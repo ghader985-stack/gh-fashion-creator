@@ -10,46 +10,49 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'API token not configured' });
   }
 
+  let width = 768;
+  let height = 1024;
+  if (ratio === '1:1') {
+    width = 1024;
+    height = 1024;
+  } else if (ratio === '16:9') {
+    width = 1024;
+    height = 576;
+  } else if (ratio === '9:16') {
+    width = 576;
+    height = 1024;
+  }
+
   try {
-    const response = await fetch('https://api.replicate.com/v1/predictions', {
+    const response = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions', {
       method: 'POST',
       headers: {
-        'Authorization': `Token ${REPLICATE_API_TOKEN}`,
+        'Authorization': 'Bearer ' + REPLICATE_API_TOKEN,
         'Content-Type': 'application/json',
+        'Prefer': 'wait'
       },
       body: JSON.stringify({
-        version: 'black-forest-labs/flux-schnell',
         input: {
           prompt: prompt,
-          aspect_ratio: ratio || '9:16',
+          width: width,
+          height: height,
           num_outputs: 1,
           output_format: 'webp',
-          output_quality: 90,
-        },
-      }),
+          output_quality: 90
+        }
+      })
     });
 
-    const prediction = await response.json();
-    if (prediction.error) {
-      return res.status(500).json({ error: prediction.error });
+    const result = await response.json();
+    
+    if (result.output && result.output[0]) {
+      return res.status(200).json({ imageUrl: result.output[0] });
+    } else if (result.error) {
+      return res.status(500).json({ error: result.error });
+    } else {
+      return res.status(500).json({ error: 'No image generated' });
     }
-
-    let result = prediction;
-    while (result.status !== 'succeeded' && result.status !== 'failed') {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const pollResponse = await fetch(
-        `https://api.replicate.com/v1/predictions/${prediction.id}`,
-        { headers: { 'Authorization': `Token ${REPLICATE_API_TOKEN}` } }
-      );
-      result = await pollResponse.json();
-    }
-
-    if (result.status === 'failed') {
-      return res.status(500).json({ error: 'Image generation failed' });
-    }
-
-    return res.status(200).json({ imageUrl: result.output[0] });
   } catch (error) {
-    return res.status(500).json({ error: 'Server error' });
+    return res.status(500).json({ error: 'Server error: ' + error.message });
   }
 }
