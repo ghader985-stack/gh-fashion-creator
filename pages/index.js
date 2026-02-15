@@ -4,7 +4,7 @@ import Head from 'next/head';
 export default function Home() {
   const [activeTab, setActiveTab] = useState('design');
   const [generatedPrompt, setGeneratedPrompt] = useState('');
-  const [arabicPrompt, setArabicPrompt] = useState('');
+  const [arabicContent, setArabicContent] = useState('');
   const [showArabic, setShowArabic] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState(null);
@@ -13,7 +13,6 @@ export default function Home() {
   const [uploadedImage, setUploadedImage] = useState(null);
   const [uploadedImageName, setUploadedImageName] = useState('');
   const [inputMode, setInputMode] = useState('description');
-
   const [designStyle, setDesignStyle] = useState('elegant');
   const [designCategory, setDesignCategory] = useState('dress');
   const [designColor, setDesignColor] = useState('black');
@@ -21,301 +20,165 @@ export default function Home() {
   const [designSeason, setDesignSeason] = useState('spring-summer');
   const [designOccasion, setDesignOccasion] = useState('evening');
   const [designDetails, setDesignDetails] = useState('');
-
   const [videoType, setVideoType] = useState('runway');
   const [videoMood, setVideoMood] = useState('dramatic');
   const [videoCamera, setVideoCamera] = useState('slow-pan');
   const [videoLighting, setVideoLighting] = useState('studio');
   const [videoDuration, setVideoDuration] = useState('15');
   const [videoDetails, setVideoDetails] = useState('');
-
   const [marketingPlatform, setMarketingPlatform] = useState('instagram-reel');
   const [marketingTone, setMarketingTone] = useState('luxury');
-  const [marketingGoal, setMarketingGoal] = useState('awareness');
   const [productName, setProductName] = useState('');
   const [productDesc, setProductDesc] = useState('');
   const [includeHashtags, setIncludeHashtags] = useState(true);
   const [includeEmojis, setIncludeEmojis] = useState(true);
   const [marketingCTA, setMarketingCTA] = useState('shop-now');
-
   const [storyTone, setStoryTone] = useState('luxury');
   const [storyLength, setStoryLength] = useState('medium');
   const [storyDesc, setStoryDesc] = useState('');
-
   const [imagePrompt, setImagePrompt] = useState('');
 
-  const styles = [
-    { id: 'elegant', en: 'Elegant', ar: 'أنيق' },
-    { id: 'casual', en: 'Casual', ar: 'كاجوال' },
-    { id: 'streetwear', en: 'Streetwear', ar: 'ستريت وير' },
-    { id: 'haute-couture', en: 'Haute Couture', ar: 'هوت كوتور' },
-    { id: 'minimalist', en: 'Minimalist', ar: 'مينيمالست' },
-    { id: 'bohemian', en: 'Bohemian', ar: 'بوهيمي' },
-    { id: 'sporty', en: 'Sporty', ar: 'رياضي' },
-    { id: 'vintage', en: 'Vintage', ar: 'فينتج' },
-    { id: 'avant-garde', en: 'Avant-Garde', ar: 'أفانت غارد' },
-    { id: 'romantic', en: 'Romantic', ar: 'رومانسي' },
-  ];
+  const styles = [{id:'elegant',en:'Elegant',ar:'أنيق'},{id:'casual',en:'Casual',ar:'كاجوال'},{id:'streetwear',en:'Streetwear',ar:'ستريت وير'},{id:'haute-couture',en:'Haute Couture',ar:'هوت كوتور'},{id:'minimalist',en:'Minimalist',ar:'مينيمالست'},{id:'bohemian',en:'Bohemian',ar:'بوهيمي'},{id:'sporty',en:'Sporty',ar:'رياضي'},{id:'vintage',en:'Vintage',ar:'فينتج'},{id:'avant-garde',en:'Avant-Garde',ar:'أفانت غارد'},{id:'romantic',en:'Romantic',ar:'رومانسي'}];
+  const categories = [{id:'dress',en:'Dress',ar:'فستان'},{id:'suit',en:'Suit',ar:'بدلة'},{id:'jacket',en:'Jacket',ar:'جاكيت'},{id:'pants',en:'Pants',ar:'بنطلون'},{id:'skirt',en:'Skirt',ar:'تنورة'},{id:'blouse',en:'Blouse',ar:'بلوزة'},{id:'coat',en:'Coat',ar:'معطف'},{id:'abaya',en:'Abaya',ar:'عباية'},{id:'kaftan',en:'Kaftan',ar:'قفطان'},{id:'jumpsuit',en:'Jumpsuit',ar:'جمبسوت'}];
+  const colors = [{id:'black',en:'Black',ar:'أسود',hex:'#000000'},{id:'white',en:'White',ar:'أبيض',hex:'#FFFFFF'},{id:'red',en:'Red',ar:'أحمر',hex:'#DC2626'},{id:'navy',en:'Navy Blue',ar:'كحلي',hex:'#1E3A5F'},{id:'emerald',en:'Emerald',ar:'زمردي',hex:'#059669'},{id:'gold',en:'Gold',ar:'ذهبي',hex:'#D4AF37'},{id:'burgundy',en:'Burgundy',ar:'خمري',hex:'#722F37'},{id:'blush',en:'Blush Pink',ar:'وردي فاتح',hex:'#FEC5BB'},{id:'royal-blue',en:'Royal Blue',ar:'أزرق ملكي',hex:'#4169E1'},{id:'champagne',en:'Champagne',ar:'شامبين',hex:'#F7E7CE'}];
+  const fabrics = [{id:'silk',en:'Silk',ar:'حرير'},{id:'velvet',en:'Velvet',ar:'مخمل'},{id:'cotton',en:'Cotton',ar:'قطن'},{id:'linen',en:'Linen',ar:'كتان'},{id:'leather',en:'Leather',ar:'جلد'},{id:'satin',en:'Satin',ar:'ساتان'},{id:'chiffon',en:'Chiffon',ar:'شيفون'},{id:'lace',en:'Lace',ar:'دانتيل'},{id:'tweed',en:'Tweed',ar:'تويد'},{id:'organza',en:'Organza',ar:'أورجانزا'}];
+  const seasons = [{id:'spring-summer',en:'Spring/Summer',ar:'ربيع/صيف'},{id:'fall-winter',en:'Fall/Winter',ar:'خريف/شتاء'},{id:'resort',en:'Resort',ar:'ريزورت'},{id:'pre-fall',en:'Pre-Fall',ar:'ما قبل الخريف'}];
+  const occasions = [{id:'evening',en:'Evening/Gala',ar:'سهرة'},{id:'casual',en:'Casual',ar:'يومي'},{id:'formal',en:'Formal/Business',ar:'رسمي'},{id:'wedding',en:'Wedding',ar:'زفاف'},{id:'party',en:'Party',ar:'حفلة'},{id:'cocktail',en:'Cocktail',ar:'كوكتيل'}];
+  const videoTypes = [{id:'runway',en:'Runway Show',ar:'عرض أزياء'},{id:'lookbook',en:'Lookbook',ar:'لوك بوك'},{id:'product',en:'Product Showcase',ar:'عرض منتج'},{id:'behind-scenes',en:'Behind The Scenes',ar:'خلف الكواليس'},{id:'transformation',en:'Transformation',ar:'تحول'},{id:'styling',en:'Styling Tips',ar:'نصائح تنسيق'}];
+  const videoMoods = [{id:'dramatic',en:'Dramatic',ar:'درامي'},{id:'elegant',en:'Elegant',ar:'راقي'},{id:'energetic',en:'Energetic',ar:'حيوي'},{id:'romantic',en:'Romantic',ar:'رومانسي'},{id:'mysterious',en:'Mysterious',ar:'غامض'},{id:'minimalist',en:'Minimalist',ar:'بسيط'}];
+  const cameraMoves = [{id:'slow-pan',en:'Slow Pan',ar:'تحريك بطيء'},{id:'360-rotation',en:'360° Rotation',ar:'دوران 360°'},{id:'zoom-in',en:'Zoom In',ar:'تقريب'},{id:'tracking',en:'Tracking Shot',ar:'تتبع'},{id:'dolly',en:'Dolly Movement',ar:'دولي'},{id:'crane',en:'Crane Shot',ar:'رافعة'}];
+  const lightingTypes = [{id:'studio',en:'Studio Lighting',ar:'إضاءة استديو'},{id:'natural',en:'Natural Light',ar:'إضاءة طبيعية'},{id:'dramatic',en:'Dramatic Shadows',ar:'ظلال درامية'},{id:'golden-hour',en:'Golden Hour',ar:'الساعة الذهبية'},{id:'neon',en:'Neon Lights',ar:'إضاءة نيون'},{id:'soft',en:'Soft Diffused',ar:'إضاءة ناعمة'}];
+  const platforms = [{id:'instagram-reel',en:'Instagram Reel',ar:'ريل انستغرام'},{id:'instagram-post',en:'Instagram Post',ar:'بوست انستغرام'},{id:'instagram-story',en:'Instagram Story',ar:'ستوري انستغرام'},{id:'tiktok',en:'TikTok',ar:'تيك توك'},{id:'facebook',en:'Facebook',ar:'فيسبوك'},{id:'pinterest',en:'Pinterest',ar:'بنترست'}];
+  const tones = [{id:'luxury',en:'Luxury',ar:'فاخر'},{id:'friendly',en:'Friendly',ar:'ودي'},{id:'professional',en:'Professional',ar:'احترافي'},{id:'playful',en:'Playful',ar:'مرح'},{id:'urgent',en:'Urgent',ar:'عاجل'},{id:'inspiring',en:'Inspiring',ar:'ملهم'}];
+  const goals = [{id:'awareness',en:'Brand Awareness',ar:'زيادة الوعي'},{id:'sales',en:'Drive Sales',ar:'زيادة المبيعات'},{id:'engagement',en:'Engagement',ar:'زيادة التفاعل'},{id:'launch',en:'Product Launch',ar:'إطلاق منتج'},{id:'promotion',en:'Promotion/Sale',ar:'عرض/خصم'}];
+  const ctas = [{id:'shop-now',en:'Shop Now',ar:'تسوقي الآن'},{id:'learn-more',en:'Learn More',ar:'اعرفي المزيد'},{id:'link-bio',en:'Link in Bio',ar:'الرابط في البايو'},{id:'dm',en:'DM to Order',ar:'راسلينا للطلب'},{id:'limited',en:'Limited Stock',ar:'كمية محدودة'}];
+  const storyLengths = [{id:'short',ar:'قصيرة'},{id:'medium',ar:'متوسطة'},{id:'long',ar:'طويلة'}];
 
-  const categories = [
-    { id: 'dress', en: 'Dress', ar: 'فستان' },
-    { id: 'suit', en: 'Suit', ar: 'بدلة' },
-    { id: 'jacket', en: 'Jacket', ar: 'جاكيت' },
-    { id: 'pants', en: 'Pants', ar: 'بنطلون' },
-    { id: 'skirt', en: 'Skirt', ar: 'تنورة' },
-    { id: 'blouse', en: 'Blouse', ar: 'بلوزة' },
-    { id: 'coat', en: 'Coat', ar: 'معطف' },
-    { id: 'abaya', en: 'Abaya', ar: 'عباية' },
-    { id: 'kaftan', en: 'Kaftan', ar: 'قفطان' },
-    { id: 'jumpsuit', en: 'Jumpsuit', ar: 'جمبسوت' },
-  ];
-
-  const colors = [
-    { id: 'black', en: 'Black', hex: '#000000' },
-    { id: 'white', en: 'White', hex: '#FFFFFF' },
-    { id: 'red', en: 'Red', hex: '#DC2626' },
-    { id: 'navy', en: 'Navy Blue', hex: '#1E3A5F' },
-    { id: 'emerald', en: 'Emerald', hex: '#059669' },
-    { id: 'gold', en: 'Gold', hex: '#D4AF37' },
-    { id: 'burgundy', en: 'Burgundy', hex: '#722F37' },
-    { id: 'blush', en: 'Blush Pink', hex: '#FEC5BB' },
-    { id: 'royal-blue', en: 'Royal Blue', hex: '#4169E1' },
-    { id: 'champagne', en: 'Champagne', hex: '#F7E7CE' },
-  ];
-
-  const fabrics = [
-    { id: 'silk', en: 'Silk', ar: 'حرير' },
-    { id: 'velvet', en: 'Velvet', ar: 'مخمل' },
-    { id: 'cotton', en: 'Cotton', ar: 'قطن' },
-    { id: 'linen', en: 'Linen', ar: 'كتان' },
-    { id: 'leather', en: 'Leather', ar: 'جلد' },
-    { id: 'satin', en: 'Satin', ar: 'ساتان' },
-    { id: 'chiffon', en: 'Chiffon', ar: 'شيفون' },
-    { id: 'lace', en: 'Lace', ar: 'دانتيل' },
-    { id: 'tweed', en: 'Tweed', ar: 'تويد' },
-    { id: 'organza', en: 'Organza', ar: 'أورجانزا' },
-  ];
-
-  const seasons = [
-    { id: 'spring-summer', en: 'Spring/Summer', ar: 'ربيع/صيف' },
-    { id: 'fall-winter', en: 'Fall/Winter', ar: 'خريف/شتاء' },
-    { id: 'resort', en: 'Resort', ar: 'ريزورت' },
-    { id: 'pre-fall', en: 'Pre-Fall', ar: 'ما قبل الخريف' },
-  ];
-
-  const occasions = [
-    { id: 'evening', en: 'Evening/Gala', ar: 'سهرة' },
-    { id: 'casual', en: 'Casual', ar: 'يومي' },
-    { id: 'formal', en: 'Formal/Business', ar: 'رسمي' },
-    { id: 'wedding', en: 'Wedding', ar: 'زفاف' },
-    { id: 'party', en: 'Party', ar: 'حفلة' },
-    { id: 'cocktail', en: 'Cocktail', ar: 'كوكتيل' },
-  ];
-
-  const videoTypes = [
-    { id: 'runway', en: 'Runway Show', ar: 'عرض أزياء' },
-    { id: 'lookbook', en: 'Lookbook', ar: 'لوك بوك' },
-    { id: 'product', en: 'Product Showcase', ar: 'عرض منتج' },
-    { id: 'behind-scenes', en: 'Behind The Scenes', ar: 'خلف الكواليس' },
-    { id: 'transformation', en: 'Transformation', ar: 'تحول' },
-    { id: 'styling', en: 'Styling Tips', ar: 'نصائح تنسيق' },
-  ];
-
-  const videoMoods = [
-    { id: 'dramatic', en: 'Dramatic', ar: 'درامي' },
-    { id: 'elegant', en: 'Elegant', ar: 'راقي' },
-    { id: 'energetic', en: 'Energetic', ar: 'حيوي' },
-    { id: 'romantic', en: 'Romantic', ar: 'رومانسي' },
-    { id: 'mysterious', en: 'Mysterious', ar: 'غامض' },
-    { id: 'minimalist', en: 'Minimalist', ar: 'بسيط' },
-  ];
-
-  const cameraMoves = [
-    { id: 'slow-pan', en: 'Slow Pan', ar: 'تحريك بطيء' },
-    { id: '360-rotation', en: '360° Rotation', ar: 'دوران 360°' },
-    { id: 'zoom-in', en: 'Zoom In', ar: 'تقريب' },
-    { id: 'tracking', en: 'Tracking Shot', ar: 'تتبع' },
-    { id: 'dolly', en: 'Dolly Movement', ar: 'دولي' },
-    { id: 'crane', en: 'Crane Shot', ar: 'رافعة' },
-  ];
-
-  const lightingTypes = [
-    { id: 'studio', en: 'Studio Lighting', ar: 'استديو' },
-    { id: 'natural', en: 'Natural Light', ar: 'طبيعي' },
-    { id: 'dramatic', en: 'Dramatic Shadows', ar: 'ظلال درامية' },
-    { id: 'golden-hour', en: 'Golden Hour', ar: 'الساعة الذهبية' },
-    { id: 'neon', en: 'Neon Lights', ar: 'نيون' },
-    { id: 'soft', en: 'Soft Diffused', ar: 'ناعم' },
-  ];
-
-  const platforms = [
-    { id: 'instagram-reel', en: 'Instagram Reel', ar: 'ريل انستغرام' },
-    { id: 'instagram-post', en: 'Instagram Post', ar: 'بوست انستغرام' },
-    { id: 'instagram-story', en: 'Instagram Story', ar: 'ستوري انستغرام' },
-    { id: 'tiktok', en: 'TikTok', ar: 'تيك توك' },
-    { id: 'facebook', en: 'Facebook', ar: 'فيسبوك' },
-    { id: 'pinterest', en: 'Pinterest', ar: 'بنترست' },
-  ];
-
-  const tones = [
-    { id: 'luxury', en: 'Luxury', ar: 'فاخر' },
-    { id: 'friendly', en: 'Friendly', ar: 'ودي' },
-    { id: 'professional', en: 'Professional', ar: 'احترافي' },
-    { id: 'playful', en: 'Playful', ar: 'مرح' },
-    { id: 'urgent', en: 'Urgent', ar: 'عاجل' },
-    { id: 'inspiring', en: 'Inspiring', ar: 'ملهم' },
-  ];
-
-  const goals = [
-    { id: 'awareness', en: 'Brand Awareness', ar: 'زيادة الوعي' },
-    { id: 'sales', en: 'Drive Sales', ar: 'زيادة المبيعات' },
-    { id: 'engagement', en: 'Engagement', ar: 'زيادة التفاعل' },
-    { id: 'launch', en: 'Product Launch', ar: 'إطلاق منتج' },
-    { id: 'promotion', en: 'Promotion/Sale', ar: 'عرض/خصم' },
-  ];
-
-  const ctas = [
-    { id: 'shop-now', en: 'Shop Now', ar: 'تسوق الآن' },
-    { id: 'learn-more', en: 'Learn More', ar: 'اعرف أكثر' },
-    { id: 'link-bio', en: 'Link in Bio', ar: 'الرابط في البايو' },
-    { id: 'dm', en: 'DM to Order', ar: 'راسلنا للطلب' },
-    { id: 'limited', en: 'Limited Stock', ar: 'كمية محدودة' },
-  ];
-
-  const storyLengths = [
-    { id: 'short', ar: 'قصيرة' },
-    { id: 'medium', ar: 'متوسطة' },
-    { id: 'long', ar: 'طويلة' },
-  ];
-
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        setUploadedImage(ev.target.result);
-        setUploadedImageName(file.name);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const removeUploadedImage = () => {
-    setUploadedImage(null);
-    setUploadedImageName('');
-  };
-
-  const translateToArabic = (text) => {
-    const t = { 'elegant': 'أنيق', 'casual': 'كاجوال', 'haute couture': 'هوت كوتور', 'dress': 'فستان', 'black': 'أسود', 'white': 'أبيض', 'red': 'أحمر', 'gold': 'ذهبي', 'silk': 'حرير', 'velvet': 'مخمل', 'satin': 'ساتان', 'evening': 'سهرة', 'wedding': 'زفاف', 'runway': 'عرض أزياء', 'dramatic': 'درامي', 'professional': 'احترافي', 'luxury': 'فاخر', 'fashion': 'أزياء', 'high-end': 'راقي', 'spring': 'ربيع', 'summer': 'صيف', 'fall': 'خريف', 'winter': 'شتاء' };
-    let r = text.toLowerCase();
-    Object.keys(t).forEach(k => { r = r.replace(new RegExp(k, 'gi'), t[k]); });
-    return r;
-  };
+  const handleImageUpload = (e) => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onload = (ev) => { setUploadedImage(ev.target.result); setUploadedImageName(file.name); }; reader.readAsDataURL(file); } };
+  const removeUploadedImage = () => { setUploadedImage(null); setUploadedImageName(''); };
 
   const generateDesignPrompt = () => {
-    const style = styles.find(s => s.id === designStyle)?.en;
-    const category = categories.find(c => c.id === designCategory)?.en;
-    const color = colors.find(c => c.id === designColor)?.en;
-    const fabric = fabrics.find(f => f.id === designFabric)?.en;
-    const season = seasons.find(s => s.id === designSeason)?.en;
-    const occasion = occasions.find(o => o.id === designOccasion)?.en;
-    
-    let prompt = '';
-    if (inputMode === 'image' && uploadedImage) {
-      prompt = `Based on the uploaded reference image, create a design prompt:\n\n`;
-    }
-    prompt += `High-end fashion photography, ${style} ${color} ${fabric} ${category}, ${season} collection, perfect for ${occasion}. Professional runway model, Vogue magazine quality, studio lighting, 8K resolution, masterful tailoring, luxury brand aesthetic${designDetails ? `. ${designDetails}` : ''}.`;
-    prompt += `\n\n--ar 3:4 --style raw --v 6.1\n\nNegative: low quality, amateur, wrinkled, blurry`;
-    
-    setGeneratedPrompt(prompt);
-    setArabicPrompt(translateToArabic(prompt));
+    const style = styles.find(s => s.id === designStyle);
+    const category = categories.find(c => c.id === designCategory);
+    const color = colors.find(c => c.id === designColor);
+    const fabric = fabrics.find(f => f.id === designFabric);
+    const season = seasons.find(s => s.id === designSeason);
+    const occasion = occasions.find(o => o.id === designOccasion);
+    const imgNote = inputMode === 'image' && uploadedImage ? 'Based on the uploaded reference image:\n\n' : '';
+    const promptEn = `${imgNote}High-end fashion photography, ${style.en} ${color.en} ${fabric.en} ${category.en}, ${season.en} collection, perfect for ${occasion.en}. Professional runway model, Vogue magazine quality, studio lighting, 8K resolution, masterful tailoring, luxury brand aesthetic.${designDetails ? ` Details: ${designDetails}` : ''}\n\n--ar 3:4 --style raw --v 6.1\n\nNegative: low quality, amateur, wrinkled, blurry`;
+    const promptAr = `${inputMode === 'image' && uploadedImage ? 'بناءً على الصورة المرفقة:\n\n' : ''}تصوير أزياء راقي، ${category.ar} ${style.ar} بلون ${color.ar} من قماش ${fabric.ar}، مجموعة ${season.ar}، مثالي لمناسبات ${occasion.ar}. عارضة أزياء محترفة، جودة مجلة فوغ، إضاءة استديو، دقة 8K، خياطة متقنة، جمالية علامة فاخرة.${designDetails ? ` التفاصيل: ${designDetails}` : ''}\n\n--ar 3:4 --style raw --v 6.1\n\nسلبي: جودة منخفضة، هاوي، مجعد، ضبابي`;
+    setGeneratedPrompt(promptEn);
+    setArabicContent(promptAr);
   };
 
   const generateVideoPrompt = () => {
-    const type = videoTypes.find(t => t.id === videoType)?.en;
-    const mood = videoMoods.find(m => m.id === videoMood)?.en;
-    const camera = cameraMoves.find(c => c.id === videoCamera)?.en;
-    const lighting = lightingTypes.find(l => l.id === videoLighting)?.en;
-    
-    let prompt = '';
-    if (inputMode === 'image' && uploadedImage) {
-      prompt = `Based on the uploaded reference image, create a video prompt:\n\n`;
-    }
-    prompt += `Cinematic fashion film, ${type} style, ${mood} atmosphere.\n\nDURATION: ${videoDuration} seconds\nCAMERA: ${camera} movement\nLIGHTING: ${lighting}\n\nProfessional model showcasing haute couture, 4K cinematic, elegant fabric movement, fashion editorial quality.${videoDetails ? ` ${videoDetails}` : ''}\n\nTECHNICAL: 24fps, 9:16 or 16:9`;
-    
-    setGeneratedPrompt(prompt);
-    setArabicPrompt(translateToArabic(prompt));
+    const type = videoTypes.find(t => t.id === videoType);
+    const mood = videoMoods.find(m => m.id === videoMood);
+    const camera = cameraMoves.find(c => c.id === videoCamera);
+    const lighting = lightingTypes.find(l => l.id === videoLighting);
+    const imgNote = inputMode === 'image' && uploadedImage ? 'Based on the uploaded reference image:\n\n' : '';
+    const promptEn = `${imgNote}Cinematic fashion film, ${type.en} style, ${mood.en} atmosphere.\n\nDURATION: ${videoDuration} seconds\nCAMERA: ${camera.en}\nLIGHTING: ${lighting.en}\n\nProfessional model showcasing haute couture, 4K cinematic, elegant fabric movement.${videoDetails ? ` Notes: ${videoDetails}` : ''}\n\nTECHNICAL: 24fps, 9:16 or 16:9`;
+    const promptAr = `${inputMode === 'image' && uploadedImage ? 'بناءً على الصورة المرفقة:\n\n' : ''}فيلم أزياء سينمائي، أسلوب ${type.ar}، أجواء ${mood.ar}.\n\nالمدة: ${videoDuration} ثانية\nالكاميرا: ${camera.ar}\nالإضاءة: ${lighting.ar}\n\nعارضة محترفة تستعرض هوت كوتور، سينمائي 4K، حركة قماش أنيقة.${videoDetails ? ` ملاحظات: ${videoDetails}` : ''}\n\nتقني: 24 إطار/ثانية، 9:16 أو 16:9`;
+    setGeneratedPrompt(promptEn);
+    setArabicContent(promptAr);
   };
 
   const generateMarketingPrompt = () => {
-    const platform = platforms.find(p => p.id === marketingPlatform)?.en;
-    const cta = ctas.find(c => c.id === marketingCTA)?.en;
+    const platform = platforms.find(p => p.id === marketingPlatform);
+    const cta = ctas.find(c => c.id === marketingCTA);
     const name = productName || '[Product Name]';
+    const nameAr = productName || '[اسم المنتج]';
     const desc = productDesc || 'Luxury fashion piece';
-    
-    let content = '';
-    if (inputMode === 'image' && uploadedImage) {
-      content = `[Based on uploaded product image]\n\n`;
-    }
-
+    const descAr = productDesc || 'قطعة أزياء فاخرة';
+    let contentEn = inputMode === 'image' && uploadedImage ? '[Based on uploaded product image]\n\n' : '';
+    let contentAr = inputMode === 'image' && uploadedImage ? '[بناءً على صورة المنتج المرفقة]\n\n' : '';
     if (marketingPlatform.includes('reel') || marketingPlatform === 'tiktok') {
-      content += `📱 ${platform} SCRIPT - ${name}\n\n⏱️ DURATION: 15-30 seconds\n\n🎬 HOOK (0-3s): "Discover ultimate elegance" ${includeEmojis ? '✨' : ''}\n🎬 SHOWCASE (3-12s): ${desc} - Show fabric details, model movement\n🎬 CTA (12-15s): "${cta}" ${includeEmojis ? '🛍️' : ''}\n\n🎵 MUSIC: Trending audio\n\n${includeHashtags ? '#fashion #luxury #style #ootd #designer #trending #viral #fyp' : ''}`;
+      contentEn += `📱 ${platform.en} SCRIPT - ${name}\n\n⏱️ DURATION: 15-30 seconds\n\n🎬 SCENE 1 - HOOK (0-3s):\n[Close-up of fabric detail]\nText: "When elegance meets perfection..." ${includeEmojis ? '✨' : ''}\n\n🎬 SCENE 2 - REVEAL (3-7s):\n[Slow-motion reveal]\nModel turns gracefully\nText: "${name}"\n\n🎬 SCENE 3 - DETAILS (7-12s):\n[Quick cuts showing:]\n- Fabric texture\n- Stitching details\n- Movement/flow\n- Different angles\n\n🎬 SCENE 4 - LIFESTYLE (12-18s):\n[Model in aspirational setting]\n- Walking confidently\n- Natural movement\n\n🎬 SCENE 5 - CTA (18-20s):\n[Product shot with branding]\nText: "${cta.en}" ${includeEmojis ? '🛍️' : ''}\n\n📝 CAPTION:\n${includeEmojis ? '✨ ' : ''}${name}\n${desc}\n${includeEmojis ? '👆 ' : ''}${cta.en}\n\n${includeHashtags ? '#fashion #luxury #style #ootd #designer #trending #viral #fyp #reels' : ''}`;
+      contentAr += `📱 سكريبت ${platform.ar} - ${nameAr}\n\n⏱️ المدة: 15-30 ثانية\n\n🎬 المشهد 1 - الجذب (0-3 ثانية):\n[لقطة قريبة لتفاصيل القماش]\nالنص: "عندما تلتقي الأناقة بالكمال..." ${includeEmojis ? '✨' : ''}\n\n🎬 المشهد 2 - الكشف (3-7 ثانية):\n[كشف بالحركة البطيئة]\nالعارضة تدور برشاقة\nالنص: "${nameAr}"\n\n🎬 المشهد 3 - التفاصيل (7-12 ثانية):\n[لقطات سريعة تظهر:]\n- ملمس القماش\n- تفاصيل الخياطة\n- الحركة/التدفق\n- زوايا مختلفة\n\n🎬 المشهد 4 - أسلوب الحياة (12-18 ثانية):\n[العارضة في مكان ملهم]\n- تمشي بثقة\n- حركة طبيعية\n\n🎬 المشهد 5 - الدعوة للعمل (18-20 ثانية):\n[لقطة المنتج مع العلامة]\nالنص: "${cta.ar}" ${includeEmojis ? '🛍️' : ''}\n\n📝 الكابشن:\n${includeEmojis ? '✨ ' : ''}${nameAr}\n${descAr}\n${includeEmojis ? '👆 ' : ''}${cta.ar}\n\n${includeHashtags ? '#أزياء #فاشن #موضة #ستايل #تصميم #ترند #ريلز #لوك #اناقة' : ''}`;
     } else if (marketingPlatform === 'instagram-post') {
-      content += `📸 INSTAGRAM POST - ${name}\n\n${includeEmojis ? '✨' : ''} ${name}\n\n${desc}\n\n${includeEmojis ? '💫' : ''} FEATURES:\n• Premium quality materials\n• Elegant design\n• Perfect for any occasion\n\n${includeEmojis ? '🛍️' : ''} ${cta}\n\n${includeHashtags ? '#fashion #style #luxury #designer #ootd #newcollection' : ''}`;
+      contentEn += `📸 INSTAGRAM POST - ${name}\n\n${includeEmojis ? '✨ ' : ''}${name}\n\n${desc}\n\n${includeEmojis ? '💫 ' : ''}What makes it special:\n• Crafted from the finest materials\n• Attention to every detail\n• Timeless elegance meets modern design\n• Perfect for your most memorable moments\n\n${includeEmojis ? '🛍️ ' : ''}${cta.en}\n\n${includeHashtags ? '#fashion #style #luxury #designer #ootd #fashionblogger #instafashion' : ''}`;
+      contentAr += `📸 بوست انستغرام - ${nameAr}\n\n${includeEmojis ? '✨ ' : ''}${nameAr}\n\n${descAr}\n\n${includeEmojis ? '💫 ' : ''}ما يميزها:\n• مصنوعة من أجود الخامات\n• اهتمام بكل تفصيلة\n• أناقة خالدة تلتقي بالتصميم العصري\n• مثالية للحظاتك المميزة\n\n${includeEmojis ? '🛍️ ' : ''}${cta.ar}\n\n${includeHashtags ? '#أزياء #ستايل #فخامة #مصمم #لوك_اليوم #فاشن #موضة' : ''}`;
     } else if (marketingPlatform === 'instagram-story') {
-      content += `📱 STORY SEQUENCE - ${name}\n\nSTORY 1: Teaser - blurred image + "Something special..." ${includeEmojis ? '👀' : ''}\nSTORY 2: Reveal - full product + "${name}" ${includeEmojis ? '✨' : ''}\nSTORY 3: Details - close-ups + Poll sticker\nSTORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
+      contentEn += `📱 STORY SEQUENCE - ${name}\n\nSTORY 1 - TEASER:\n[Blurred/partial image]\nText: "Something special is here..." ${includeEmojis ? '👀' : ''}\nSticker: Countdown timer\n\nSTORY 2 - REVEAL:\n[Full product shot]\nText: "${name}" ${includeEmojis ? '✨' : ''}\nSticker: "NEW"\n\nSTORY 3 - DETAILS:\n[Close-up video of details]\nAdd Poll: "Which detail is your favorite?"\nOptions: "The fabric ✨" / "The design 💫"\n\nSTORY 4 - STYLING:\n[Product styled/on model]\nAdd Quiz: "Guess the occasion?"\n\nSTORY 5 - CTA:\n[Product with price/info]\nText: "${cta.en}" ${includeEmojis ? '🛍️' : ''}\nLink sticker: Direct to product`;
+      contentAr += `📱 سلسلة ستوري - ${nameAr}\n\nستوري 1 - تشويق:\n[صورة ضبابية/جزئية]\nالنص: "شيء مميز وصل..." ${includeEmojis ? '👀' : ''}\nملصق: عداد تنازلي\n\nستوري 2 - الكشف:\n[لقطة كاملة للمنتج]\nالنص: "${nameAr}" ${includeEmojis ? '✨' : ''}\nملصق: "جديد"\n\nستوري 3 - التفاصيل:\n[فيديو قريب للتفاصيل]\nاستطلاع: "أي تفصيلة المفضلة؟"\nالخيارات: "القماش ✨" / "التصميم 💫"\n\nستوري 4 - التنسيق:\n[المنتج منسق/على عارضة]\nاختبار: "خمني المناسبة؟"\n\nستوري 5 - الدعوة للعمل:\n[المنتج مع السعر/المعلومات]\nالنص: "${cta.ar}" ${includeEmojis ? '🛍️' : ''}\nملصق الرابط: مباشر للمنتج`;
     } else {
-      content += `📝 ${platform} - ${name}\n\n${includeEmojis ? '✨' : ''} ${name}\n${desc}\n\n${includeEmojis ? '🛍️' : ''} ${cta}\n\n${includeHashtags ? '#fashion #style #luxury' : ''}`;
+      contentEn += `📝 ${platform.en} - ${name}\n\n${includeEmojis ? '✨ ' : ''}${name}\n${desc}\n\n${includeEmojis ? '🛍️ ' : ''}${cta.en}\n\n${includeHashtags ? '#fashion #style #luxury' : ''}`;
+      contentAr += `📝 ${platform.ar} - ${nameAr}\n\n${includeEmojis ? '✨ ' : ''}${nameAr}\n${descAr}\n\n${includeEmojis ? '🛍️ ' : ''}${cta.ar}\n\n${includeHashtags ? '#أزياء #ستايل #فخامة' : ''}`;
     }
-    
-    setGeneratedPrompt(content);
-    setArabicPrompt(content.replace('Discover ultimate elegance', 'اكتشفي الأناقة المطلقة').replace('Shop Now', 'تسوق الآن').replace('FEATURES:', 'المميزات:').replace('Premium quality materials', 'خامات فاخرة').replace('Elegant design', 'تصميم أنيق').replace('Perfect for any occasion', 'مناسب لجميع المناسبات'));
+    setGeneratedPrompt(contentEn);
+    setArabicContent(contentAr);
   };
 
   const generateStoryPrompt = () => {
-    const tone = tones.find(t => t.id === storyTone)?.en;
-    const length = storyLength === 'short' ? '50-100 words' : storyLength === 'medium' ? '150-200 words' : '300-400 words';
+    const tone = tones.find(t => t.id === storyTone);
+    const desc = storyDesc || 'A luxurious fashion piece with exquisite details and premium craftsmanship';
+    const descAr = storyDesc || 'قطعة أزياء فاخرة بتفاصيل راقية وحرفية متميزة';
+    let storyEn = inputMode === 'image' && uploadedImage ? '[Based on uploaded product image]\n\n' : '';
+    let storyAr = inputMode === 'image' && uploadedImage ? '[بناءً على صورة المنتج المرفقة]\n\n' : '';
+    storyEn += `📖 MARKETING STORY\n\nTone: ${tone.en}\nProduct: ${desc}\n\n━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    storyAr += `📖 قصة تسويقية\n\nالنبرة: ${tone.ar}\nالمنتج: ${descAr}\n\n━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     
-    let content = '';
-    if (inputMode === 'image' && uploadedImage) {
-      content = `[Based on uploaded product image]\n\n`;
-    }
+    const storiesEn = {
+      luxury: {
+        short: `In a world where ordinary is forgotten, we created the extraordinary. This isn't just fashion—it's a statement of who you are. Every stitch whispers luxury, every fold speaks elegance. For those who refuse to blend in.`,
+        medium: `There are moments that define us. Moments when we walk into a room and time seems to pause. When all eyes turn, not because we demand attention, but because we command presence.\n\nThis piece was born from that vision—a vision of unapologetic elegance, of craftsmanship that honors tradition while embracing the bold spirit of modern femininity.\n\nEvery detail has been considered. Every stitch placed with intention. From the whisper of the fabric against your skin to the way it moves with your every step—this is fashion elevated to art.\n\nBecause you don't just wear luxury. You embody it.`,
+        long: `THE ART OF PRESENCE\n\nIn the quiet moments before dawn breaks over the atelier, when the city still sleeps and dreams linger in the air, magic happens. Hands that have mastered their craft over decades begin their delicate dance with fabric, thread, and vision.\n\nThis is where your piece was born.\n\nNot in a factory. Not on an assembly line. But in a space where time moves differently—where hours disappear into the pursuit of perfection, where "good enough" is a phrase that doesn't exist.\n\nWe sourced this fabric from artisans who have guarded their secrets for generations. Feel it between your fingers—that subtle weight, that luminous sheen that catches light like captured moonbeams. This isn't just material. It's heritage woven into every thread.\n\nThe design emerged from countless sketches, each one bringing us closer to this moment—the moment when concept becomes reality, when imagination takes physical form. We rejected dozens of iterations. Because close to perfect isn't perfect.\n\nEvery seam has been reinforced by hand. Every edge finished with the precision of a master jeweler. Turn it inside out—we dare you. The interior is as flawless as the exterior, because true luxury doesn't hide behind façades.\n\nWhen you wear this piece, you're not just putting on a garment. You're stepping into a legacy. You're choosing to present yourself to the world as someone who understands that the finest things in life aren't about labels or trends—they're about an uncompromising commitment to excellence.\n\nThis is for the woman who walks into boardrooms and ballrooms with equal confidence. For the one who has worked for everything she has and chooses to celebrate that journey.\n\nNot just fashion. A declaration.\n\nWelcome to a new standard of elegance.`
+      },
+      friendly: {
+        short: `Hey gorgeous! 👋 You know that feeling when you find THE piece? The one that makes you do a little spin in front of the mirror? Yeah, this is that piece. Made with love, designed for YOU. Let's make some heads turn together! 💕`,
+        medium: `Can we talk for a sec? 💕\n\nYou know those days when your closet feels full but you have "nothing to wear"? We've ALL been there. That's exactly why we created this piece.\n\nIt's not trying to be everything to everyone. It's designed to be YOUR go-to—the piece you reach for when you want to feel put-together without trying too hard. Comfortable enough for all-day wear, stunning enough for that unexpected dinner invite.\n\nWe obsessed over every detail so you don't have to stress. The fit? Tested on real bodies, not just mannequins. The fabric? Feels like a dream, looks like a million bucks.\n\nThis is fashion that gets you. Finally. 🙌`,
+        long: `LET'S GET REAL FOR A MINUTE 💕\n\nSo here's the thing—we started this brand because we were frustrated. Frustrated with fashion that promised comfort but delivered discomfort. With "luxury" that fell apart after three washes. With sizing that made no sense and return policies that felt like punishment.\n\nSound familiar?\n\nWe thought so.\n\nThat's why every single decision we make starts with one question: "Would WE want this?" Not what's trending. Not what's cheapest to produce. What would make us genuinely excited to open that package?\n\nThis piece? It took us 8 months to perfect. EIGHT. MONTHS. Our manufacturer probably thought we were crazy (honestly, fair). But we kept sending it back. The sleeve wasn't quite right. The hem needed adjusting. The color was 0.5% off from what we envisioned.\n\nBecause here's what we believe: you work hard for your money. Like, HARD. And when you choose to spend it with us, that means something. It means you trusted us with a little piece of your hard-earned paycheck, and we refuse—REFUSE—to let you down.\n\nSo when this arrives at your door, we want you to have that moment. You know the one. Where you try it on, look in the mirror, and just... smile. Not because it's fine. Not because it'll do. Because it's exactly what you hoped it would be.\n\nThe fabric moves with you, not against you. The cut flatters without squeezing. The style is current but not try-hard. It's the piece your future self will thank you for buying.\n\nWelcome to fashion that actually cares. We're so happy you're here. 💕`
+      },
+      inspiring: {
+        short: `She didn't dress for others. She dressed for the woman she was becoming. Every morning, she chose pieces that reminded her of her power. This is one of those pieces. For every woman writing her own story. ✨`,
+        medium: `Before she satisfies the world, she was herself.\n\nShe learned early that waiting for permission meant waiting forever. So she stopped asking. She started choosing—her path, her voice, her style.\n\nThis piece isn't about fitting in. It's about standing out on your own terms. It's for the woman who knows that true style isn't about following—it's about leading.\n\nSome will understand. Some won't. She dresses for the ones who do, and inspires the ones who will.\n\nYour moment isn't coming. It's here. Dress for it.`,
+        long: `THE WOMAN WHO CHOSE HERSELF\n\nShe remembers the moment everything changed.\n\nIt wasn't dramatic—no lightning bolt, no sudden revelation. Just a quiet morning, standing in front of her closet, reaching for the same safe choices she always made. And then... she didn't.\n\nThat day, she chose differently. Not louder. Not more expensive. Just more HER.\n\nIt started with clothes but it didn't end there. That small act of choosing herself rippled outward. She spoke up in meetings. She asked for the promotion. She set boundaries she'd been afraid to set. She finally started that project she'd been "thinking about" for years.\n\nAll because one morning, she decided to stop dressing for disappearance and start dressing for presence.\n\nThis piece carries that energy.\n\nIt was designed for women at crossroads. For the one deciding whether to play it safe or bet on herself. For the one who's tired of blending into beige backgrounds. For the one ready to be seen—really seen—for exactly who she is.\n\nWear this on the day you ask for what you deserve. On the day you walk away from what no longer serves you. On the day you finally stop apologizing for taking up space.\n\nBecause here's what we know: clothes don't change your life. YOU change your life. But the right piece? It can remind you of who you're becoming. It can be armor when you need protection and wings when you're ready to soar.\n\nThis is for you.\n\nNow go show them what you're made of. ✨`
+      },
+      professional: {
+        short: `Crafted with precision. Designed for excellence. This piece represents our commitment to quality that speaks for itself. For the professional who values substance over flash.`,
+        medium: `In a market saturated with trends, we chose a different path: timeless quality.\n\nThis piece represents months of development, countless iterations, and an unwavering commitment to excellence. We partnered with artisans who share our vision—professionals who understand that true craftsmanship cannot be rushed.\n\nThe result speaks for itself. Superior materials, impeccable construction, and a design that transcends seasonal trends. This is an investment piece, built to serve you for years to come.\n\nFor the discerning professional who understands that quality is never an expense—it's an investment.`,
+        long: `A NOTE ON CRAFTSMANSHIP\n\nIn an era of fast fashion and disposable trends, we made a deliberate choice to swim against the current.\n\nMATERIAL SELECTION\nOur sourcing process begins 18 months before a piece reaches you. We work exclusively with mills that meet our stringent quality standards—facilities that prioritize sustainable practices and fair labor conditions. Each fabric is tested for durability, colorfastness, and hand feel. We reject approximately 70% of samples before finding materials worthy of our collection.\n\nDESIGN PHILOSOPHY\nOur design team operates on a simple principle: create pieces you'll want to wear 10 years from now. This means avoiding trend-dependent elements while incorporating subtle contemporary touches. Every silhouette is refined over multiple seasons, tested across diverse body types, and adjusted until it achieves what we call "effortless elegance."\n\nCONSTRUCTION STANDARDS\nEach piece passes through 47 quality checkpoints. Seams are reinforced at stress points. Hems are weighted for optimal drape. Hardware is tested to withstand 10,000 uses. We maintain a defect tolerance of less than 0.3%—significantly below industry standards.\n\nTHE RESULT\nWhat you receive is not merely a garment. It is the culmination of expertise, intention, and an uncompromising commitment to excellence. A piece designed to become a cornerstone of your professional wardrobe.\n\nWe invite you to experience the difference that true quality makes.`
+      }
+    };
     
-    content += `📖 MARKETING STORY\n\nTone: ${tone}\nLength: ${length}\n\n`;
-    content += `Product Description: ${storyDesc || '[Enter product description]'}\n\n`;
-    content += `---\n\n`;
+    const storiesAr = {
+      luxury: {
+        short: `في عالم يُنسى فيه العادي، صنعنا الاستثنائي. هذه ليست مجرد أزياء—إنها بيان عن هويتك. كل غرزة تهمس بالفخامة، كل طية تنطق بالأناقة. لمن يرفضون الذوبان في الحشود.`,
+        medium: `هناك لحظات تحددنا. لحظات ندخل فيها غرفة ويبدو أن الزمن يتوقف. عندما تتجه كل الأنظار، ليس لأننا نطلب الاهتمام، بل لأننا نفرض الحضور.\n\nوُلدت هذه القطعة من تلك الرؤية—رؤية الأناقة بلا اعتذار، والحرفية التي تكرم التقاليد بينما تحتضن الروح الجريئة للأنوثة العصرية.\n\nكل تفصيلة تم التفكير فيها. كل غرزة وُضعت بقصد. من همس القماش على بشرتك إلى طريقة حركته مع كل خطوة تخطينها—هذه أزياء ارتقت إلى فن.\n\nلأنك لا ترتدين الفخامة فحسب. أنتِ تجسدينها.`,
+        long: `فن الحضور\n\nفي اللحظات الهادئة قبل انبلاج الفجر فوق المشغل، عندما تكون المدينة نائمة والأحلام معلقة في الهواء، يحدث السحر. أيدٍ أتقنت حرفتها عبر عقود تبدأ رقصتها الرقيقة مع القماش والخيط والرؤية.\n\nهنا وُلدت قطعتك.\n\nليس في مصنع. ليس على خط تجميع. بل في مساحة يتحرك فيها الزمن بشكل مختلف—حيث تختفي الساعات في السعي نحو الكمال، حيث "جيد بما فيه الكفاية" عبارة غير موجودة.\n\nحصلنا على هذا القماش من حرفيين حرسوا أسرارهم لأجيال. تحسسيه بين أصابعك—ذلك الثقل الخفي، تلك اللمعة المضيئة التي تلتقط الضوء كأشعة قمر أسيرة. هذه ليست مجرد مادة. إنها إرث منسوج في كل خيط.\n\nانبثق التصميم من رسومات لا تُحصى، كل واحدة تقربنا من هذه اللحظة—اللحظة التي يصبح فيها المفهوم واقعاً، حين يتخذ الخيال شكلاً ملموساً. رفضنا عشرات النسخ. لأن القريب من الكمال ليس كمالاً.\n\nكل درزة عُززت يدوياً. كل حافة أُنهيت بدقة صائغ مجوهرات ماهر.\n\nعندما ترتدين هذه القطعة، أنتِ لا تلبسين مجرد ثوب. أنتِ تدخلين في إرث. أنتِ تختارين تقديم نفسك للعالم كشخص يفهم أن أرقى الأشياء في الحياة ليست عن العلامات التجارية أو الصيحات—إنها عن التزام لا يتزعزع بالتميز.\n\nهذا للمرأة التي تدخل غرف الاجتماعات وقاعات الحفلات بثقة متساوية.\n\nليست مجرد أزياء. إنها إعلان.\n\nمرحباً بكِ في معيار جديد للأناقة.`
+      },
+      friendly: {
+        short: `هاي يا حلوة! 👋 تعرفين ذلك الشعور لما تلاقين القطعة المثالية؟ تلك التي تخليكِ تدورين قدام المرآة؟ أيوا، هذي هي تلك القطعة. مصنوعة بحب، مصممة لكِ. خلينا نلفت الأنظار سوا! 💕`,
+        medium: `ممكن نحكي لحظة؟ 💕\n\nتعرفين تلك الأيام لما تحسين خزانتك مليانة بس "ما في شي تلبسينه"؟ كلنا مرينا بهذا. لهذا بالضبط صنعنا هذه القطعة.\n\nما تحاول تكون كل شي لكل الناس. مصممة لتكون قطعتك المفضلة—اللي تمدين إيدك لها لما تبين تحسين بأناقة بدون مجهود كبير. مريحة بما يكفي لليوم كله، مذهلة بما يكفي لدعوة عشاء مفاجئة.\n\nاهتمينا بكل تفصيلة عشان ما تقلقين. القصة؟ جربناها على أجسام حقيقية. القماش؟ إحساسه حلم، شكله مليون.\n\nهذي أزياء تفهمك. أخيراً. 🙌`,
+        long: `خلينا نكون صريحين لدقيقة 💕\n\nالموضوع هو—بدأنا هذا البراند لأننا كنا محبطين. محبطين من أزياء وعدت بالراحة وقدمت الانزعاج. من "فخامة" تفككت بعد ثلاث غسلات. من مقاسات ما كان لها معنى.\n\nمألوف؟\n\nتوقعنا ذلك.\n\nلهذا كل قرار ناخذه يبدأ بسؤال واحد: "هل نحن نبي هذا؟" مش شو الترند. مش شو الأرخص للإنتاج. شو اللي يخلينا فعلاً متحمسين نفتح تلك الشحنة؟\n\nهذه القطعة؟ أخذت منا 8 شهور لنتقنها. ثمانية. شهور.\n\nلأن هذا اللي نؤمن فيه: أنتِ تشتغلين بجد على فلوسك. ولما تختارين تصرفينها معنا، هذا يعني شي. يعني وثقتِ فينا بجزء صغير من راتبك اللي تعبتِ عليه، ونحن نرفض—نرفض—نخذلك.\n\nفلما توصل لبابك، نبيك تعيشين تلك اللحظة. لما تجربينها، تطالعين بالمرآة، وبس... تبتسمين. لأنها بالضبط اللي تمنيتيها.\n\nالقماش يتحرك معك، مش ضدك. القصة تناسب بدون ما تضغط. الستايل عصري بس مش متكلف.\n\nمرحباً بك في أزياء تهتم فعلاً. مبسوطين إنك هنا. 💕`
+      },
+      inspiring: {
+        short: `لم تكن تلبس للآخرين. كانت تلبس للمرأة التي تصبحها. كل صباح، اختارت قطعاً تذكرها بقوتها. هذه واحدة من تلك القطع. لكل امرأة تكتب قصتها الخاصة. ✨`,
+        medium: `قبل أن ترضي العالم، كانت نفسها.\n\nتعلمت باكراً أن انتظار الإذن يعني الانتظار للأبد. فتوقفت عن السؤال. بدأت تختار—طريقها، صوتها، أسلوبها.\n\nهذه القطعة ليست عن الاندماج. إنها عن التميز بشروطك الخاصة. إنها للمرأة التي تعرف أن الستايل الحقيقي ليس عن الاتباع—إنه عن القيادة.\n\nالبعض سيفهم. البعض لن يفهم. هي تلبس لمن يفهمون، وتلهم من سيفهمون.\n\nلحظتك ليست قادمة. إنها هنا. البسي لها.`,
+        long: `المرأة التي اختارت نفسها\n\nتتذكر اللحظة التي تغير فيها كل شيء.\n\nلم تكن درامية—لا صاعقة برق، لا إلهام مفاجئ. فقط صباح هادئ، واقفة أمام خزانتها، تمد يدها للخيارات الآمنة ذاتها التي طالما اختارتها. وبعدها... لم تفعل.\n\nذلك اليوم، اختارت بشكل مختلف. ليس أعلى صوتاً. ليس أغلى ثمناً. فقط أكثر انتماءً لها.\n\nبدأ بالملابس لكنه لم ينتهِ هناك. ذلك الفعل الصغير من اختيار نفسها امتد للخارج. تكلمت في الاجتماعات. طلبت الترقية. وضعت حدوداً كانت تخاف أن تضعها. أخيراً بدأت ذلك المشروع الذي كانت "تفكر فيه" لسنوات.\n\nكل ذلك لأنها صباحاً واحداً، قررت أن تتوقف عن اللبس للاختفاء وتبدأ اللبس للحضور.\n\nهذه القطعة تحمل تلك الطاقة.\n\nصُممت للنساء عند مفترقات الطرق. للتي تقرر إن كانت ستلعبها آمنة أم تراهن على نفسها. للتي مستعدة أن تُرى—تُرى فعلاً—لمن هي بالضبط.\n\nالبسيها يوم تطلبين ما تستحقين. يوم تمشين بعيداً عما لم يعد يخدمك. يوم تتوقفين أخيراً عن الاعتذار لأنك تأخذين مساحة.\n\nهذه لكِ.\n\nالآن اذهبي أريهم مما أنتِ مصنوعة. ✨`
+      },
+      professional: {
+        short: `مصنوعة بدقة. مصممة للتميز. هذه القطعة تمثل التزامنا بالجودة التي تتحدث عن نفسها. للمحترفة التي تقدر الجوهر على البريق.`,
+        medium: `في سوق مشبع بالصيحات، اخترنا طريقاً مختلفاً: الجودة الخالدة.\n\nهذه القطعة تمثل شهوراً من التطوير، تكرارات لا تُحصى، والتزاماً لا يتزعزع بالتميز. شاركنا حرفيين يشاركوننا رؤيتنا—محترفين يفهمون أن الحرفية الحقيقية لا يمكن استعجالها.\n\nالنتيجة تتحدث عن نفسها. مواد متفوقة، بناء لا تشوبه شائبة، وتصميم يتجاوز صيحات المواسم. هذه قطعة استثمارية.\n\nللمحترفة الذواقة التي تفهم أن الجودة ليست أبداً مصروفاً—إنها استثمار.`,
+        long: `ملاحظة عن الحرفية\n\nفي عصر الموضة السريعة والصيحات القابلة للتخلص، اتخذنا خياراً متعمداً للسباحة عكس التيار.\n\nاختيار المواد\nتبدأ عملية التوريد لدينا قبل 18 شهراً من وصول القطعة إليك. نعمل حصرياً مع مصانع تلبي معايير الجودة الصارمة لدينا. كل قماش يُختبر للمتانة وثبات اللون والملمس. نرفض حوالي 70% من العينات قبل إيجاد مواد جديرة بمجموعتنا.\n\nفلسفة التصميم\nيعمل فريق التصميم لدينا على مبدأ بسيط: صنع قطع ستريدين ارتداءها بعد 10 سنوات من الآن. هذا يعني تجنب العناصر المعتمدة على الصيحات مع دمج لمسات عصرية خفية.\n\nمعايير البناء\nكل قطعة تمر عبر 47 نقطة فحص جودة. الدرزات مُعززة في نقاط الإجهاد. الحواشي موزونة للانسدال الأمثل.\n\nالنتيجة\nما تستلمينه ليس مجرد ثوب. إنه تتويج للخبرة والقصد والالتزام الصارم بالتميز. قطعة مصممة لتصبح حجر أساس في خزانتك المهنية.\n\nندعوك لتجربة الفرق الذي تصنعه الجودة الحقيقية.`
+      }
+    };
     
-    if (storyTone === 'luxury') {
-      content += `In a world where elegance meets artistry, we present a masterpiece that transcends ordinary fashion. Each stitch tells a story of dedication, each fold whispers tales of timeless sophistication.\n\nThis isn't just a garment—it's a statement. A declaration that you deserve nothing but the extraordinary. Crafted for those who understand that true luxury lies in the details.\n\nEmbrace the exceptional. Wear your confidence.`;
-    } else if (storyTone === 'friendly') {
-      content += `Hey there, fashion lover! 👋\n\nWe've got something special for you—a piece that's going to become your new favorite. You know that feeling when you put something on and just feel amazing? That's exactly what we designed this for.\n\nComfortable, stylish, and totally YOU. Because fashion should be fun, not complicated!\n\nReady to fall in love with your wardrobe again?`;
-    } else if (storyTone === 'inspiring') {
-      content += `She walked into the room, and everything changed.\n\nNot because of what she wore, but how she wore it—with unshakeable confidence, with purpose, with grace. Her outfit wasn't just fabric; it was armor for her dreams.\n\nThis is what fashion can do. It can transform not just how you look, but how you feel. How you move through the world.\n\nYour moment is waiting. Dress for it.`;
-    } else {
-      content += `Introducing our latest collection—where modern design meets timeless elegance.\n\nKey Features:\n• Premium materials sourced globally\n• Expert craftsmanship\n• Versatile styling options\n• Sustainable production\n\nPerfect for the discerning individual who values quality and style in equal measure.`;
-    }
-    
-    setGeneratedPrompt(content);
-    setArabicPrompt(content);
+    const toneKey = storyTone === 'playful' ? 'friendly' : storyTone === 'urgent' ? 'professional' : storyTone;
+    storyEn += storiesEn[toneKey]?.[storyLength] || storiesEn.luxury.medium;
+    storyAr += storiesAr[toneKey]?.[storyLength] || storiesAr.luxury.medium;
+    setGeneratedPrompt(storyEn);
+    setArabicContent(storyAr);
   };
 
-  const handleGenerate = () => {
-    if (activeTab === 'design') generateDesignPrompt();
-    else if (activeTab === 'video') generateVideoPrompt();
-    else if (activeTab === 'marketing') generateMarketingPrompt();
-    else if (activeTab === 'story') generateStoryPrompt();
-  };
+  const handleGenerate = () => { setShowArabic(false); if (activeTab === 'design') generateDesignPrompt(); else if (activeTab === 'video') generateVideoPrompt(); else if (activeTab === 'marketing') generateMarketingPrompt(); else if (activeTab === 'story') generateStoryPrompt(); };
 
   const generateImage = async () => {
     const promptToUse = activeTab === 'generate' ? imagePrompt : generatedPrompt;
     if (!promptToUse) { setError('Please enter or generate a prompt first'); return; }
     setIsGenerating(true); setError(null); setGeneratedImage(null);
     try {
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: promptToUse }),
-      });
+      const response = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: promptToUse }) });
       const data = await response.json();
       if (data.error) throw new Error(data.error);
       if (data.image) setGeneratedImage(data.image);
@@ -324,366 +187,39 @@ export default function Home() {
     finally { setIsGenerating(false); }
   };
 
-  const copyPrompt = () => {
-    navigator.clipboard.writeText(showArabic ? arabicPrompt : generatedPrompt);
-    setCopied(true); setTimeout(() => setCopied(false), 2000);
-  };
+  const copyPrompt = () => { navigator.clipboard.writeText(showArabic ? arabicContent : generatedPrompt); setCopied(true); setTimeout(() => setCopied(false), 2000); };
 
   const gold = '#D4AF37';
   const btnStyle = (active) => ({ padding: '12px 16px', background: active ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: active ? 'none' : `1px solid ${gold}40`, borderRadius: '8px', color: active ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: '600' });
   const inputStyle = { width: '100%', padding: '12px', background: 'rgba(0,0,0,0.3)', border: `1px solid ${gold}40`, borderRadius: '8px', color: '#fff', fontSize: '14px' };
   const sectionStyle = { background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '30px', border: `1px solid ${gold}30` };
 
-  const InputModeSelector = () => (
-    <div style={{ marginBottom: '20px' }}>
-      <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Input Mode / طريقة الإدخال</label>
-      <div style={{ display: 'flex', gap: '10px' }}>
-        <button onClick={() => setInputMode('description')} style={{ flex: 1, padding: '12px', background: inputMode === 'description' ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: inputMode === 'description' ? 'none' : `1px solid ${gold}40`, borderRadius: '8px', color: inputMode === 'description' ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>📝 من وصف</button>
-        <button onClick={() => setInputMode('image')} style={{ flex: 1, padding: '12px', background: inputMode === 'image' ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: inputMode === 'image' ? 'none' : `1px solid ${gold}40`, borderRadius: '8px', color: inputMode === 'image' ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>🖼️ من صورة</button>
-      </div>
-    </div>
-  );
+  const InputModeSelector = () => (<div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>طريقة الإدخال / Input Mode</label><div style={{ display: 'flex', gap: '10px' }}><button onClick={() => { setInputMode('description'); removeUploadedImage(); }} style={{ flex: 1, padding: '12px', background: inputMode === 'description' ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: inputMode === 'description' ? 'none' : `1px solid ${gold}40`, borderRadius: '8px', color: inputMode === 'description' ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>📝 من وصف</button><button onClick={() => setInputMode('image')} style={{ flex: 1, padding: '12px', background: inputMode === 'image' ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: inputMode === 'image' ? 'none' : `1px solid ${gold}40`, borderRadius: '8px', color: inputMode === 'image' ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>🖼️ من صورة</button></div></div>);
 
-  const ImageUploadSection = () => (
-    <div style={{ marginBottom: '20px', display: inputMode === 'image' ? 'block' : 'none' }}>
-      <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Upload Image / رفع صورة</label>
-      {!uploadedImage ? (
-        <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '30px', border: `2px dashed ${gold}50`, borderRadius: '10px', cursor: 'pointer', background: 'rgba(0,0,0,0.2)' }}>
-          <span style={{ fontSize: '30px', marginBottom: '10px' }}>📁</span>
-          <span style={{ color: '#aaa', fontSize: '13px' }}>Click to upload image</span>
-          <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
-        </label>
-      ) : (
-        <div style={{ position: 'relative', borderRadius: '10px', overflow: 'hidden' }}>
-          <img src={uploadedImage} alt="Uploaded" style={{ width: '100%', height: '150px', objectFit: 'cover', borderRadius: '10px' }} />
-          <button onClick={removeUploadedImage} style={{ position: 'absolute', top: '8px', right: '8px', background: '#DC2626', border: 'none', borderRadius: '50%', width: '28px', height: '28px', color: '#fff', cursor: 'pointer', fontSize: '14px' }}>✕</button>
-          <p style={{ marginTop: '8px', fontSize: '12px', color: '#aaa' }}>{uploadedImageName}</p>
-        </div>
-      )}
-    </div>
-  );
+  const ImageUploadSection = () => (<div style={{ marginBottom: '20px', display: inputMode === 'image' ? 'block' : 'none' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>رفع صورة / Upload Image</label>{!uploadedImage ? (<label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '30px', border: `2px dashed ${gold}50`, borderRadius: '10px', cursor: 'pointer', background: 'rgba(0,0,0,0.2)' }}><span style={{ fontSize: '30px', marginBottom: '10px' }}>📁</span><span style={{ color: '#aaa', fontSize: '13px' }}>اضغط لرفع صورة</span><input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} /></label>) : (<div style={{ position: 'relative', borderRadius: '10px', overflow: 'hidden' }}><img src={uploadedImage} alt="Uploaded" style={{ width: '100%', height: '150px', objectFit: 'cover', borderRadius: '10px' }} /><button onClick={removeUploadedImage} style={{ position: 'absolute', top: '8px', right: '8px', background: '#DC2626', border: 'none', borderRadius: '50%', width: '28px', height: '28px', color: '#fff', cursor: 'pointer', fontSize: '14px' }}>✕</button><p style={{ marginTop: '8px', fontSize: '12px', color: '#aaa' }}>{uploadedImageName}</p></div>)}</div>);
 
   return (
-    <>
-      <Head>
-        <title>AI Fashion Creator - GH Fashion</title>
-        <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet" />
-      </Head>
-      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%)', fontFamily: 'Montserrat, sans-serif', color: '#fff' }}>
-        <header style={{ padding: '20px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${gold}30`, background: 'rgba(0,0,0,0.4)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ width: '45px', height: '45px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 'bold', color: '#0a0a0a' }}>GH</div>
-            <div>
-              <h1 style={{ margin: 0, fontSize: '22px', fontWeight: '600', fontFamily: 'Playfair Display, serif' }}>AI Fashion Creator</h1>
-              <p style={{ margin: 0, fontSize: '10px', color: gold, letterSpacing: '2px', textTransform: 'uppercase' }}>Professional Prompt Generator</p>
-            </div>
-          </div>
-        </header>
+    <><Head><title>AI Fashion Creator - GH Fashion</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet" /></Head>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%)', fontFamily: 'Montserrat, sans-serif', color: '#fff' }}>
+      <header style={{ padding: '20px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${gold}30`, background: 'rgba(0,0,0,0.4)' }}><div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}><div style={{ width: '45px', height: '45px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 'bold', color: '#0a0a0a' }}>GH</div><div><h1 style={{ margin: 0, fontSize: '22px', fontWeight: '600', fontFamily: 'Playfair Display, serif' }}>AI Fashion Creator</h1><p style={{ margin: 0, fontSize: '10px', color: gold, letterSpacing: '2px', textTransform: 'uppercase' }}>Professional Prompt Generator</p></div></div></header>
 
-        <nav style={{ display: 'flex', justifyContent: 'center', gap: '12px', padding: '25px', flexWrap: 'wrap' }}>
-          {[
-            { id: 'design', icon: '🎨', label: 'Design' },
-            { id: 'video', icon: '🎬', label: 'Video' },
-            { id: 'marketing', icon: '📱', label: 'Marketing' },
-            { id: 'story', icon: '📖', label: 'Story' },
-            { id: 'generate', icon: '✨', label: 'Generate' },
-            { id: 'pricing', icon: '💎', label: 'Pricing' }
-          ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ padding: '12px 22px', background: activeTab === tab.id ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: activeTab === tab.id ? 'none' : `1px solid ${gold}50`, borderRadius: '25px', color: activeTab === tab.id ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>{tab.icon}</span><span>{tab.label}</span>
-            </button>
-          ))}
-        </nav>
+      <nav style={{ display: 'flex', justifyContent: 'center', gap: '12px', padding: '25px', flexWrap: 'wrap' }}>{[{id:'design',icon:'🎨',label:'Design'},{id:'video',icon:'🎬',label:'Video'},{id:'marketing',icon:'📱',label:'Marketing'},{id:'story',icon:'📖',label:'Story'},{id:'generate',icon:'✨',label:'Generate'},{id:'pricing',icon:'💎',label:'Pricing'}].map(tab => (<button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ padding: '12px 22px', background: activeTab === tab.id ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: activeTab === tab.id ? 'none' : `1px solid ${gold}50`, borderRadius: '25px', color: activeTab === tab.id ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}><span>{tab.icon}</span><span>{tab.label}</span></button>))}</nav>
 
-        <main style={{ padding: '30px 40px', maxWidth: '1300px', margin: '0 auto' }}>
+      <main style={{ padding: '30px 40px', maxWidth: '1300px', margin: '0 auto' }}>
+        {activeTab === 'design' && (<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}><div style={sectionStyle}><h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🎨 Design Prompt Generator</h2><InputModeSelector /><ImageUploadSection /><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Style</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>{styles.map(s => <button key={s.id} onClick={() => setDesignStyle(s.id)} style={btnStyle(designStyle === s.id)}>{s.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Category</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>{categories.map(c => <button key={c.id} onClick={() => setDesignCategory(c.id)} style={btnStyle(designCategory === c.id)}>{c.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Color</label><div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>{colors.map(c => <button key={c.id} onClick={() => setDesignColor(c.id)} title={c.ar} style={{ width: '36px', height: '36px', background: c.hex, border: designColor === c.id ? `3px solid ${gold}` : '2px solid rgba(255,255,255,0.3)', borderRadius: '50%', cursor: 'pointer' }} />)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Fabric</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>{fabrics.map(f => <button key={f.id} onClick={() => setDesignFabric(f.id)} style={btnStyle(designFabric === f.id)}>{f.ar}</button>)}</div></div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}><div><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Season</label><select value={designSeason} onChange={(e) => setDesignSeason(e.target.value)} style={inputStyle}>{seasons.map(s => <option key={s.id} value={s.id} style={{background:'#1a1a2e'}}>{s.ar}</option>)}</select></div><div><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Occasion</label><select value={designOccasion} onChange={(e) => setDesignOccasion(e.target.value)} style={inputStyle}>{occasions.map(o => <option key={o.id} value={o.id} style={{background:'#1a1a2e'}}>{o.ar}</option>)}</select></div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Additional Details</label><textarea value={designDetails} onChange={(e) => setDesignDetails(e.target.value)} placeholder="تفاصيل إضافية..." style={{ ...inputStyle, height: '70px', resize: 'none' }} /></div><button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>✨ GENERATE PROMPT</button></div><div style={sectionStyle}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}><h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Prompt</h2><button onClick={() => setShowArabic(!showArabic)} style={{ padding: '8px 16px', background: showArabic ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: showArabic ? '#0a0a0a' : gold, cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>{showArabic ? '🇺🇸 English' : '🇸🇦 عربي'}</button></div><div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '300px', border: `1px solid ${gold}20`, marginBottom: '15px' }}><pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '13px', lineHeight: '1.8', direction: showArabic ? 'rtl' : 'ltr', textAlign: showArabic ? 'right' : 'left' }}>{showArabic ? arabicContent : generatedPrompt || 'اختاري الخيارات واضغطي Generate...'}</pre></div>{generatedPrompt && (<div style={{ display: 'flex', gap: '10px' }}><button onClick={copyPrompt} style={{ flex: 1, padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ تم النسخ!' : '📋 نسخ'}</button><button onClick={generateImage} disabled={isGenerating} style={{ flex: 1, padding: '14px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '8px', color: '#0a0a0a', cursor: 'pointer', fontSize: '13px', fontWeight: '600', opacity: isGenerating ? 0.7 : 1 }}>{isGenerating ? '⏳ جاري التوليد...' : '🖼️ توليد صورة'}</button></div>)}{isGenerating && <p style={{ textAlign: 'center', color: '#888', marginTop: '10px', fontSize: '12px' }}>انتظري 30-60 ثانية...</p>}{generatedImage && <div style={{ marginTop: '15px' }}><img src={generatedImage} alt="Generated" style={{ width: '100%', borderRadius: '10px' }} /></div>}{error && <p style={{ color: '#f87171', marginTop: '10px', fontSize: '13px' }}>⚠️ {error}</p>}</div></div>)}
 
-          {activeTab === 'design' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
-              <div style={sectionStyle}>
-                <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🎨 Design Prompt Generator</h2>
-                <InputModeSelector />
-                <ImageUploadSection />
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Style</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
-                    {styles.map(s => <button key={s.id} onClick={() => setDesignStyle(s.id)} style={btnStyle(designStyle === s.id)}>{s.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Category</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
-                    {categories.map(c => <button key={c.id} onClick={() => setDesignCategory(c.id)} style={btnStyle(designCategory === c.id)}>{c.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Color</label>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {colors.map(c => <button key={c.id} onClick={() => setDesignColor(c.id)} title={c.en} style={{ width: '36px', height: '36px', background: c.hex, border: designColor === c.id ? `3px solid ${gold}` : '2px solid rgba(255,255,255,0.3)', borderRadius: '50%', cursor: 'pointer' }} />)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Fabric</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
-                    {fabrics.map(f => <button key={f.id} onClick={() => setDesignFabric(f.id)} style={btnStyle(designFabric === f.id)}>{f.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Season</label>
-                    <select value={designSeason} onChange={(e) => setDesignSeason(e.target.value)} style={inputStyle}>
-                      {seasons.map(s => <option key={s.id} value={s.id} style={{background:'#1a1a2e'}}>{s.ar}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Occasion</label>
-                    <select value={designOccasion} onChange={(e) => setDesignOccasion(e.target.value)} style={inputStyle}>
-                      {occasions.map(o => <option key={o.id} value={o.id} style={{background:'#1a1a2e'}}>{o.ar}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Additional Details</label>
-                  <textarea value={designDetails} onChange={(e) => setDesignDetails(e.target.value)} placeholder="e.g., gold embroidery, long sleeves..." style={{ ...inputStyle, height: '70px', resize: 'none' }} />
-                </div>
-                <button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>✨ GENERATE PROMPT</button>
-              </div>
-              <div style={sectionStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                  <h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Prompt</h2>
-                  <button onClick={() => setShowArabic(!showArabic)} style={{ padding: '6px 15px', background: `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: gold, cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>{showArabic ? '🇺🇸 EN' : '🇸🇦 AR'}</button>
-                </div>
-                <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '250px', border: `1px solid ${gold}20`, marginBottom: '15px' }}>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '12px', lineHeight: '1.7', direction: showArabic ? 'rtl' : 'ltr' }}>{showArabic ? arabicPrompt : generatedPrompt || 'Select options and click Generate...'}</pre>
-                </div>
-                {generatedPrompt && (
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button onClick={copyPrompt} style={{ flex: 1, padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ Copied!' : '📋 Copy'}</button>
-                    <button onClick={generateImage} disabled={isGenerating} style={{ flex: 1, padding: '14px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '8px', color: '#0a0a0a', cursor: 'pointer', fontSize: '13px', fontWeight: '600', opacity: isGenerating ? 0.7 : 1 }}>{isGenerating ? '⏳ Generating...' : '🖼️ Generate Image'}</button>
-                  </div>
-                )}
-                {isGenerating && <p style={{ textAlign: 'center', color: '#888', marginTop: '10px', fontSize: '12px' }}>Please wait 30-60 seconds...</p>}
-                {generatedImage && <div style={{ marginTop: '15px' }}><img src={generatedImage} alt="Generated" style={{ width: '100%', borderRadius: '10px' }} /></div>}
-                {error && <p style={{ color: '#f87171', marginTop: '10px', fontSize: '13px' }}>⚠️ {error}</p>}
-              </div>
-            </div>
-          )}
+        {activeTab === 'video' && (<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}><div style={sectionStyle}><h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🎬 Video Prompt Generator</h2><InputModeSelector /><ImageUploadSection /><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Video Type</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>{videoTypes.map(t => <button key={t.id} onClick={() => setVideoType(t.id)} style={btnStyle(videoType === t.id)}>{t.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Mood</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>{videoMoods.map(m => <button key={m.id} onClick={() => setVideoMood(m.id)} style={btnStyle(videoMood === m.id)}>{m.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Camera</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>{cameraMoves.map(c => <button key={c.id} onClick={() => setVideoCamera(c.id)} style={btnStyle(videoCamera === c.id)}>{c.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Lighting</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>{lightingTypes.map(l => <button key={l.id} onClick={() => setVideoLighting(l.id)} style={btnStyle(videoLighting === l.id)}>{l.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Duration: {videoDuration}s</label><input type="range" min="5" max="60" value={videoDuration} onChange={(e) => setVideoDuration(e.target.value)} style={{ width: '100%', accentColor: gold }} /></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Scene Details</label><textarea value={videoDetails} onChange={(e) => setVideoDetails(e.target.value)} placeholder="تفاصيل المشهد..." style={{ ...inputStyle, height: '60px', resize: 'none' }} /></div><button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>🎬 GENERATE PROMPT</button></div><div style={sectionStyle}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}><h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Prompt</h2><button onClick={() => setShowArabic(!showArabic)} style={{ padding: '8px 16px', background: showArabic ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: showArabic ? '#0a0a0a' : gold, cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>{showArabic ? '🇺🇸 English' : '🇸🇦 عربي'}</button></div><div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '350px', border: `1px solid ${gold}20`, marginBottom: '15px' }}><pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '13px', lineHeight: '1.8', direction: showArabic ? 'rtl' : 'ltr', textAlign: showArabic ? 'right' : 'left' }}>{showArabic ? arabicContent : generatedPrompt || 'اختاري الخيارات واضغطي Generate...'}</pre></div>{generatedPrompt && <button onClick={copyPrompt} style={{ width: '100%', padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ تم النسخ!' : '📋 نسخ'}</button>}</div></div>)}
 
-          {activeTab === 'video' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
-              <div style={sectionStyle}>
-                <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🎬 Video Prompt Generator</h2>
-                <InputModeSelector />
-                <ImageUploadSection />
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Video Type</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {videoTypes.map(t => <button key={t.id} onClick={() => setVideoType(t.id)} style={btnStyle(videoType === t.id)}>{t.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Mood</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {videoMoods.map(m => <button key={m.id} onClick={() => setVideoMood(m.id)} style={btnStyle(videoMood === m.id)}>{m.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Camera</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {cameraMoves.map(c => <button key={c.id} onClick={() => setVideoCamera(c.id)} style={btnStyle(videoCamera === c.id)}>{c.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Lighting</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {lightingTypes.map(l => <button key={l.id} onClick={() => setVideoLighting(l.id)} style={btnStyle(videoLighting === l.id)}>{l.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Duration: {videoDuration}s</label>
-                  <input type="range" min="5" max="60" value={videoDuration} onChange={(e) => setVideoDuration(e.target.value)} style={{ width: '100%', accentColor: gold }} />
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Scene Details</label>
-                  <textarea value={videoDetails} onChange={(e) => setVideoDetails(e.target.value)} placeholder="e.g., outdoor garden, wind effect..." style={{ ...inputStyle, height: '60px', resize: 'none' }} />
-                </div>
-                <button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>🎬 GENERATE PROMPT</button>
-              </div>
-              <div style={sectionStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                  <h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Prompt</h2>
-                  <button onClick={() => setShowArabic(!showArabic)} style={{ padding: '6px 15px', background: `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: gold, cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>{showArabic ? '🇺🇸 EN' : '🇸🇦 AR'}</button>
-                </div>
-                <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '350px', border: `1px solid ${gold}20`, marginBottom: '15px' }}>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '12px', lineHeight: '1.7', direction: showArabic ? 'rtl' : 'ltr' }}>{showArabic ? arabicPrompt : generatedPrompt || 'Select options and click Generate...'}</pre>
-                </div>
-                {generatedPrompt && <button onClick={copyPrompt} style={{ width: '100%', padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ Copied!' : '📋 Copy Prompt'}</button>}
-              </div>
-            </div>
-          )}
+        {activeTab === 'marketing' && (<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}><div style={sectionStyle}><h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>📱 Marketing Content</h2><InputModeSelector /><ImageUploadSection /><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Platform</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>{platforms.map(p => <button key={p.id} onClick={() => setMarketingPlatform(p.id)} style={btnStyle(marketingPlatform === p.id)}>{p.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Tone</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>{tones.map(t => <button key={t.id} onClick={() => setMarketingTone(t.id)} style={btnStyle(marketingTone === t.id)}>{t.ar}</button>)}</div></div><div style={{ marginBottom: '15px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Product Name</label><input type="text" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="اسم المنتج" style={inputStyle} /></div><div style={{ marginBottom: '15px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Description</label><textarea value={productDesc} onChange={(e) => setProductDesc(e.target.value)} placeholder="وصف المنتج..." style={{ ...inputStyle, height: '60px', resize: 'none' }} /></div><div style={{ marginBottom: '15px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>CTA</label><select value={marketingCTA} onChange={(e) => setMarketingCTA(e.target.value)} style={inputStyle}>{ctas.map(c => <option key={c.id} value={c.id} style={{background:'#1a1a2e'}}>{c.ar}</option>)}</select></div><div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}><label style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px' }}><input type="checkbox" checked={includeHashtags} onChange={(e) => setIncludeHashtags(e.target.checked)} style={{ accentColor: gold }} /> Hashtags</label><label style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px' }}><input type="checkbox" checked={includeEmojis} onChange={(e) => setIncludeEmojis(e.target.checked)} style={{ accentColor: gold }} /> Emojis</label></div><button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>📱 GENERATE CONTENT</button></div><div style={sectionStyle}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}><h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Content</h2><button onClick={() => setShowArabic(!showArabic)} style={{ padding: '8px 16px', background: showArabic ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: showArabic ? '#0a0a0a' : gold, cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>{showArabic ? '🇺🇸 English' : '🇸🇦 عربي'}</button></div><div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '400px', border: `1px solid ${gold}20`, marginBottom: '15px', overflowY: 'auto' }}><pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '13px', lineHeight: '1.8', direction: showArabic ? 'rtl' : 'ltr', textAlign: showArabic ? 'right' : 'left' }}>{showArabic ? arabicContent : generatedPrompt || 'اختاري الخيارات واضغطي Generate...'}</pre></div>{generatedPrompt && <button onClick={copyPrompt} style={{ width: '100%', padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ تم النسخ!' : '📋 نسخ'}</button>}</div></div>)}
 
-          {activeTab === 'marketing' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
-              <div style={sectionStyle}>
-                <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>📱 Marketing Content</h2>
-                <InputModeSelector />
-                <ImageUploadSection />
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Platform</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {platforms.map(p => <button key={p.id} onClick={() => setMarketingPlatform(p.id)} style={btnStyle(marketingPlatform === p.id)}>{p.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Tone</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {tones.map(t => <button key={t.id} onClick={() => setMarketingTone(t.id)} style={btnStyle(marketingTone === t.id)}>{t.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Goal</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {goals.map(g => <button key={g.id} onClick={() => setMarketingGoal(g.id)} style={btnStyle(marketingGoal === g.id)}>{g.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '15px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Product Name</label>
-                  <input type="text" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="e.g., Silk Evening Gown" style={inputStyle} />
-                </div>
-                <div style={{ marginBottom: '15px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Description</label>
-                  <textarea value={productDesc} onChange={(e) => setProductDesc(e.target.value)} placeholder="Product description..." style={{ ...inputStyle, height: '60px', resize: 'none' }} />
-                </div>
-                <div style={{ marginBottom: '15px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>CTA</label>
-                  <select value={marketingCTA} onChange={(e) => setMarketingCTA(e.target.value)} style={inputStyle}>
-                    {ctas.map(c => <option key={c.id} value={c.id} style={{background:'#1a1a2e'}}>{c.ar}</option>)}
-                  </select>
-                </div>
-                <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px' }}>
-                    <input type="checkbox" checked={includeHashtags} onChange={(e) => setIncludeHashtags(e.target.checked)} style={{ accentColor: gold }} /> Hashtags
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fff', cursor: 'pointer', fontSize: '13px' }}>
-                    <input type="checkbox" checked={includeEmojis} onChange={(e) => setIncludeEmojis(e.target.checked)} style={{ accentColor: gold }} /> Emojis
-                  </label>
-                </div>
-                <button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>📱 GENERATE CONTENT</button>
-              </div>
-              <div style={sectionStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                  <h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Content</h2>
-                  <button onClick={() => setShowArabic(!showArabic)} style={{ padding: '6px 15px', background: `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: gold, cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>{showArabic ? '🇺🇸 EN' : '🇸🇦 AR'}</button>
-                </div>
-                <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '380px', border: `1px solid ${gold}20`, marginBottom: '15px', overflowY: 'auto' }}>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '12px', lineHeight: '1.7', direction: showArabic ? 'rtl' : 'ltr' }}>{showArabic ? arabicPrompt : generatedPrompt || 'Select options and click Generate...'}</pre>
-                </div>
-                {generatedPrompt && <button onClick={copyPrompt} style={{ width: '100%', padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ Copied!' : '📋 Copy Content'}</button>}
-              </div>
-            </div>
-          )}
+        {activeTab === 'story' && (<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}><div style={sectionStyle}><h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>📖 Marketing Story Generator</h2><InputModeSelector /><ImageUploadSection /><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>نبرة القصة / Story Tone</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>{tones.map(t => <button key={t.id} onClick={() => setStoryTone(t.id)} style={btnStyle(storyTone === t.id)}>{t.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>طول القصة / Story Length</label><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>{storyLengths.map(l => <button key={l.id} onClick={() => setStoryLength(l.id)} style={btnStyle(storyLength === l.id)}>{l.ar}</button>)}</div></div><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>وصف المنتج / Product Description</label><textarea value={storyDesc} onChange={(e) => setStoryDesc(e.target.value)} placeholder="صفي منتجك بالتفصيل..." style={{ ...inputStyle, height: '120px', resize: 'none' }} /></div><button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>📖 GENERATE STORY</button></div><div style={sectionStyle}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}><h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Story</h2><button onClick={() => setShowArabic(!showArabic)} style={{ padding: '8px 16px', background: showArabic ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: showArabic ? '#0a0a0a' : gold, cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>{showArabic ? '🇺🇸 English' : '🇸🇦 عربي'}</button></div><div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '400px', border: `1px solid ${gold}20`, marginBottom: '15px', overflowY: 'auto' }}><pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '13px', lineHeight: '1.8', direction: showArabic ? 'rtl' : 'ltr', textAlign: showArabic ? 'right' : 'left' }}>{showArabic ? arabicContent : generatedPrompt || 'اختاري الخيارات واضغطي Generate Story...'}</pre></div>{generatedPrompt && <button onClick={copyPrompt} style={{ width: '100%', padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ تم النسخ!' : '📋 نسخ'}</button>}</div></div>)}
 
-          {activeTab === 'story' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
-              <div style={sectionStyle}>
-                <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>📖 Marketing Story Generator</h2>
-                <InputModeSelector />
-                <ImageUploadSection />
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Story Tone / نبرة القصة</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {tones.map(t => <button key={t.id} onClick={() => setStoryTone(t.id)} style={btnStyle(storyTone === t.id)}>{t.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Story Length / طول القصة</label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {storyLengths.map(l => <button key={l.id} onClick={() => setStoryLength(l.id)} style={btnStyle(storyLength === l.id)}>{l.ar}</button>)}
-                  </div>
-                </div>
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Product Description / وصف المنتج</label>
-                  <textarea value={storyDesc} onChange={(e) => setStoryDesc(e.target.value)} placeholder="Describe your product in detail..." style={{ ...inputStyle, height: '120px', resize: 'none' }} />
-                </div>
-                <button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>📖 GENERATE STORY</button>
-              </div>
-              <div style={sectionStyle}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                  <h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Story</h2>
-                  <button onClick={() => setShowArabic(!showArabic)} style={{ padding: '6px 15px', background: `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: gold, cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>{showArabic ? '🇺🇸 EN' : '🇸🇦 AR'}</button>
-                </div>
-                <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '380px', border: `1px solid ${gold}20`, marginBottom: '15px', overflowY: 'auto' }}>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '12px', lineHeight: '1.7', direction: showArabic ? 'rtl' : 'ltr' }}>{showArabic ? arabicPrompt : generatedPrompt || 'Select options and click Generate Story...'}</pre>
-                </div>
-                {generatedPrompt && <button onClick={copyPrompt} style={{ width: '100%', padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ Copied!' : '📋 Copy Story'}</button>}
-              </div>
-            </div>
-          )}
+        {activeTab === 'generate' && (<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}><div style={sectionStyle}><h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>✨ AI Image Generator</h2><InputModeSelector /><ImageUploadSection /><div style={{ marginBottom: '20px' }}><label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Enter Prompt</label><textarea value={imagePrompt} onChange={(e) => setImagePrompt(e.target.value)} placeholder="صفي الصورة التي تريدين توليدها..." style={{ ...inputStyle, height: '120px', resize: 'none' }} /></div>{error && <div style={{ background: 'rgba(220,38,38,0.2)', border: '1px solid #DC2626', borderRadius: '8px', padding: '12px', marginBottom: '15px', color: '#FCA5A5', fontSize: '13px' }}>⚠️ {error}</div>}<button onClick={generateImage} disabled={isGenerating || !imagePrompt} style={{ width: '100%', padding: '16px', background: isGenerating ? `${gold}80` : `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: isGenerating || !imagePrompt ? 'not-allowed' : 'pointer' }}>{isGenerating ? '⏳ جاري التوليد...' : '✨ GENERATE IMAGE'}</button>{isGenerating && <p style={{ textAlign: 'center', color: '#888', marginTop: '10px', fontSize: '12px' }}>انتظري 30-60 ثانية...</p>}</div><div style={sectionStyle}><h2 style={{ color: gold, marginBottom: '20px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🖼️ Generated Image</h2><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', minHeight: '350px', border: `2px dashed ${gold}40` }}>{isGenerating ? (<div style={{ textAlign: 'center' }}><div style={{ width: '50px', height: '50px', border: `3px solid ${gold}40`, borderTop: `3px solid ${gold}`, borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 15px' }} /><p style={{ color: gold, fontSize: '14px' }}>جاري توليد التصميم...</p><p style={{ color: '#888', fontSize: '12px' }}>انتظري 30-60 ثانية</p><style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style></div>) : generatedImage ? (<img src={generatedImage} alt="Generated" style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />) : (<div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}><div style={{ fontSize: '40px', marginBottom: '10px' }}>👗</div><p style={{ fontSize: '13px' }}>أدخلي برومبت واضغطي Generate</p></div>)}</div>{generatedImage && <button onClick={() => window.open(generatedImage, '_blank')} style={{ marginTop: '15px', width: '100%', padding: '14px', background: 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>📥 تحميل الصورة</button>}</div></div>)}
 
-          {activeTab === 'generate' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
-              <div style={sectionStyle}>
-                <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>✨ AI Image Generator</h2>
-                <InputModeSelector />
-                <ImageUploadSection />
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Enter Prompt</label>
-                  <textarea value={imagePrompt} onChange={(e) => setImagePrompt(e.target.value)} placeholder="Describe the fashion image you want to generate..." style={{ ...inputStyle, height: '120px', resize: 'none' }} />
-                </div>
-                {error && <div style={{ background: 'rgba(220,38,38,0.2)', border: '1px solid #DC2626', borderRadius: '8px', padding: '12px', marginBottom: '15px', color: '#FCA5A5', fontSize: '13px' }}>⚠️ {error}</div>}
-                <button onClick={generateImage} disabled={isGenerating || !imagePrompt} style={{ width: '100%', padding: '16px', background: isGenerating ? `${gold}80` : `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: isGenerating || !imagePrompt ? 'not-allowed' : 'pointer' }}>{isGenerating ? '⏳ Generating...' : '✨ GENERATE IMAGE'}</button>
-                {isGenerating && <p style={{ textAlign: 'center', color: '#888', marginTop: '10px', fontSize: '12px' }}>Please wait 30-60 seconds...</p>}
-              </div>
-              <div style={sectionStyle}>
-                <h2 style={{ color: gold, marginBottom: '20px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🖼️ Generated Image</h2>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.3)', borderRadius: '12px', minHeight: '350px', border: `2px dashed ${gold}40` }}>
-                  {isGenerating ? (
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ width: '50px', height: '50px', border: `3px solid ${gold}40`, borderTop: `3px solid ${gold}`, borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 15px' }} />
-                      <p style={{ color: gold, fontSize: '14px' }}>Generating your design...</p>
-                      <p style={{ color: '#888', fontSize: '12px' }}>Please wait 30-60 seconds</p>
-                      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-                    </div>
-                  ) : generatedImage ? (
-                    <img src={generatedImage} alt="Generated" style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
-                  ) : (
-                    <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
-                      <div style={{ fontSize: '40px', marginBottom: '10px' }}>👗</div>
-                      <p style={{ fontSize: '13px' }}>Enter a prompt and click Generate</p>
-                    </div>
-                  )}
-                </div>
-                {generatedImage && <button onClick={() => window.open(generatedImage, '_blank')} style={{ marginTop: '15px', width: '100%', padding: '14px', background: 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>📥 Download Image</button>}
-              </div>
-            </div>
-          )}
+        {activeTab === 'pricing' && (<div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '25px', maxWidth: '900px', margin: '0 auto' }}>{[{name:'Basic',nameAr:'المبتدئ',images:100,prompts:200,price:15},{name:'Pro',nameAr:'المتوسط',images:250,prompts:500,price:35,popular:true},{name:'Unlimited',nameAr:'الاحترافي',images:600,prompts:1200,price:75}].map(plan => (<div key={plan.name} style={{ background: plan.popular ? `linear-gradient(135deg, ${gold}20, ${gold}10)` : 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '35px 25px', border: plan.popular ? `2px solid ${gold}` : `1px solid ${gold}30`, textAlign: 'center', position: 'relative', transform: plan.popular ? 'scale(1.05)' : 'none' }}>{plan.popular && <div style={{ position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, padding: '4px 16px', borderRadius: '15px', fontSize: '10px', fontWeight: '700', color: '#0a0a0a' }}>POPULAR</div>}<h3 style={{ fontSize: '22px', color: gold, marginBottom: '5px', fontFamily: 'Playfair Display, serif' }}>{plan.name}</h3><p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: '15px', fontSize: '13px' }}>{plan.nameAr}</p><div style={{ fontSize: '42px', fontWeight: '700', marginBottom: '8px' }}>${plan.price}</div><p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: '25px', fontSize: '13px' }}>{plan.images} images • {plan.prompts} prompts</p><ul style={{ listStyle: 'none', padding: 0, margin: '0 0 25px 0', textAlign: 'left' }}>{['Design Prompts', 'Video Prompts', 'Marketing Content', 'Story Generator', 'AI Image Generation', 'Image Upload'].map((f, i) => <li key={i} style={{ padding: '6px 0', color: 'rgba(255,255,255,0.8)', fontSize: '13px' }}>✓ {f}</li>)}</ul><button style={{ width: '100%', padding: '14px', background: plan.popular ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'transparent', border: plan.popular ? 'none' : `2px solid ${gold}`, borderRadius: '8px', color: plan.popular ? '#0a0a0a' : gold, fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>GET STARTED</button></div>))}</div>)}
+      </main>
 
-          {activeTab === 'pricing' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '25px', maxWidth: '900px', margin: '0 auto' }}>
-              {[
-                { name: 'Basic', nameAr: 'المبتدئ', images: 100, prompts: 200, price: 15 },
-                { name: 'Pro', nameAr: 'المتوسط', images: 250, prompts: 500, price: 35, popular: true },
-                { name: 'Unlimited', nameAr: 'الاحترافي', images: 600, prompts: 1200, price: 75 },
-              ].map(plan => (
-                <div key={plan.name} style={{ background: plan.popular ? `linear-gradient(135deg, ${gold}20, ${gold}10)` : 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '35px 25px', border: plan.popular ? `2px solid ${gold}` : `1px solid ${gold}30`, textAlign: 'center', position: 'relative', transform: plan.popular ? 'scale(1.05)' : 'none' }}>
-                  {plan.popular && <div style={{ position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, padding: '4px 16px', borderRadius: '15px', fontSize: '10px', fontWeight: '700', color: '#0a0a0a' }}>POPULAR</div>}
-                  <h3 style={{ fontSize: '22px', color: gold, marginBottom: '5px', fontFamily: 'Playfair Display, serif' }}>{plan.name}</h3>
-                  <p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: '15px', fontSize: '13px' }}>{plan.nameAr}</p>
-                  <div style={{ fontSize: '42px', fontWeight: '700', marginBottom: '8px' }}>${plan.price}</div>
-                  <p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: '25px', fontSize: '13px' }}>{plan.images} images • {plan.prompts} prompts</p>
-                  <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 25px 0', textAlign: 'left' }}>
-                    {['Design Prompts', 'Video Prompts', 'Marketing Content', 'Story Generator', 'AI Image Generation', 'Image Upload'].map((f, i) => <li key={i} style={{ padding: '6px 0', color: 'rgba(255,255,255,0.8)', fontSize: '13px' }}>✓ {f}</li>)}
-                  </ul>
-                  <button style={{ width: '100%', padding: '14px', background: plan.popular ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'transparent', border: plan.popular ? 'none' : `2px solid ${gold}`, borderRadius: '8px', color: plan.popular ? '#0a0a0a' : gold, fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>GET STARTED</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </main>
-
-        <footer style={{ textAlign: 'center', padding: '25px', borderTop: `1px solid ${gold}20`, color: 'rgba(255,255,255,0.5)', fontSize: '12px' }}>
-          <p>© 2026 GH Fashion Creator. All rights reserved.</p>
-        </footer>
-      </div>
-    </>
+      <footer style={{ textAlign: 'center', padding: '25px', borderTop: `1px solid ${gold}20`, color: 'rgba(255,255,255,0.5)', fontSize: '12px' }}><p>© 2026 GH Fashion Creator. All rights reserved.</p></footer>
+    </div></>
   );
 }
