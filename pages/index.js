@@ -10,6 +10,9 @@ export default function Home() {
   const [generatedImage, setGeneratedImage] = useState(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
+  const [uploadedImage, setUploadedImage] = useState(null);
+  const [uploadedImageName, setUploadedImageName] = useState('');
+  const [inputMode, setInputMode] = useState('description');
 
   const [designStyle, setDesignStyle] = useState('elegant');
   const [designCategory, setDesignCategory] = useState('dress');
@@ -34,6 +37,10 @@ export default function Home() {
   const [includeHashtags, setIncludeHashtags] = useState(true);
   const [includeEmojis, setIncludeEmojis] = useState(true);
   const [marketingCTA, setMarketingCTA] = useState('shop-now');
+
+  const [storyTone, setStoryTone] = useState('luxury');
+  const [storyLength, setStoryLength] = useState('medium');
+  const [storyDesc, setStoryDesc] = useState('');
 
   const [imagePrompt, setImagePrompt] = useState('');
 
@@ -175,8 +182,31 @@ export default function Home() {
     { id: 'limited', en: 'Limited Stock', ar: 'كمية محدودة' },
   ];
 
+  const storyLengths = [
+    { id: 'short', ar: 'قصيرة' },
+    { id: 'medium', ar: 'متوسطة' },
+    { id: 'long', ar: 'طويلة' },
+  ];
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setUploadedImage(ev.target.result);
+        setUploadedImageName(file.name);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const removeUploadedImage = () => {
+    setUploadedImage(null);
+    setUploadedImageName('');
+  };
+
   const translateToArabic = (text) => {
-    const t = { 'elegant': 'أنيق', 'casual': 'كاجوال', 'haute couture': 'هوت كوتور', 'dress': 'فستان', 'suit': 'بدلة', 'jacket': 'جاكيت', 'black': 'أسود', 'white': 'أبيض', 'red': 'أحمر', 'gold': 'ذهبي', 'silk': 'حرير', 'velvet': 'مخمل', 'satin': 'ساتان', 'evening': 'سهرة', 'wedding': 'زفاف', 'runway': 'عرض أزياء', 'dramatic': 'درامي', 'professional': 'احترافي', 'luxury': 'فاخر', 'fashion': 'أزياء', 'high-end': 'راقي', 'spring': 'ربيع', 'summer': 'صيف', 'fall': 'خريف', 'winter': 'شتاء' };
+    const t = { 'elegant': 'أنيق', 'casual': 'كاجوال', 'haute couture': 'هوت كوتور', 'dress': 'فستان', 'black': 'أسود', 'white': 'أبيض', 'red': 'أحمر', 'gold': 'ذهبي', 'silk': 'حرير', 'velvet': 'مخمل', 'satin': 'ساتان', 'evening': 'سهرة', 'wedding': 'زفاف', 'runway': 'عرض أزياء', 'dramatic': 'درامي', 'professional': 'احترافي', 'luxury': 'فاخر', 'fashion': 'أزياء', 'high-end': 'راقي', 'spring': 'ربيع', 'summer': 'صيف', 'fall': 'خريف', 'winter': 'شتاء' };
     let r = text.toLowerCase();
     Object.keys(t).forEach(k => { r = r.replace(new RegExp(k, 'gi'), t[k]); });
     return r;
@@ -189,11 +219,14 @@ export default function Home() {
     const fabric = fabrics.find(f => f.id === designFabric)?.en;
     const season = seasons.find(s => s.id === designSeason)?.en;
     const occasion = occasions.find(o => o.id === designOccasion)?.en;
-    const prompt = `High-end fashion photography, ${style} ${color} ${fabric} ${category}, ${season} collection, perfect for ${occasion}. Professional runway model, Vogue magazine quality, studio lighting, 8K resolution, masterful tailoring, luxury brand aesthetic${designDetails ? `. ${designDetails}` : ''}.
-
---ar 3:4 --style raw --v 6.1
-
-Negative: low quality, amateur, wrinkled, blurry`;
+    
+    let prompt = '';
+    if (inputMode === 'image' && uploadedImage) {
+      prompt = `Based on the uploaded reference image, create a design prompt:\n\n`;
+    }
+    prompt += `High-end fashion photography, ${style} ${color} ${fabric} ${category}, ${season} collection, perfect for ${occasion}. Professional runway model, Vogue magazine quality, studio lighting, 8K resolution, masterful tailoring, luxury brand aesthetic${designDetails ? `. ${designDetails}` : ''}.`;
+    prompt += `\n\n--ar 3:4 --style raw --v 6.1\n\nNegative: low quality, amateur, wrinkled, blurry`;
+    
     setGeneratedPrompt(prompt);
     setArabicPrompt(translateToArabic(prompt));
   };
@@ -203,78 +236,80 @@ Negative: low quality, amateur, wrinkled, blurry`;
     const mood = videoMoods.find(m => m.id === videoMood)?.en;
     const camera = cameraMoves.find(c => c.id === videoCamera)?.en;
     const lighting = lightingTypes.find(l => l.id === videoLighting)?.en;
-    const prompt = `Cinematic fashion film, ${type} style, ${mood} atmosphere.
-
-DURATION: ${videoDuration} seconds
-CAMERA: ${camera} movement
-LIGHTING: ${lighting}
-
-Professional model showcasing haute couture, 4K cinematic, elegant fabric movement, fashion editorial quality.${videoDetails ? ` ${videoDetails}` : ''}
-
-TECHNICAL: 24fps, 9:16 or 16:9`;
+    
+    let prompt = '';
+    if (inputMode === 'image' && uploadedImage) {
+      prompt = `Based on the uploaded reference image, create a video prompt:\n\n`;
+    }
+    prompt += `Cinematic fashion film, ${type} style, ${mood} atmosphere.\n\nDURATION: ${videoDuration} seconds\nCAMERA: ${camera} movement\nLIGHTING: ${lighting}\n\nProfessional model showcasing haute couture, 4K cinematic, elegant fabric movement, fashion editorial quality.${videoDetails ? ` ${videoDetails}` : ''}\n\nTECHNICAL: 24fps, 9:16 or 16:9`;
+    
     setGeneratedPrompt(prompt);
     setArabicPrompt(translateToArabic(prompt));
   };
 
   const generateMarketingPrompt = () => {
     const platform = platforms.find(p => p.id === marketingPlatform)?.en;
-    const tone = tones.find(t => t.id === marketingTone)?.ar;
     const cta = ctas.find(c => c.id === marketingCTA)?.en;
     const name = productName || '[Product Name]';
     const desc = productDesc || 'Luxury fashion piece';
+    
     let content = '';
+    if (inputMode === 'image' && uploadedImage) {
+      content = `[Based on uploaded product image]\n\n`;
+    }
 
     if (marketingPlatform.includes('reel') || marketingPlatform === 'tiktok') {
-      content = `📱 ${platform} SCRIPT - ${name}
-
-⏱️ DURATION: 15-30 seconds
-
-🎬 HOOK (0-3s): "Discover ultimate elegance" ${includeEmojis ? '✨' : ''}
-🎬 SHOWCASE (3-12s): ${desc} - Show fabric details, model movement
-🎬 CTA (12-15s): "${cta}" ${includeEmojis ? '🛍️' : ''}
-
-🎵 MUSIC: Trending audio
-
-${includeHashtags ? '#fashion #luxury #style #ootd #designer #trending #viral #fyp' : ''}`;
+      content += `📱 ${platform} SCRIPT - ${name}\n\n⏱️ DURATION: 15-30 seconds\n\n🎬 HOOK (0-3s): "Discover ultimate elegance" ${includeEmojis ? '✨' : ''}\n🎬 SHOWCASE (3-12s): ${desc} - Show fabric details, model movement\n🎬 CTA (12-15s): "${cta}" ${includeEmojis ? '🛍️' : ''}\n\n🎵 MUSIC: Trending audio\n\n${includeHashtags ? '#fashion #luxury #style #ootd #designer #trending #viral #fyp' : ''}`;
     } else if (marketingPlatform === 'instagram-post') {
-      content = `📸 INSTAGRAM POST - ${name}
-
-${includeEmojis ? '✨' : ''} ${name}
-
-${desc}
-
-${includeEmojis ? '💫' : ''} FEATURES:
-- Premium quality materials
-- Elegant design
-- Perfect for any occasion
-
-${includeEmojis ? '🛍️' : ''} ${cta}
-
-${includeHashtags ? '#fashion #style #luxury #designer #ootd #newcollection' : ''}`;
+      content += `📸 INSTAGRAM POST - ${name}\n\n${includeEmojis ? '✨' : ''} ${name}\n\n${desc}\n\n${includeEmojis ? '💫' : ''} FEATURES:\n• Premium quality materials\n• Elegant design\n• Perfect for any occasion\n\n${includeEmojis ? '🛍️' : ''} ${cta}\n\n${includeHashtags ? '#fashion #style #luxury #designer #ootd #newcollection' : ''}`;
     } else if (marketingPlatform === 'instagram-story') {
-      content = `📱 STORY SEQUENCE - ${name}
-
-STORY 1: Teaser - blurred image + "Something special..." ${includeEmojis ? '👀' : ''}
-STORY 2: Reveal - full product + "${name}" ${includeEmojis ? '✨' : ''}
-STORY 3: Details - close-ups + Poll sticker
-STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
+      content += `📱 STORY SEQUENCE - ${name}\n\nSTORY 1: Teaser - blurred image + "Something special..." ${includeEmojis ? '👀' : ''}\nSTORY 2: Reveal - full product + "${name}" ${includeEmojis ? '✨' : ''}\nSTORY 3: Details - close-ups + Poll sticker\nSTORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
     } else {
-      content = `📝 ${platform} - ${name}\n\n${includeEmojis ? '✨' : ''} ${name}\n${desc}\n\n${includeEmojis ? '🛍️' : ''} ${cta}\n\n${includeHashtags ? '#fashion #style #luxury' : ''}`;
+      content += `📝 ${platform} - ${name}\n\n${includeEmojis ? '✨' : ''} ${name}\n${desc}\n\n${includeEmojis ? '🛍️' : ''} ${cta}\n\n${includeHashtags ? '#fashion #style #luxury' : ''}`;
     }
+    
     setGeneratedPrompt(content);
     setArabicPrompt(content.replace('Discover ultimate elegance', 'اكتشفي الأناقة المطلقة').replace('Shop Now', 'تسوق الآن').replace('FEATURES:', 'المميزات:').replace('Premium quality materials', 'خامات فاخرة').replace('Elegant design', 'تصميم أنيق').replace('Perfect for any occasion', 'مناسب لجميع المناسبات'));
+  };
+
+  const generateStoryPrompt = () => {
+    const tone = tones.find(t => t.id === storyTone)?.en;
+    const length = storyLength === 'short' ? '50-100 words' : storyLength === 'medium' ? '150-200 words' : '300-400 words';
+    
+    let content = '';
+    if (inputMode === 'image' && uploadedImage) {
+      content = `[Based on uploaded product image]\n\n`;
+    }
+    
+    content += `📖 MARKETING STORY\n\nTone: ${tone}\nLength: ${length}\n\n`;
+    content += `Product Description: ${storyDesc || '[Enter product description]'}\n\n`;
+    content += `---\n\n`;
+    
+    if (storyTone === 'luxury') {
+      content += `In a world where elegance meets artistry, we present a masterpiece that transcends ordinary fashion. Each stitch tells a story of dedication, each fold whispers tales of timeless sophistication.\n\nThis isn't just a garment—it's a statement. A declaration that you deserve nothing but the extraordinary. Crafted for those who understand that true luxury lies in the details.\n\nEmbrace the exceptional. Wear your confidence.`;
+    } else if (storyTone === 'friendly') {
+      content += `Hey there, fashion lover! 👋\n\nWe've got something special for you—a piece that's going to become your new favorite. You know that feeling when you put something on and just feel amazing? That's exactly what we designed this for.\n\nComfortable, stylish, and totally YOU. Because fashion should be fun, not complicated!\n\nReady to fall in love with your wardrobe again?`;
+    } else if (storyTone === 'inspiring') {
+      content += `She walked into the room, and everything changed.\n\nNot because of what she wore, but how she wore it—with unshakeable confidence, with purpose, with grace. Her outfit wasn't just fabric; it was armor for her dreams.\n\nThis is what fashion can do. It can transform not just how you look, but how you feel. How you move through the world.\n\nYour moment is waiting. Dress for it.`;
+    } else {
+      content += `Introducing our latest collection—where modern design meets timeless elegance.\n\nKey Features:\n• Premium materials sourced globally\n• Expert craftsmanship\n• Versatile styling options\n• Sustainable production\n\nPerfect for the discerning individual who values quality and style in equal measure.`;
+    }
+    
+    setGeneratedPrompt(content);
+    setArabicPrompt(content);
   };
 
   const handleGenerate = () => {
     if (activeTab === 'design') generateDesignPrompt();
     else if (activeTab === 'video') generateVideoPrompt();
     else if (activeTab === 'marketing') generateMarketingPrompt();
+    else if (activeTab === 'story') generateStoryPrompt();
   };
 
   const generateImage = async () => {
     const promptToUse = activeTab === 'generate' ? imagePrompt : generatedPrompt;
     if (!promptToUse) { setError('Please enter or generate a prompt first'); return; }
-    setIsGenerating(true); setError(null);
+    setIsGenerating(true); setError(null); setGeneratedImage(null);
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -283,7 +318,8 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
       });
       const data = await response.json();
       if (data.error) throw new Error(data.error);
-      setGeneratedImage(data.image);
+      if (data.image) setGeneratedImage(data.image);
+      else throw new Error('No image returned');
     } catch (err) { setError(err.message || 'Failed to generate image'); }
     finally { setIsGenerating(false); }
   };
@@ -297,6 +333,35 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
   const btnStyle = (active) => ({ padding: '12px 16px', background: active ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: active ? 'none' : `1px solid ${gold}40`, borderRadius: '8px', color: active ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '12px', fontWeight: '600' });
   const inputStyle = { width: '100%', padding: '12px', background: 'rgba(0,0,0,0.3)', border: `1px solid ${gold}40`, borderRadius: '8px', color: '#fff', fontSize: '14px' };
   const sectionStyle = { background: 'rgba(255,255,255,0.05)', borderRadius: '16px', padding: '30px', border: `1px solid ${gold}30` };
+
+  const InputModeSelector = () => (
+    <div style={{ marginBottom: '20px' }}>
+      <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Input Mode / طريقة الإدخال</label>
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button onClick={() => setInputMode('description')} style={{ flex: 1, padding: '12px', background: inputMode === 'description' ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: inputMode === 'description' ? 'none' : `1px solid ${gold}40`, borderRadius: '8px', color: inputMode === 'description' ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>📝 من وصف</button>
+        <button onClick={() => setInputMode('image')} style={{ flex: 1, padding: '12px', background: inputMode === 'image' ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: inputMode === 'image' ? 'none' : `1px solid ${gold}40`, borderRadius: '8px', color: inputMode === 'image' ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>🖼️ من صورة</button>
+      </div>
+    </div>
+  );
+
+  const ImageUploadSection = () => (
+    <div style={{ marginBottom: '20px', display: inputMode === 'image' ? 'block' : 'none' }}>
+      <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Upload Image / رفع صورة</label>
+      {!uploadedImage ? (
+        <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '30px', border: `2px dashed ${gold}50`, borderRadius: '10px', cursor: 'pointer', background: 'rgba(0,0,0,0.2)' }}>
+          <span style={{ fontSize: '30px', marginBottom: '10px' }}>📁</span>
+          <span style={{ color: '#aaa', fontSize: '13px' }}>Click to upload image</span>
+          <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
+        </label>
+      ) : (
+        <div style={{ position: 'relative', borderRadius: '10px', overflow: 'hidden' }}>
+          <img src={uploadedImage} alt="Uploaded" style={{ width: '100%', height: '150px', objectFit: 'cover', borderRadius: '10px' }} />
+          <button onClick={removeUploadedImage} style={{ position: 'absolute', top: '8px', right: '8px', background: '#DC2626', border: 'none', borderRadius: '50%', width: '28px', height: '28px', color: '#fff', cursor: 'pointer', fontSize: '14px' }}>✕</button>
+          <p style={{ marginTop: '8px', fontSize: '12px', color: '#aaa' }}>{uploadedImageName}</p>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -315,9 +380,16 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
           </div>
         </header>
 
-        <nav style={{ display: 'flex', justifyContent: 'center', gap: '15px', padding: '25px', flexWrap: 'wrap' }}>
-          {[{ id: 'design', icon: '🎨', label: 'Design' }, { id: 'video', icon: '🎬', label: 'Video' }, { id: 'marketing', icon: '📱', label: 'Marketing' }, { id: 'generate', icon: '✨', label: 'Generate' }, { id: 'pricing', icon: '💎', label: 'Pricing' }].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ padding: '12px 25px', background: activeTab === tab.id ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: activeTab === tab.id ? 'none' : `1px solid ${gold}50`, borderRadius: '25px', color: activeTab === tab.id ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <nav style={{ display: 'flex', justifyContent: 'center', gap: '12px', padding: '25px', flexWrap: 'wrap' }}>
+          {[
+            { id: 'design', icon: '🎨', label: 'Design' },
+            { id: 'video', icon: '🎬', label: 'Video' },
+            { id: 'marketing', icon: '📱', label: 'Marketing' },
+            { id: 'story', icon: '📖', label: 'Story' },
+            { id: 'generate', icon: '✨', label: 'Generate' },
+            { id: 'pricing', icon: '💎', label: 'Pricing' }
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{ padding: '12px 22px', background: activeTab === tab.id ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'rgba(255,255,255,0.05)', border: activeTab === tab.id ? 'none' : `1px solid ${gold}50`, borderRadius: '25px', color: activeTab === tab.id ? '#0a0a0a' : '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span>{tab.icon}</span><span>{tab.label}</span>
             </button>
           ))}
@@ -329,6 +401,8 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
               <div style={sectionStyle}>
                 <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🎨 Design Prompt Generator</h2>
+                <InputModeSelector />
+                <ImageUploadSection />
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Style</label>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
@@ -378,15 +452,18 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
                   <h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Prompt</h2>
                   <button onClick={() => setShowArabic(!showArabic)} style={{ padding: '6px 15px', background: `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: gold, cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>{showArabic ? '🇺🇸 EN' : '🇸🇦 AR'}</button>
                 </div>
-                <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '280px', border: `1px solid ${gold}20`, marginBottom: '15px' }}>
+                <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '250px', border: `1px solid ${gold}20`, marginBottom: '15px' }}>
                   <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '12px', lineHeight: '1.7', direction: showArabic ? 'rtl' : 'ltr' }}>{showArabic ? arabicPrompt : generatedPrompt || 'Select options and click Generate...'}</pre>
                 </div>
                 {generatedPrompt && (
                   <div style={{ display: 'flex', gap: '10px' }}>
                     <button onClick={copyPrompt} style={{ flex: 1, padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ Copied!' : '📋 Copy'}</button>
-                    <button onClick={generateImage} disabled={isGenerating} style={{ flex: 1, padding: '14px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '8px', color: '#0a0a0a', cursor: 'pointer', fontSize: '13px', fontWeight: '600', opacity: isGenerating ? 0.7 : 1 }}>{isGenerating ? '⏳...' : '🖼️ Generate Image'}</button>
+                    <button onClick={generateImage} disabled={isGenerating} style={{ flex: 1, padding: '14px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '8px', color: '#0a0a0a', cursor: 'pointer', fontSize: '13px', fontWeight: '600', opacity: isGenerating ? 0.7 : 1 }}>{isGenerating ? '⏳ Generating...' : '🖼️ Generate Image'}</button>
                   </div>
                 )}
+                {isGenerating && <p style={{ textAlign: 'center', color: '#888', marginTop: '10px', fontSize: '12px' }}>Please wait 30-60 seconds...</p>}
+                {generatedImage && <div style={{ marginTop: '15px' }}><img src={generatedImage} alt="Generated" style={{ width: '100%', borderRadius: '10px' }} /></div>}
+                {error && <p style={{ color: '#f87171', marginTop: '10px', fontSize: '13px' }}>⚠️ {error}</p>}
               </div>
             </div>
           )}
@@ -395,6 +472,8 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
               <div style={sectionStyle}>
                 <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🎬 Video Prompt Generator</h2>
+                <InputModeSelector />
+                <ImageUploadSection />
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Video Type</label>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
@@ -446,6 +525,8 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
               <div style={sectionStyle}>
                 <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>📱 Marketing Content</h2>
+                <InputModeSelector />
+                <ImageUploadSection />
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Platform</label>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
@@ -501,16 +582,56 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
             </div>
           )}
 
+          {activeTab === 'story' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
+              <div style={sectionStyle}>
+                <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>📖 Marketing Story Generator</h2>
+                <InputModeSelector />
+                <ImageUploadSection />
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Story Tone / نبرة القصة</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                    {tones.map(t => <button key={t.id} onClick={() => setStoryTone(t.id)} style={btnStyle(storyTone === t.id)}>{t.ar}</button>)}
+                  </div>
+                </div>
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Story Length / طول القصة</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                    {storyLengths.map(l => <button key={l.id} onClick={() => setStoryLength(l.id)} style={btnStyle(storyLength === l.id)}>{l.ar}</button>)}
+                  </div>
+                </div>
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Product Description / وصف المنتج</label>
+                  <textarea value={storyDesc} onChange={(e) => setStoryDesc(e.target.value)} placeholder="Describe your product in detail..." style={{ ...inputStyle, height: '120px', resize: 'none' }} />
+                </div>
+                <button onClick={handleGenerate} style={{ width: '100%', padding: '16px', background: `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: 'pointer' }}>📖 GENERATE STORY</button>
+              </div>
+              <div style={sectionStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                  <h2 style={{ color: gold, fontFamily: 'Playfair Display, serif', margin: 0, fontSize: '20px' }}>📝 Generated Story</h2>
+                  <button onClick={() => setShowArabic(!showArabic)} style={{ padding: '6px 15px', background: `${gold}30`, border: `1px solid ${gold}`, borderRadius: '15px', color: gold, cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>{showArabic ? '🇺🇸 EN' : '🇸🇦 AR'}</button>
+                </div>
+                <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '10px', padding: '20px', minHeight: '380px', border: `1px solid ${gold}20`, marginBottom: '15px', overflowY: 'auto' }}>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'rgba(255,255,255,0.9)', fontSize: '12px', lineHeight: '1.7', direction: showArabic ? 'rtl' : 'ltr' }}>{showArabic ? arabicPrompt : generatedPrompt || 'Select options and click Generate Story...'}</pre>
+                </div>
+                {generatedPrompt && <button onClick={copyPrompt} style={{ width: '100%', padding: '14px', background: copied ? '#059669' : 'transparent', border: `2px solid ${gold}`, borderRadius: '8px', color: copied ? '#fff' : gold, cursor: 'pointer', fontSize: '13px', fontWeight: '600' }}>{copied ? '✓ Copied!' : '📋 Copy Story'}</button>}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'generate' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
               <div style={sectionStyle}>
                 <h2 style={{ color: gold, marginBottom: '25px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>✨ AI Image Generator</h2>
+                <InputModeSelector />
+                <ImageUploadSection />
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', marginBottom: '8px', color: '#F4E4BA', fontWeight: '600', fontSize: '13px' }}>Enter Prompt</label>
-                  <textarea value={imagePrompt} onChange={(e) => setImagePrompt(e.target.value)} placeholder="Describe the fashion image..." style={{ ...inputStyle, height: '150px', resize: 'none' }} />
+                  <textarea value={imagePrompt} onChange={(e) => setImagePrompt(e.target.value)} placeholder="Describe the fashion image you want to generate..." style={{ ...inputStyle, height: '120px', resize: 'none' }} />
                 </div>
                 {error && <div style={{ background: 'rgba(220,38,38,0.2)', border: '1px solid #DC2626', borderRadius: '8px', padding: '12px', marginBottom: '15px', color: '#FCA5A5', fontSize: '13px' }}>⚠️ {error}</div>}
                 <button onClick={generateImage} disabled={isGenerating || !imagePrompt} style={{ width: '100%', padding: '16px', background: isGenerating ? `${gold}80` : `linear-gradient(135deg, ${gold}, #F4E4BA)`, border: 'none', borderRadius: '10px', color: '#0a0a0a', fontSize: '15px', fontWeight: '700', cursor: isGenerating || !imagePrompt ? 'not-allowed' : 'pointer' }}>{isGenerating ? '⏳ Generating...' : '✨ GENERATE IMAGE'}</button>
+                {isGenerating && <p style={{ textAlign: 'center', color: '#888', marginTop: '10px', fontSize: '12px' }}>Please wait 30-60 seconds...</p>}
               </div>
               <div style={sectionStyle}>
                 <h2 style={{ color: gold, marginBottom: '20px', fontFamily: 'Playfair Display, serif', fontSize: '20px' }}>🖼️ Generated Image</h2>
@@ -518,11 +639,12 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
                   {isGenerating ? (
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ width: '50px', height: '50px', border: `3px solid ${gold}40`, borderTop: `3px solid ${gold}`, borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 15px' }} />
-                      <p style={{ color: gold, fontSize: '14px' }}>Generating...</p>
+                      <p style={{ color: gold, fontSize: '14px' }}>Generating your design...</p>
+                      <p style={{ color: '#888', fontSize: '12px' }}>Please wait 30-60 seconds</p>
                       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
                     </div>
                   ) : generatedImage ? (
-                    <img src={generatedImage} alt="Generated" style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: '8px' }} />
+                    <img src={generatedImage} alt="Generated" style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
                   ) : (
                     <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
                       <div style={{ fontSize: '40px', marginBottom: '10px' }}>👗</div>
@@ -549,7 +671,7 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
                   <div style={{ fontSize: '42px', fontWeight: '700', marginBottom: '8px' }}>${plan.price}</div>
                   <p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: '25px', fontSize: '13px' }}>{plan.images} images • {plan.prompts} prompts</p>
                   <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 25px 0', textAlign: 'left' }}>
-                    {['Design Prompts', 'Video Prompts', 'Marketing Content', 'AI Image Generation'].map((f, i) => <li key={i} style={{ padding: '6px 0', color: 'rgba(255,255,255,0.8)', fontSize: '13px' }}>✓ {f}</li>)}
+                    {['Design Prompts', 'Video Prompts', 'Marketing Content', 'Story Generator', 'AI Image Generation', 'Image Upload'].map((f, i) => <li key={i} style={{ padding: '6px 0', color: 'rgba(255,255,255,0.8)', fontSize: '13px' }}>✓ {f}</li>)}
                   </ul>
                   <button style={{ width: '100%', padding: '14px', background: plan.popular ? `linear-gradient(135deg, ${gold}, #F4E4BA)` : 'transparent', border: plan.popular ? 'none' : `2px solid ${gold}`, borderRadius: '8px', color: plan.popular ? '#0a0a0a' : gold, fontSize: '13px', fontWeight: '700', cursor: 'pointer' }}>GET STARTED</button>
                 </div>
@@ -559,7 +681,7 @@ STORY 4: CTA - "${cta}" + link sticker ${includeEmojis ? '🛍️' : ''}`;
         </main>
 
         <footer style={{ textAlign: 'center', padding: '25px', borderTop: `1px solid ${gold}20`, color: 'rgba(255,255,255,0.5)', fontSize: '12px' }}>
-          <p>© 2024 GH Fashion Creator. All rights reserved.</p>
+          <p>© 2026 GH Fashion Creator. All rights reserved.</p>
         </footer>
       </div>
     </>
