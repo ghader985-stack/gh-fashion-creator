@@ -18,8 +18,9 @@ export default async function handler(req, res) {
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
-        'Authorization': `Token ${REPLICATE_API_TOKEN}`,
+        'Authorization': `Bearer ${REPLICATE_API_TOKEN}`,
         'Content-Type': 'application/json',
+        'Prefer': 'wait'
       },
       body: JSON.stringify({
         version: "39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
@@ -29,40 +30,42 @@ export default async function handler(req, res) {
           height: 1024,
           num_outputs: 1,
           scheduler: "K_EULER",
-          num_inference_steps: 50,
-          guidance_scale: 7.5,
-        },
-      }),
+          num_inference_steps: 30,
+          guidance_scale: 7.5
+        }
+      })
     });
 
-    let prediction = await response.json();
+    const prediction = await response.json();
 
     if (prediction.error) {
       return res.status(500).json({ error: prediction.error });
     }
 
-    // Poll for result
-    while (prediction.status !== 'succeeded' && prediction.status !== 'failed') {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const pollResponse = await fetch(
-        `https://api.replicate.com/v1/predictions/${prediction.id}`,
-        {
-          headers: {
-            'Authorization': `Token ${REPLICATE_API_TOKEN}`,
-          },
-        }
-      );
-      prediction = await pollResponse.json();
+    if (prediction.output && prediction.output[0]) {
+      return res.status(200).json({ success: true, image: prediction.output[0] });
     }
 
-    if (prediction.status === 'failed') {
-      return res.status(500).json({ error: 'Image generation failed' });
+    if (prediction.urls && prediction.urls.get) {
+      let result = prediction;
+      let attempts = 0;
+      while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < 60) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const pollResponse = await fetch(prediction.urls.get, {
+          headers: { 'Authorization': `Bearer ${REPLICATE_API_TOKEN}` }
+        });
+        result = await pollResponse.json();
+        attempts++;
+      }
+
+      if (result.status === 'succeeded' && result.output && result.output[0]) {
+        return res.status(200).json({ success: true, image: result.output[0] });
+      } else {
+        return res.status(500).json({ error: 'Generation failed or timed out' });
+      }
     }
 
-    return res.status(200).json({ 
-      success: true, 
-      image: prediction.output[0] 
-    });
+    return res.status(500).json({ error: 'Unexpected response from API' });
 
   } catch (error) {
     console.error('Error:', error);
