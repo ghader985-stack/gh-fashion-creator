@@ -15,61 +15,54 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch('https://api.replicate.com/v1/models/stability-ai/sdxl/predictions', {
+    // Create prediction
+    const createResponse = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${REPLICATE_API_TOKEN}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'wait'
+        'Authorization': `Token ${REPLICATE_API_TOKEN}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
+        version: "ac732df83cea7fff18b8472768c88ad041fa750ff7682a21affe81863cbe77e4",
         input: {
-          prompt: prompt,
+          prompt: "fashion photography, " + prompt + ", professional model, studio lighting, high quality, 8k",
           width: 768,
           height: 1024,
           num_outputs: 1,
-          scheduler: "K_EULER",
-          num_inference_steps: 25,
           guidance_scale: 7.5,
-          negative_prompt: "low quality, blurry, distorted, ugly, bad anatomy"
+          num_inference_steps: 25
         }
       })
     });
 
-    const data = await response.json();
+    const prediction = await createResponse.json();
 
-    if (data.error) {
-      return res.status(500).json({ error: data.error });
+    if (prediction.error) {
+      return res.status(500).json({ error: prediction.error });
     }
 
-    if (data.output && data.output[0]) {
-      return res.status(200).json({ success: true, image: data.output[0] });
-    }
-
-    if (data.urls && data.urls.get) {
-      let result = data;
-      let attempts = 0;
+    // Poll for result
+    let result = prediction;
+    let attempts = 0;
+    
+    while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < 60) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
       
-      while (result.status !== 'succeeded' && result.status !== 'failed' && attempts < 30) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const pollResponse = await fetch(data.urls.get, {
-          headers: { 'Authorization': `Bearer ${REPLICATE_API_TOKEN}` }
-        });
-        result = await pollResponse.json();
-        attempts++;
-      }
-
-      if (result.status === 'succeeded' && result.output && result.output[0]) {
-        return res.status(200).json({ success: true, image: result.output[0] });
-      }
-      
-      return res.status(500).json({ error: 'Generation timed out' });
+      const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
+        headers: { 'Authorization': `Token ${REPLICATE_API_TOKEN}` }
+      });
+      result = await pollResponse.json();
+      attempts++;
     }
 
-    return res.status(500).json({ error: 'No image generated' });
+    if (result.status === 'succeeded' && result.output) {
+      const imageUrl = Array.isArray(result.output) ? result.output[0] : result.output;
+      return res.status(200).json({ success: true, image: imageUrl });
+    }
+    
+    return res.status(500).json({ error: 'Generation failed: ' + (result.error || result.status) });
 
   } catch (error) {
-    return res.status(500).json({ error: error.message || 'Server error' });
+    return res.status(500).json({ error: error.message });
   }
 }
