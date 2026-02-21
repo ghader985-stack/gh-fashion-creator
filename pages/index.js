@@ -115,69 +115,309 @@ ${vNotes ? `ملاحظات: ${vNotes}` : ''}
     const e = emojis;
     const h = hashtags;
 
-    const en = `${fromImg ? '📸 PRODUCT IMAGE\n\n' : ''}📱 REEL SCRIPT - ${name}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const en = `${fromImg ? '📸 PRODUCT IMAGE ATTACHED - Use as visual reference\n\n' : ''}══════════════════════════════════════════
+📱 PROFESSIONAL REEL SCRIPT
+══════════════════════════════════════════
 
-🎬 SCENE 1 (0-3s) HOOK:
-Shot: Extreme close-up detail
-Text: "Wait for it..."
-Audio: Suspense sound
+🎯 SCENE 1: THE HOOK (0:00-0:03)
+┌────────────────────────────────────────
+│ 📍 SHOT: Extreme macro close-up
+│    Fill frame with most striking detail
+│    (embroidery, fabric texture, button)
+│
+│ 🎥 CAMERA: Static or ultra-slow zoom out
+│    Shallow depth of field f/1.8
+│
+│ 💡 LIGHTING: Single dramatic side light
+│    Creates texture and mystery
+│
+│ 📝 TEXT OPTIONS:
+│    • "Wait for it..."
+│    • "POV: You found THE one"
+│    • "This changes everything"
+│
+│ 🎵 AUDIO: Suspenseful bass hit
+│
+│ 💭 GOAL: Stop the scroll, create curiosity
+└────────────────────────────────────────
 
-🎬 SCENE 2 (3-7s) REVEAL:
-Shot: Full product, slow-mo
-Text: "${name}"
-Audio: Beat drop
+✨ SCENE 2: THE REVEAL (0:03-0:08)
+┌────────────────────────────────────────
+│ 📍 SHOT: Full product hero reveal
+│    Model turns gracefully showing piece
+│    Medium-wide framing
+│
+│ 🎥 CAMERA: Slow motion 60fps→24fps
+│    Smooth tracking or gentle push-in
+│
+│ 💡 LIGHTING: Full professional setup
+│    Rim light separating from background
+│
+│ 📝 TEXT: "${name}"
+│    Elegant serif font, appears on beat
+│
+│ 🎵 AUDIO: Beat drop synced with reveal
+│
+│ 💭 GOAL: "WOW" moment, emotional peak
+└────────────────────────────────────────
 
-🎬 SCENE 3 (7-15s) DETAILS:
-4 quick cuts - fabric, stitching, movement, unique element
-Text: "Handcrafted" / "Premium"
+🔍 SCENE 3: THE DETAILS (0:08-0:16)
+┌────────────────────────────────────────
+│ 📍 4 QUICK SHOTS (2 seconds each):
+│
+│ SHOT A - FABRIC TEXTURE:
+│    • Extreme close-up of material
+│    • Hand gently touching fabric
+│    • Text: "Handcrafted Excellence"
+│
+│ SHOT B - CONSTRUCTION:
+│    • Stitching, seams, buttons detail
+│    • Shows quality craftsmanship
+│    • Text: "Premium Quality"
+│
+│ SHOT C - MOVEMENT:
+│    • Fabric flowing, catching light
+│    • Model walking or spinning
+│    • Text: "Designed to Move"
+│
+│ SHOT D - UNIQUE ELEMENT:
+│    • The signature detail
+│    • What makes it special
+│    • Text: "One of a Kind"
+│
+│ 🎥 CAMERA: Quick cuts on beat
+│ 🎵 AUDIO: Rhythmic beats matching cuts
+└────────────────────────────────────────
 
-🎬 SCENE 4 (15-22s) LIFESTYLE:
-Model in luxury setting
-Text: "For moments that matter"
+🌟 SCENE 4: LIFESTYLE (0:16-0:22)
+┌────────────────────────────────────────
+│ 📍 SHOT: Model in aspirational setting
+│    • Luxury hotel lobby
+│    • Art gallery / Rooftop
+│    • High-end restaurant entrance
+│
+│ 🎥 CAMERA: Tracking shot
+│    Model walks confidently toward camera
+│
+│ 📝 TEXT OPTIONS:
+│    • "For moments that matter"
+│    • "Dress the life you deserve"
+│    • "Main character energy"
+│
+│ 🎵 AUDIO: Music emotional crescendo
+│
+│ 💭 GOAL: Viewer visualizes themselves
+└────────────────────────────────────────
 
-🎬 SCENE 5 (22-25s) CTA:
-Product beauty shot
-Text: "Shop Now - Link in bio"
+🛒 SCENE 5: CALL TO ACTION (0:22-0:25)
+┌────────────────────────────────────────
+│ 📍 SHOT: Product beauty shot + branding
+│    Clean background, logo visible
+│
+│ 📝 TEXT (LARGE & CLEAR):
+│    • "Shop Now"
+│    • "Link in Bio 👆"
+│    • "Limited Pieces Available"
+│
+│ 🎵 AUDIO: Music resolve + subtle whoosh
+│
+│ 💭 GOAL: Clear instruction, urgency
+└────────────────────────────────────────
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📝 CAPTION:
-${e?'✨ ':''}${name}
+══════════════════════════════════════════
+📝 CAPTION (COPY & PASTE READY)
+══════════════════════════════════════════
+
+${e?'✨':''}${name}
+
 ${desc}
-${e?'🛍️ ':''}Shop now - Link in bio
-${h?'\n#fashion #luxury #style #ootd #trending #viral #fyp':''}`;
 
-    const ar = `${fromImg ? '📸 صورة المنتج\n\n' : ''}📱 سكريبت ريل - ${name}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${e?'🔥':''} Why you NEED this:
+${e?'→':'•'} Premium quality that speaks for itself
+${e?'→':'•'} Designed for women who know their worth
+${e?'→':'•'} Limited pieces - when it's gone, it's gone
 
-🎬 مشهد 1 (0-3ث) الجذب:
-اللقطة: كلوز أب على التفاصيل
-النص: "انتظري..."
-الصوت: مؤثر تشويقي
+${e?'💫':''} The Details:
+${e?'→':'•'} Handcrafted with precision
+${e?'→':'•'} Luxurious fabric that moves beautifully
+${e?'→':'•'} Timeless design you'll treasure
 
-🎬 مشهد 2 (3-7ث) الكشف:
-اللقطة: المنتج كامل، سلو موشن
-النص: "${name}"
-الصوت: دروب البيت
+${e?'🛍️':''} Shop Now
+${e?'👆':''} Link in bio
 
-🎬 مشهد 3 (7-15ث) التفاصيل:
-4 لقطات سريعة - القماش، الخياطة، الحركة، التفصيلة الفريدة
-النص: "صناعة يدوية" / "جودة فاخرة"
+${h?`
+.
+.
+.
+#fashion #luxury #style #ootd #fashionreels #newcollection #designer #outfitinspo #fashionista #luxuryfashion #instafashion #reelsinstagram #trending #viral #fyp #explorepage`:''}
 
-🎬 مشهد 4 (15-22ث) لايف ستايل:
-العارضة في مكان فاخر
-النص: "للحظاتك المميزة"
+══════════════════════════════════════════
+🎵 MUSIC RECOMMENDATIONS
+══════════════════════════════════════════
+• Check "Trending Audio" in Reels tab weekly
+• Instrumental luxury/fashion beats
+• Songs with clear "drop" for reveal moment
+• Avoid copyrighted songs for business
 
-🎬 مشهد 5 (22-25ث) CTA:
-لقطة جمالية للمنتج
-النص: "تسوقي الآن - الرابط بالبايو"
+══════════════════════════════════════════
+📊 POSTING STRATEGY
+══════════════════════════════════════════
+• Best times: 7-9 AM, 12-1 PM, 7-9 PM
+• Respond to ALL comments in first hour
+• Share to Stories immediately
+• Use 3-5 hashtags in comments`;
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📝 الكابشن:
-${e?'✨ ':''}${name}
+    const ar = `${fromImg ? '📸 صورة المنتج مرفقة - استخدميها كمرجع بصري\n\n' : ''}══════════════════════════════════════════
+📱 سكريبت ريل احترافي
+══════════════════════════════════════════
+
+🎯 المشهد 1: الجذب (0:00-0:03)
+┌────────────────────────────────────────
+│ 📍 اللقطة: ماكرو كلوز أب شديد
+│    املئي الإطار بأبرز تفصيلة
+│    (تطريز، ملمس القماش، زر فريد)
+│
+│ 🎥 الكاميرا: ثابتة أو زووم آوت بطيء جداً
+│    عمق ميدان ضحل f/1.8
+│
+│ 💡 الإضاءة: ضوء جانبي درامي واحد
+│    يخلق ملمس وغموض
+│
+│ 📝 خيارات النص:
+│    • "انتظري..."
+│    • "لما تلاقين القطعة المثالية"
+│    • "هذي تغير كل شي"
+│
+│ 🎵 الصوت: بيس تشويقي
+│
+│ 💭 الهدف: إيقاف السكرول، خلق فضول
+└────────────────────────────────────────
+
+✨ المشهد 2: الكشف (0:03-0:08)
+┌────────────────────────────────────────
+│ 📍 اللقطة: كشف بطولي كامل للقطعة
+│    العارضة تدور برشاقة تعرض القطعة
+│    إطار متوسط-واسع
+│
+│ 🎥 الكاميرا: سلو موشن 60fps→24fps
+│    تراكينغ سلس أو push-in لطيف
+│
+│ 💡 الإضاءة: إعداد احترافي كامل
+│    ريم لايت يفصل عن الخلفية
+│
+│ 📝 النص: "${name}"
+│    خط أنيق، يظهر مع البيت
+│
+│ 🎵 الصوت: دروب البيت متزامن مع الكشف
+│
+│ 💭 الهدف: لحظة "واو"، الذروة العاطفية
+└────────────────────────────────────────
+
+🔍 المشهد 3: التفاصيل (0:08-0:16)
+┌────────────────────────────────────────
+│ 📍 4 لقطات سريعة (2 ثانية لكل):
+│
+│ لقطة أ - ملمس القماش:
+│    • كلوز أب شديد على الخامة
+│    • يد تلمس القماش برفق
+│    • النص: "إتقان يدوي"
+│
+│ لقطة ب - البناء والخياطة:
+│    • تفاصيل الدرزات والأزرار
+│    • تُظهر جودة الحرفية
+│    • النص: "جودة فاخرة"
+│
+│ لقطة ج - الحركة:
+│    • القماش يتدفق، يلتقط الضوء
+│    • العارضة تمشي أو تدور
+│    • النص: "مصمم للحركة"
+│
+│ لقطة د - العنصر الفريد:
+│    • التفصيلة المميزة
+│    • اللي يخليها خاصة
+│    • النص: "قطعة واحدة"
+│
+│ 🎥 الكاميرا: قطعات سريعة على البيت
+│ 🎵 الصوت: بيتات إيقاعية مع كل قطعة
+└────────────────────────────────────────
+
+🌟 المشهد 4: أسلوب الحياة (0:16-0:22)
+┌────────────────────────────────────────
+│ 📍 اللقطة: العارضة في مكان ملهم
+│    • لوبي فندق فاخر
+│    • غاليري فني / روف توب
+│    • مدخل مطعم راقي
+│
+│ 🎥 الكاميرا: تراكينغ شوت
+│    العارضة تمشي بثقة نحو الكاميرا
+│
+│ 📝 خيارات النص:
+│    • "للحظات المهمة"
+│    • "البسي الحياة اللي تستاهلينها"
+│    • "طاقة البطلة"
+│
+│ 🎵 الصوت: ذروة الموسيقى العاطفية
+│
+│ 💭 الهدف: المشاهدة تتخيل نفسها
+└────────────────────────────────────────
+
+🛒 المشهد 5: الدعوة للعمل (0:22-0:25)
+┌────────────────────────────────────────
+│ 📍 اللقطة: لقطة جمالية + البراند
+│    خلفية نظيفة، اللوغو واضح
+│
+│ 📝 النص (كبير وواضح):
+│    • "تسوقي الآن"
+│    • "الرابط بالبايو 👆"
+│    • "قطع محدودة"
+│
+│ 🎵 الصوت: الموسيقى تنتهي + ووش خفيف
+│
+│ 💭 الهدف: تعليمات واضحة، إلحاح
+└────────────────────────────────────────
+
+══════════════════════════════════════════
+📝 الكابشن (جاهز للنسخ واللصق)
+══════════════════════════════════════════
+
+${e?'✨':''}${name}
+
 ${desc}
-${e?'🛍️ ':''}تسوقي الآن - الرابط بالبايو
-${h?'\n#أزياء #فاشن #موضة #ستايل #ريلز #ترند #اكسبلور':''}`;
+
+${e?'🔥':''} ليش لازم تكون عندك:
+${e?'←':'•'} جودة فاخرة تتحدث عن نفسها
+${e?'←':'•'} مصممة للمرأة اللي تعرف قيمتها
+${e?'←':'•'} قطع محدودة - لما تخلص تخلص
+
+${e?'💫':''} التفاصيل:
+${e?'←':'•'} صناعة يدوية بدقة متناهية
+${e?'←':'•'} قماش فاخر يتحرك بجمال
+${e?'←':'•'} تصميم خالد تعتزين فيه
+
+${e?'🛍️':''} تسوقي الآن
+${e?'👆':''} الرابط بالبايو
+
+${h?`
+.
+.
+.
+#أزياء #فاشن #موضة #ستايل #ريلز #ترند #اكسبلور #فخامة #تسوق #مصممة #أناقة #ملابس #لوك #السعودية #الامارات #الكويت #البحرين #قطر`:''}
+
+══════════════════════════════════════════
+🎵 اقتراحات الموسيقى
+══════════════════════════════════════════
+• تصفحي "الصوت الترند" بتاب الريلز أسبوعياً
+• بيتات فخامة/أزياء موسيقية
+• أغاني فيها "دروب" واضح للكشف
+• تجنبي الأغاني المحمية للحسابات التجارية
+
+══════════════════════════════════════════
+📊 استراتيجية النشر
+══════════════════════════════════════════
+• أفضل الأوقات: 7-9 صباحاً، 12-1 ظهراً، 7-9 مساءً
+• ردي على كل التعليقات بأول ساعة
+• شاركي بالستوري فوراً
+• حطي 3-5 هاشتاقات بالتعليقات`;
 
     setPrompt(en); setPromptAr(ar); setShowAr(false);
   };
