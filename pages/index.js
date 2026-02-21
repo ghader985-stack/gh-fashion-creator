@@ -228,36 +228,67 @@ ${vNotes ? `ملاحظات: ${vNotes}` : ''}
 📝 CAPTION (COPY & PASTE READY)
 ══════════════════════════════════════════
 
-${e?'✨':''}${name}
+${tone === 'luxury' ? `${e?'✨':''} ${name}
 
 ${desc}
 
-${e?'🔥':''} Why you NEED this:
-${e?'→':'•'} Premium quality that speaks for itself
-${e?'→':'•'} Designed for women who know their worth
-${e?'→':'•'} Limited pieces - when it's gone, it's gone
+${e?'🔥':''} Why this piece is extraordinary:
+${e?'→':'•'} ${desc.includes('silk') || desc.includes('حرير') ? 'Pure silk that flows like liquid gold' : desc.includes('velvet') || desc.includes('مخمل') ? 'Luxurious velvet with rich depth' : desc.includes('lace') || desc.includes('دانتيل') ? 'Delicate lace crafted with precision' : 'Premium fabric selected for excellence'}
+${e?'→':'•'} ${desc.includes('embroid') || desc.includes('تطريز') ? 'Hand-embroidered details that tell a story' : desc.includes('gold') || desc.includes('ذهب') ? 'Golden accents that catch every light' : 'Every detail perfected by master artisans'}
+${e?'→':'•'} Limited pieces available - true exclusivity
 
-${e?'💫':''} The Details:
-${e?'→':'•'} Handcrafted with precision
-${e?'→':'•'} Luxurious fabric that moves beautifully
-${e?'→':'•'} Timeless design you'll treasure
+${e?'💫':''} ${name} - For moments that deserve perfection
 
-${e?'🛍️':''} Shop Now
-${e?'👆':''} Link in bio
+${e?'🛍️':''} Secure yours now
+${e?'👆':''} Link in bio` : tone === 'friendly' ? `${e?'💕':''} OMG you guys!! ${name} is HERE! ${e?'😍':''}
+
+Okay but seriously... ${desc}
+
+${e?'✨':''} Why I'm obsessed:
+${e?'💫':''} ${desc.includes('comfort') || desc.includes('مريح') ? 'SO comfortable you won\'t want to take it off!' : 'The fit is *chef\'s kiss*'}
+${e?'💫':''} ${desc.includes('color') || desc.includes('لون') ? 'This color is EVERYTHING this season!' : 'Goes with literally everything in your closet'}
+${e?'💫':''} The quality?! You have to feel it to believe it
+
+${e?'🙌':''} Made for real women living real lives!
+
+Drop a ${e?'❤️':''} if you need this!
+${e?'👆':''} Link in bio babe!` : tone === 'professional' ? `${name}
+
+${desc}
+
+Product Highlights:
+• ${desc.includes('silk') || desc.includes('حرير') ? 'Premium silk composition' : desc.includes('cotton') || desc.includes('قطن') ? 'Fine cotton construction' : 'Superior material quality'}
+• ${desc.includes('hand') || desc.includes('يدوي') ? 'Artisan handcrafted details' : 'Precision manufacturing standards'}
+• Designed for versatility and longevity
+
+Investment dressing at its finest.
+
+Available now via link in bio.` : `${e?'✨':''} She didn't ask permission.
+
+She saw ${name} and she KNEW.
+
+${desc}
+
+${e?'💫':''} This is for the woman who:
+${e?'→':'•'} ${desc.includes('elegant') || desc.includes('أنيق') ? 'Commands elegance without trying' : 'Writes her own rules'}
+${e?'→':'•'} ${desc.includes('bold') || desc.includes('جريء') ? 'Isn\'t afraid to stand out' : 'Knows her worth and dresses like it'}
+${e?'→':'•'} Refuses to wait for "someday"
+
+Your moment is NOW.
+${e?'👆':''} Link in bio - if you're ready`}
 
 ${h?`
 .
 .
 .
-#fashion #luxury #style #ootd #fashionreels #newcollection #designer #outfitinspo #fashionista #luxuryfashion #instafashion #reelsinstagram #trending #viral #fyp #explorepage`:''}
+#fashion #luxury #${name.toLowerCase().replace(/\s+/g, '')} #style #ootd #fashionreels #newcollection #designer #outfitinspo #fashionista #luxuryfashion #instafashion #trending #viral #fyp`:''}
 
 ══════════════════════════════════════════
 🎵 MUSIC RECOMMENDATIONS
 ══════════════════════════════════════════
 • Check "Trending Audio" in Reels tab weekly
-• Instrumental luxury/fashion beats
+• ${tone === 'luxury' ? 'Orchestral, elegant instrumentals' : tone === 'friendly' ? 'Upbeat trending pop sounds' : tone === 'professional' ? 'Minimal, sophisticated beats' : 'Empowering, dramatic builds'}
 • Songs with clear "drop" for reveal moment
-• Avoid copyrighted songs for business
 
 ══════════════════════════════════════════
 📊 POSTING STRATEGY
@@ -380,36 +411,67 @@ ${h?`
 📝 الكابشن (جاهز للنسخ واللصق)
 ══════════════════════════════════════════
 
-${e?'✨':''}${name}
+${tone === 'luxury' ? `${e?'✨':''} ${name}
 
 ${desc}
 
-${e?'🔥':''} ليش لازم تكون عندك:
-${e?'←':'•'} جودة فاخرة تتحدث عن نفسها
-${e?'←':'•'} مصممة للمرأة اللي تعرف قيمتها
-${e?'←':'•'} قطع محدودة - لما تخلص تخلص
+${e?'🔥':''} ليش هالقطعة استثنائية:
+${e?'←':'•'} ${desc.includes('silk') || desc.includes('حرير') ? 'حرير نقي يتدفق كالذهب السائل' : desc.includes('velvet') || desc.includes('مخمل') ? 'مخمل فاخر بعمق غني' : desc.includes('lace') || desc.includes('دانتيل') ? 'دانتيل رقيق مصنوع بدقة' : 'قماش فاخر مختار بعناية'}
+${e?'←':'•'} ${desc.includes('embroid') || desc.includes('تطريز') ? 'تطريز يدوي يحكي قصة' : desc.includes('gold') || desc.includes('ذهب') ? 'لمسات ذهبية تلتقط كل ضوء' : 'كل تفصيلة أتقنها حرفيون متمرسون'}
+${e?'←':'•'} قطع محدودة - تميز حقيقي
 
-${e?'💫':''} التفاصيل:
-${e?'←':'•'} صناعة يدوية بدقة متناهية
-${e?'←':'•'} قماش فاخر يتحرك بجمال
-${e?'←':'•'} تصميم خالد تعتزين فيه
+${e?'💫':''} ${name} - للحظات التي تستحق الكمال
 
-${e?'🛍️':''} تسوقي الآن
-${e?'👆':''} الرابط بالبايو
+${e?'🛍️':''} احجزي قطعتك الآن
+${e?'👆':''} الرابط بالبايو` : tone === 'friendly' ? `${e?'💕':''} يا بنات!! ${name} وصلت! ${e?'😍':''}
+
+بصراحة... ${desc}
+
+${e?'✨':''} ليش مجنونة فيها:
+${e?'💫':''} ${desc.includes('comfort') || desc.includes('مريح') ? 'مريحة لدرجة ما بتبين تشلينها!' : 'القصة *تجنن*'}
+${e?'💫':''} ${desc.includes('color') || desc.includes('لون') ? 'هاللون هو كل شي هالموسم!' : 'تمشي مع كل شي بخزانتك'}
+${e?'💫':''} الجودة؟! لازم تحسين فيها لتصدقين
+
+${e?'🙌':''} مصنوعة لنساء حقيقيات بحياة حقيقية!
+
+حطي ${e?'❤️':''} إذا تحتاجينها!
+${e?'👆':''} الرابط بالبايو يا حلوة!` : tone === 'professional' ? `${name}
+
+${desc}
+
+مميزات المنتج:
+• ${desc.includes('silk') || desc.includes('حرير') ? 'تركيبة حرير فاخر' : desc.includes('cotton') || desc.includes('قطن') ? 'بناء قطن فاخر' : 'جودة خامات متفوقة'}
+• ${desc.includes('hand') || desc.includes('يدوي') ? 'تفاصيل يدوية حرفية' : 'معايير تصنيع دقيقة'}
+• مصمم للتنوع والاستدامة
+
+استثمار في الأناقة بأفضل صورها.
+
+متوفر الآن - الرابط بالبايو.` : `${e?'✨':''} ما استأذنت من أحد.
+
+شافت ${name} وعرفت.
+
+${desc}
+
+${e?'💫':''} هذي للمرأة اللي:
+${e?'←':'•'} ${desc.includes('elegant') || desc.includes('أنيق') ? 'تفرض الأناقة بدون ما تحاول' : 'تكتب قوانينها بنفسها'}
+${e?'←':'•'} ${desc.includes('bold') || desc.includes('جريء') ? 'ما تخاف تتميز' : 'تعرف قيمتها وتلبس على هالأساس'}
+${e?'←':'•'} ترفض تنتظر "يوم ثاني"
+
+لحظتك هي الآن.
+${e?'👆':''} الرابط بالبايو - إذا جاهزة`}
 
 ${h?`
 .
 .
 .
-#أزياء #فاشن #موضة #ستايل #ريلز #ترند #اكسبلور #فخامة #تسوق #مصممة #أناقة #ملابس #لوك #السعودية #الامارات #الكويت #البحرين #قطر`:''}
+#أزياء #فاشن #${name.replace(/\s+/g, '_')} #موضة #ستايل #ريلز #ترند #اكسبلور #فخامة #تسوق #مصممة #أناقة #السعودية #الامارات #الكويت`:''}
 
 ══════════════════════════════════════════
 🎵 اقتراحات الموسيقى
 ══════════════════════════════════════════
 • تصفحي "الصوت الترند" بتاب الريلز أسبوعياً
-• بيتات فخامة/أزياء موسيقية
+• ${tone === 'luxury' ? 'موسيقى أوركسترالية أنيقة' : tone === 'friendly' ? 'أصوات بوب ترند راقصة' : tone === 'professional' ? 'بيتات راقية بسيطة' : 'موسيقى تمكينية درامية'}
 • أغاني فيها "دروب" واضح للكشف
-• تجنبي الأغاني المحمية للحسابات التجارية
 
 ══════════════════════════════════════════
 📊 استراتيجية النشر
