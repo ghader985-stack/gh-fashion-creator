@@ -425,14 +425,330 @@ ${h?`
   const genStory = () => {
     const fromImg = inputMode === 'image' && image;
     const d = storyDesc || 'A luxurious fashion piece';
-    const stories = {
-      luxury: { short: `In a world of ordinary, we chose extraordinary.\n\nThis isn't just fashion—it's a statement. Every stitch whispers luxury.\n\nFor those who refuse to blend in.`, medium: `There are moments that define us.\n\nMoments when we walk into a room and time pauses. This piece was born from that vision.\n\nWe spent months perfecting every element. The weight of fabric as it falls. How light catches the material. The invisible construction that makes the visible perfect.\n\nThis isn't mass production. This is art made wearable.\n\nYou are that woman. And this is worthy of you.`, long: `THE ART OF PRESENCE\n\nIn the quiet hours before dawn, in an atelier where time moves differently, magic happens.\n\nWe searched three continents for this fabric. Rejected hundreds of samples. Because we weren't looking for fabric—we were looking for poetry you can wear.\n\nTurn it inside out—we dare you. The interior is as flawless as the exterior.\n\nThis was designed for a specific woman. She walks into boardrooms and ballrooms with equal confidence.\n\nIs this you?\n\nWelcome to a new standard of elegance.` },
-      friendly: { short: `Hey gorgeous! 👋\n\nYou know that feeling when you find THE piece? Yeah. This is it.\n\nMade with love, for YOU. 💕`, medium: `Can we be real? 💕\n\nYou know those mornings when your closet is FULL but you have "nothing to wear"?\n\nThat's why we created this piece. Comfortable enough for all day, stunning enough for any occasion.\n\nWe tested it on real women. Not models. Women with curves and lives.\n\nThis is fashion that gets you. Finally. 🙌`, long: `LET'S GET REAL 💕\n\nWe started this brand because we were frustrated.\n\nFrustrated with "luxury" that fell apart. With sizing that made no sense.\n\nThis piece took 8 months. We kept sending it back: "The sleeve isn't right." "The hem needs adjusting."\n\nBecause you work hard for your money. We refuse to let you down.\n\nWelcome to fashion that actually cares. 💕` },
-      inspiring: { short: `She didn't dress for others.\n\nShe dressed for the woman she was becoming.\n\nFor every woman writing her own story. ✨`, medium: `Before she satisfies the world, she was herself.\n\nShe stopped asking permission. Started choosing—her path, her voice, her style.\n\nThis isn't about fitting in. It's about standing out.\n\nYour moment isn't coming. It's here. Dress for it.`, long: `THE WOMAN WHO CHOSE HERSELF\n\nShe remembers the moment everything changed. A quiet morning, reaching for safe choices.\n\nThen... she didn't.\n\nThat small act rippled outward. She spoke up. Asked for the promotion. Set boundaries.\n\nThis piece is for women at crossroads. For the one ready to stop waiting.\n\nNow go show them what you're made of. ✨` }
+    
+    const storiesEn = {
+      luxury: { 
+        short: `In a world drowning in ordinary, we chose extraordinary.
+
+This isn't just fashion—it's a declaration. Every stitch whispers centuries of craft. Every fold speaks the language of elegance.
+
+For those who refuse to blend in. For those who lead, not follow.
+
+This is your moment. Own it.`, 
+        medium: `There are moments that define us.
+
+Moments when we walk into a room and time seems to pause. When all eyes turn—not because we demand attention, but because we command presence.
+
+This piece was born from that vision. A vision of unapologetic elegance.
+
+We spent months sourcing the perfect fabric—one that catches light like liquid gold, that moves with you like a second skin.
+
+Every seam placed with intention. Every detail considered until it reached perfection.
+
+This isn't mass production. This is art, wearable and alive.
+
+Because you don't just wear luxury.
+You embody it.`, 
+        long: `THE ART OF PRESENCE
+
+In the quiet hours before dawn, in an atelier where time moves differently, magic happens.
+
+Hands that have mastered their craft over generations begin their delicate dance with fabric, thread, and vision.
+
+THE FABRIC
+We searched three continents. Rejected hundreds of samples. Because we weren't looking for fabric—we were looking for poetry you could touch.
+
+THE DESIGN
+Our design emerged from countless sketches. Dozens of prototypes. We rejected versions that would satisfy most—because we aren't most.
+
+THE CRAFT
+Turn it inside out—we dare you. The interior is as flawless as the exterior. Every seam reinforced by hand. Every edge finished with precision.
+
+THE WOMAN
+This was designed for a specific woman. She walks into boardrooms and ballrooms with equal confidence. She doesn't follow trends. She sets them.
+
+Is this you?
+
+Welcome to a new standard of elegance.` 
+      },
+      friendly: { 
+        short: `Hey gorgeous! 👋
+
+You know that feeling when you find THE piece? The one that makes you spin in the mirror?
+
+Yeah. This is that piece.
+
+Made with love, designed for YOU. Let's turn some heads! 💕`, 
+        medium: `Can we be real for a sec? 💕
+
+You know those mornings when your closet is FULL but you have "nothing to wear"? We've ALL been there.
+
+That's exactly why we created this piece.
+
+Comfortable enough for all day, stunning enough for any occasion. We tested it on real women—not models. Women with curves and lives.
+
+We obsessed over every detail:
+✓ The fit? Tested on real bodies
+✓ The fabric? Feels like a dream
+✓ The style? Current but timeless
+
+This is fashion that gets you. Finally. 🙌`, 
+        long: `LET'S GET REAL 💕
+
+We started this brand because we were frustrated.
+
+Frustrated with fashion that promised comfort but delivered discomfort. With "luxury" that fell apart after three washes. With sizing that made no sense.
+
+SO WE DID SOMETHING ABOUT IT
+
+Every decision starts with: "Would WE actually want this?"
+
+This piece took 8 months. EIGHT MONTHS. We kept sending it back:
+"The sleeve isn't right."
+"The hem needs adjusting."
+"The color is 0.5% off."
+
+Because you work hard for your money. When you spend it with us, that means something. We REFUSE to let you down.
+
+AND IF IT'S NOT PERFECT?
+Send it back. No guilt trips. No hoops. Just a full refund.
+
+Welcome to fashion that actually cares about you. 💕` 
+      },
+      inspiring: { 
+        short: `She didn't dress for others.
+
+She dressed for the woman she was becoming.
+
+Every morning, she chose pieces that reminded her of her power. Her potential. Her promise to herself.
+
+For every woman writing her own story. ✨`, 
+        medium: `Before she satisfies the world, she was herself.
+
+She learned that waiting for permission meant waiting forever. So she stopped asking. She started choosing—her path, her voice, her style.
+
+This piece isn't about fitting in. It's about standing out—on your own terms.
+
+When she puts this on, something shifts. Her shoulders go back. Her chin lifts.
+
+The right piece doesn't change who you are.
+It reveals who you've been all along.
+
+Your moment isn't coming. It's here. Dress for it.`, 
+        long: `THE WOMAN WHO CHOSE HERSELF
+
+She remembers the moment everything changed.
+
+It wasn't dramatic. Just a quiet morning, standing in front of her closet, reaching for the same safe choices.
+
+And then... she didn't.
+
+THE SHIFT
+That day, she chose differently. Not louder. Not more expensive. Just more HER.
+
+It started with clothes but didn't end there. She spoke up in meetings. Asked for the promotion. Set boundaries. Started that project she'd been "thinking about" for years.
+
+THIS PIECE
+We designed it for women at crossroads. For the one deciding whether to play it safe or bet on herself.
+
+Wear this on the day you ask for what you deserve.
+On the day you walk away from what no longer serves you.
+On the day you finally stop apologizing for taking up space.
+
+THE TRUTH
+Clothes don't change your life. YOU change your life. But the right piece can remind you of who you're becoming.
+
+Now go show them what you're made of. ✨` 
+      }
     };
-    const s = stories[storyTone]?.[storyLen] || stories.luxury.medium;
-    const en = `${fromImg ? '📸 PRODUCT IMAGE\n\n' : ''}📖 MARKETING STORY\nTone: ${storyTone} | Length: ${storyLen}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${s}`;
-    const ar = `${fromImg ? '📸 صورة المنتج\n\n' : ''}📖 قصة تسويقية\nالنبرة: ${storyTone} | الطول: ${storyLen}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n${s}`;
+
+    const storiesAr = {
+      luxury: { 
+        short: `في عالم يغرق بالعادي، اخترنا الاستثنائي.
+
+هذه ليست مجرد أزياء—إنها إعلان. كل غرزة تهمس بقرون من الحرفية. كل طية تتحدث لغة الأناقة.
+
+لمن يرفضون الذوبان في الحشود. لمن يقودون، لا يتبعون.
+
+هذه لحظتك. امتلكيها.`, 
+        medium: `هناك لحظات تحددنا.
+
+لحظات ندخل فيها غرفة ويبدو أن الزمن يتوقف. عندما تتجه كل الأنظار—ليس لأننا نطلب الاهتمام، بل لأننا نفرض الحضور.
+
+وُلدت هذه القطعة من تلك الرؤية. رؤية الأناقة بلا اعتذار.
+
+أمضينا شهوراً في البحث عن القماش المثالي—قماش يلتقط الضوء كالذهب السائل، يتحرك معك كجلد ثانٍ.
+
+كل درزة وُضعت بقصد. كل تفصيلة رُوجعت حتى بلغت الكمال.
+
+هذا ليس إنتاجاً ضخماً. هذا فن، قابل للارتداء وحي.
+
+لأنك لا ترتدين الفخامة فحسب.
+أنتِ تجسدينها.`, 
+        long: `فن الحضور
+
+في الساعات الهادئة قبل الفجر، في مشغل يتحرك فيه الزمن بشكل مختلف، يحدث السحر.
+
+أيدٍ أتقنت حرفتها عبر أجيال تبدأ رقصتها الرقيقة مع القماش والخيط والرؤية.
+
+القماش
+بحثنا في ثلاث قارات. رفضنا مئات العينات. لأننا لم نكن نبحث عن قماش—كنا نبحث عن شعر يمكنك لمسه.
+
+التصميم
+انبثق تصميمنا من رسومات لا تُحصى. عشرات النماذج. رفضنا نسخاً كانت لترضي معظمهم—لأننا لسنا معظمهم.
+
+الحرفية
+اقلبيها من الداخل للخارج—نتحداك. الداخل بلا عيوب كالخارج. كل درزة مُعززة يدوياً. كل حافة مُنهاة بدقة.
+
+المرأة
+صُممت هذه لامرأة محددة. تدخل غرف الاجتماعات وقاعات الحفلات بثقة متساوية. لا تتبع الصيحات. هي تصنعها.
+
+هل هذه أنتِ؟
+
+مرحباً بكِ في معيار جديد للأناقة.` 
+      },
+      friendly: { 
+        short: `هاي يا حلوة! 👋
+
+تعرفين ذلك الشعور لما تلاقين القطعة المثالية؟ تلك التي تخليكِ تدورين قدام المرآة؟
+
+أيوا. هذي هي تلك القطعة.
+
+مصنوعة بحب، مصممة لكِ. خلينا نلفت الأنظار! 💕`, 
+        medium: `ممكن نكون صريحين لحظة؟ 💕
+
+تعرفين تلك الصباحات لما خزانتك مليانة بس "ما في شي تلبسينه"؟ كلنا مرينا بهيك.
+
+لهذا بالضبط صنعنا هذه القطعة.
+
+مريحة بما يكفي لطوال اليوم، مذهلة بما يكفي لأي مناسبة. جربناها على نساء حقيقيات—مش عارضات. نساء عندهم منحنيات وحياة.
+
+اهتمينا بكل تفصيلة:
+✓ القصة؟ جربناها على أجسام حقيقية
+✓ القماش؟ إحساسه حلم
+✓ الستايل؟ عصري وخالد
+
+هذي أزياء تفهمك. أخيراً. 🙌`, 
+        long: `خلينا نكون صريحين 💕
+
+بدأنا هذا البراند لأننا كنا محبطين.
+
+محبطين من أزياء وعدت بالراحة وقدمت الانزعاج. من "فخامة" تفككت بعد ثلاث غسلات. من مقاسات ما كان لها معنى.
+
+فسوينا شي
+
+كل قرار يبدأ بـ: "هل نحن فعلاً نبي هذا؟"
+
+هذه القطعة أخذت 8 شهور. ثمانية شهور. ضلينا نرجعها:
+"الكم مش مضبوط"
+"الحاشية تحتاج تعديل"
+"اللون بعيد 0.5%"
+
+لأنك تشتغلين بجد على فلوسك. لما تصرفينها معنا، هذا يعني شي. نرفض نخذلك.
+
+ولو مش مثالية؟
+رجعيها. بدون تأنيب ضمير. استرجاع كامل.
+
+مرحباً بك في أزياء تهتم فعلاً. 💕` 
+      },
+      inspiring: { 
+        short: `لم تكن تلبس للآخرين.
+
+كانت تلبس للمرأة التي تصبحها.
+
+كل صباح، اختارت قطعاً تذكرها بقوتها. بإمكانياتها. بوعدها لنفسها.
+
+لكل امرأة تكتب قصتها الخاصة. ✨`, 
+        medium: `قبل أن ترضي العالم، كانت نفسها.
+
+تعلمت أن انتظار الإذن يعني الانتظار للأبد. فتوقفت عن السؤال. بدأت تختار—طريقها، صوتها، أسلوبها.
+
+هذه القطعة ليست عن الاندماج. إنها عن التميز—بشروطك الخاصة.
+
+لما تلبسها، شيء يتغير. كتفاها ترجعان للخلف. ذقنها يرتفع.
+
+القطعة المناسبة لا تغير من أنتِ.
+تكشف من كنتِ دائماً.
+
+لحظتك ليست قادمة. إنها هنا. البسي لها.`, 
+        long: `المرأة التي اختارت نفسها
+
+تتذكر اللحظة التي تغير فيها كل شيء.
+
+لم تكن درامية. فقط صباح هادئ، واقفة أمام خزانتها، تمد يدها للخيارات الآمنة ذاتها.
+
+وبعدها... لم تفعل.
+
+التحول
+ذلك اليوم، اختارت بشكل مختلف. ليس أعلى صوتاً. ليس أغلى ثمناً. فقط أكثر هي.
+
+بدأ بالملابس لكنه لم ينتهِ هناك. تكلمت بالاجتماعات. طلبت الترقية. وضعت حدوداً. بدأت ذلك المشروع اللي كانت "تفكر فيه" لسنوات.
+
+هذه القطعة
+صممناها للنساء عند مفترقات الطرق. للتي تقرر إن كانت ستلعبها آمنة أم تراهن على نفسها.
+
+البسيها يوم تطلبين ما تستحقين.
+يوم تمشين بعيداً عما لم يعد يخدمك.
+يوم تتوقفين أخيراً عن الاعتذار لأنك تأخذين مساحة.
+
+الحقيقة
+الملابس لا تغير حياتك. أنتِ تغيرين حياتك. لكن القطعة المناسبة تذكرك بمن تصبحين.
+
+اذهبي أريهم مما أنتِ مصنوعة. ✨` 
+      }
+    };
+
+    const storyEn = storiesEn[storyTone]?.[storyLen] || storiesEn.luxury.medium;
+    const storyAr = storiesAr[storyTone]?.[storyLen] || storiesAr.luxury.medium;
+    
+    const en = `${fromImg ? '📸 PRODUCT IMAGE ATTACHED\n\n' : ''}══════════════════════════════════════════
+📖 PROFESSIONAL MARKETING STORY
+══════════════════════════════════════════
+
+📋 Story Details:
+• Tone: ${storyTone.charAt(0).toUpperCase() + storyTone.slice(1)}
+• Length: ${storyLen.charAt(0).toUpperCase() + storyLen.slice(1)}
+• Product: ${d}
+
+══════════════════════════════════════════
+📝 YOUR STORY (Copy & Use)
+══════════════════════════════════════════
+
+${storyEn}
+
+══════════════════════════════════════════
+💡 HOW TO USE THIS STORY
+══════════════════════════════════════════
+• Website "About" or "Our Story" page
+• Product descriptions
+• Email marketing campaigns
+• Social media carousel posts
+• Brand storytelling content`;
+
+    const ar = `${fromImg ? '📸 صورة المنتج مرفقة\n\n' : ''}══════════════════════════════════════════
+📖 قصة تسويقية احترافية
+══════════════════════════════════════════
+
+📋 تفاصيل القصة:
+• النبرة: ${storyTone === 'luxury' ? 'فاخرة' : storyTone === 'friendly' ? 'ودية' : 'ملهمة'}
+• الطول: ${storyLen === 'short' ? 'قصيرة' : storyLen === 'medium' ? 'متوسطة' : 'طويلة'}
+• المنتج: ${d}
+
+══════════════════════════════════════════
+📝 قصتك (انسخيها واستخدميها)
+══════════════════════════════════════════
+
+${storyAr}
+
+══════════════════════════════════════════
+💡 كيف تستخدمين هذه القصة
+══════════════════════════════════════════
+• صفحة "عنا" أو "قصتنا" بالموقع
+• وصف المنتجات
+• حملات التسويق بالإيميل
+• بوستات كاروسيل بالسوشال ميديا
+• محتوى سرد قصة البراند`;
+
     setPrompt(en); setPromptAr(ar); setShowAr(false);
   };
 
