@@ -12,6 +12,8 @@ export default function Home() {
   const [showPricing, setShowPricing] = useState(false);
   const [user, setUser] = useState(null);
   const [usageCount, setUsageCount] = useState(0);
+  const [adminCode, setAdminCode] = useState('');
+  const [showAdminInput, setShowAdminInput] = useState(false);
   
   const [style, setStyle] = useState('elegant');
   const [category, setCategory] = useState('dress');
@@ -25,7 +27,10 @@ export default function Home() {
   const [startFrame, setStartFrame] = useState('');
   const [endFrame, setEndFrame] = useState('');
 
+  const ADMIN_PASSWORD = 'SalyGh85';
+
   const plans = {
+    admin: { name: 'Admin', limit: 999999, price: 0 },
     basic: { name: 'Basic', limit: 200, price: 15 },
     pro: { name: 'Pro', limit: 400, price: 35 },
     enterprise: { name: 'Enterprise', limit: 700, price: 70 }
@@ -69,13 +74,28 @@ export default function Home() {
   
   const checkUsageLimit = () => {
     if (!user) return false;
+    if (user.plan === 'admin') return true;
     return usageCount < plans[user.plan]?.limit;
   };
   
   const incrementUsage = () => {
+    if (user?.plan === 'admin') return;
     const newCount = usageCount + 1;
     setUsageCount(newCount);
     localStorage.setItem('gh_usage', newCount.toString());
+  };
+
+  const handleAdminLogin = () => {
+    if (adminCode === ADMIN_PASSWORD) {
+      const adminUser = { plan: 'admin', subscribedAt: new Date().toISOString() };
+      setUser(adminUser);
+      localStorage.setItem('gh_user', JSON.stringify(adminUser));
+      setShowAdminInput(false);
+      setAdminCode('');
+      alert('مرحباً بك يا مالكة الأداة! 👑');
+    } else {
+      alert('كلمة السر غير صحيحة');
+    }
   };
 
   const getPromptByTab = () => {
@@ -360,6 +380,13 @@ ${imageContext}${textContext}
     alert(`تم الاشتراك في ${plans[plan].name}! 🎉`);
   };
 
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('gh_user');
+    localStorage.removeItem('gh_usage');
+    setUsageCount(0);
+  };
+
   return (
     <>
       <Head>
@@ -380,15 +407,28 @@ ${imageContext}${textContext}
           <div className="header-actions">
             {user && (
               <div className="usage-info">
-                <span>الاستخدام: {usageCount}/{plans[user.plan]?.limit || 0}</span>
-                <div className="usage-bar">
-                  <div className="usage-fill" style={{width: `${(usageCount/(plans[user.plan]?.limit || 1))*100}%`}}></div>
-                </div>
+                {user.plan === 'admin' ? (
+                  <span>👑 وضع المالك - بلا حدود</span>
+                ) : (
+                  <>
+                    <span>الاستخدام: {usageCount}/{plans[user.plan]?.limit || 0}</span>
+                    <div className="usage-bar">
+                      <div className="usage-fill" style={{width: `${(usageCount/(plans[user.plan]?.limit || 1))*100}%`}}></div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
-            <button onClick={() => setShowPricing(true)} className="upgrade-btn">
-              {user ? '💎 ترقية' : '🔐 اشتركي'}
-            </button>
+            {user ? (
+              <div className="user-actions">
+                {user.plan !== 'admin' && (
+                  <button onClick={() => setShowPricing(true)} className="upgrade-btn">💎 ترقية</button>
+                )}
+                <button onClick={handleLogout} className="logout-btn">خروج</button>
+              </div>
+            ) : (
+              <button onClick={() => setShowPricing(true)} className="upgrade-btn">🔐 اشتركي</button>
+            )}
           </div>
         </header>
 
@@ -565,6 +605,26 @@ ${imageContext}${textContext}
               <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
               <h2 className="modal-title">💎 اختاري باقتك</h2>
               <p className="modal-sub">اشتركي الآن وابدئي بإنشاء برومبتات احترافية</p>
+              
+              {/* Admin Login */}
+              <div className="admin-section">
+                {!showAdminInput ? (
+                  <button onClick={() => setShowAdminInput(true)} className="admin-link">🔑 دخول المالك</button>
+                ) : (
+                  <div className="admin-input-group">
+                    <input 
+                      type="password" 
+                      value={adminCode} 
+                      onChange={(e) => setAdminCode(e.target.value)}
+                      placeholder="كلمة السر"
+                      className="admin-input"
+                    />
+                    <button onClick={handleAdminLogin} className="admin-btn">دخول</button>
+                    <button onClick={() => {setShowAdminInput(false); setAdminCode('');}} className="admin-cancel">إلغاء</button>
+                  </div>
+                )}
+              </div>
+
               <div className="pricing-grid">
                 <div className="pricing-card">
                   <div className="plan-icon">✨</div>
@@ -585,7 +645,7 @@ ${imageContext}${textContext}
                   <div className="plan-icon">👑</div>
                   <h3>Enterprise</h3>
                   <div className="plan-price">$70<span>/شهر</span></div>
-                  <ul><li>✓ 700 توليد</li><li>✓ مدير حساب</li><li>✓ API Access</li></ul>
+                  <ul><li>✓ 700 توليد</li><li>✓ مدير حساب</li><li>✓ دعم أولوية 24/7</li></ul>
                   <button onClick={() => handleSubscribe('enterprise')} className="subscribe-btn">اشتركي الآن</button>
                 </div>
               </div>
@@ -606,10 +666,12 @@ ${imageContext}${textContext}
         .logo-text { font-size: 1.6rem; font-weight: 800; color: white; }
         .logo-sub { font-size: 0.85rem; color: rgba(255,255,255,0.9); }
         .header-actions { display: flex; align-items: center; gap: 1rem; }
+        .user-actions { display: flex; gap: 0.5rem; }
         .usage-info { background: rgba(255,255,255,0.2); padding: 0.5rem 1rem; border-radius: 20px; color: white; font-size: 0.85rem; }
         .usage-bar { width: 100px; height: 6px; background: rgba(255,255,255,0.3); border-radius: 3px; margin-top: 4px; }
         .usage-fill { height: 100%; background: white; border-radius: 3px; }
         .upgrade-btn { background: white; color: #ec4899; border: none; padding: 0.6rem 1.2rem; border-radius: 25px; font-weight: 700; cursor: pointer; }
+        .logout-btn { background: rgba(255,255,255,0.2); color: white; border: none; padding: 0.6rem 1rem; border-radius: 20px; cursor: pointer; font-size: 0.85rem; }
         .tabs-container { display: flex; justify-content: center; gap: 0.5rem; padding: 1.5rem; flex-wrap: wrap; background: white; }
         .tab { background: white; border: 2px solid #e9d5ff; padding: 0.75rem 1.25rem; border-radius: 30px; color: #7c3aed; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; }
         .tab.active { background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border-color: transparent; }
@@ -649,7 +711,13 @@ ${imageContext}${textContext}
         .modal { background: white; border-radius: 30px; padding: 2.5rem; max-width: 900px; width: 95%; max-height: 90vh; overflow-y: auto; position: relative; }
         .close-modal { position: absolute; top: 1rem; left: 1rem; background: #f3e8ff; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; color: #7c3aed; }
         .modal-title { text-align: center; font-size: 2rem; color: #7c3aed; margin-bottom: 0.5rem; }
-        .modal-sub { text-align: center; color: #9ca3af; margin-bottom: 2rem; }
+        .modal-sub { text-align: center; color: #9ca3af; margin-bottom: 1rem; }
+        .admin-section { text-align: center; margin-bottom: 2rem; padding: 1rem; background: #fdf4ff; border-radius: 15px; }
+        .admin-link { background: none; border: none; color: #a855f7; cursor: pointer; font-size: 0.9rem; text-decoration: underline; }
+        .admin-input-group { display: flex; gap: 0.5rem; justify-content: center; align-items: center; flex-wrap: wrap; }
+        .admin-input { padding: 0.5rem 1rem; border: 2px solid #e9d5ff; border-radius: 10px; width: 150px; }
+        .admin-btn { padding: 0.5rem 1rem; background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border: none; border-radius: 10px; cursor: pointer; }
+        .admin-cancel { padding: 0.5rem 1rem; background: #e5e7eb; color: #6b7280; border: none; border-radius: 10px; cursor: pointer; }
         .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
         @media (max-width: 800px) { .pricing-grid { grid-template-columns: 1fr; } }
         .pricing-card { background: white; border-radius: 25px; padding: 2rem; text-align: center; border: 2px solid #e9d5ff; position: relative; }
