@@ -26,7 +26,6 @@ export default function Home() {
   const [endFrame, setEndFrame] = useState('');
 
   const plans = {
-    free: { name: 'مجاني', limit: 5, price: 0 },
     basic: { name: 'Basic', limit: 200, price: 15 },
     pro: { name: 'Pro', limit: 400, price: 35 },
     enterprise: { name: 'Enterprise', limit: 700, price: 70 }
@@ -51,7 +50,7 @@ export default function Home() {
   const stylesArr = ['elegant', 'casual', 'couture', 'minimalist', 'dramatic', 'romantic', 'edgy', 'classic'];
   const categories = ['dress', 'abaya', 'suit', 'jacket', 'gown', 'casual', 'sportswear', 'accessories'];
   const moods = ['dramatic', 'soft', 'energetic', 'mysterious', 'romantic', 'bold', 'natural', 'cinematic'];
-  const platforms = ['instagram', 'tiktok', 'pinterest', 'website', 'print'];
+  const platforms = ['instagram', 'tiktok', 'pinterest', 'story'];
   const tones = ['luxury', 'friendly', 'professional', 'inspiring', 'playful', 'sophisticated'];
   const videoTypes = ['reel', 'story', 'tiktok', 'commercial', 'lookbook', 'bts'];
   const shotStyles = ['closeup', 'full-body', 'detail', 'lifestyle', 'editorial', 'product-focus'];
@@ -67,7 +66,12 @@ export default function Home() {
   };
 
   const removeImage = () => { setImage(null); setImagePreview(''); };
-  const checkUsageLimit = () => usageCount < plans[user?.plan || 'free'].limit;
+  
+  const checkUsageLimit = () => {
+    if (!user) return false;
+    return usageCount < plans[user.plan]?.limit;
+  };
+  
   const incrementUsage = () => {
     const newCount = usageCount + 1;
     setUsageCount(newCount);
@@ -251,16 +255,45 @@ ${imageContext}${textContext}
 ═══════════════════════════════════════`;
 
       case 'marketing':
+        if (platform === 'story') {
+          return `أنتِ خبيرة تسويق أزياء فاخرة.
+النبرة: ${tone}
+${imageContext}${textContext}
+
+قدمي قصة تسويقية كاملة ومؤثرة للمنتج:
+
+═══════════════════════════════════════
+📖 القصة التسويقية الكاملة
+═══════════════════════════════════════
+
+**الفصل 1: الإلهام والولادة**
+[اكتبي قصة مؤثرة عن من أين جاء إلهام هذا التصميم، ما القصة وراءه، من أي ثقافة أو فن أو لحظة استوحي - فقرتين على الأقل]
+
+**الفصل 2: الحرفية والتفاصيل**
+[اكتبي عن جودة الصناعة، المواد المستخدمة، الاهتمام بالتفاصيل، ساعات العمل - فقرتين]
+
+**الفصل 3: المرأة التي ترتديه**
+[اكتبي عن شخصية المرأة المثالية لهذا التصميم، كيف ستشعر، أين سترتديه، ما الثقة التي سيمنحها - فقرتين]
+
+**الفصل 4: اللحظة**
+[اكتبي سيناريو تخيلي للحظة ارتداء هذا التصميم، المكان، الأجواء، ردود الفعل - فقرتين]
+
+═══════════════════════════════════════
+✨ الرسالة التسويقية المختصرة
+═══════════════════════════════════════
+[جملة واحدة قوية تلخص جوهر المنتج]
+
+═══════════════════════════════════════
+🎯 الشعار الإعلاني (Tagline)
+═══════════════════════════════════════
+[3 خيارات للشعار]`;
+        }
+        
         return `أنتِ خبيرة تسويق أزياء فاخرة.
 المنصة: ${platform} | النبرة: ${tone}
 ${imageContext}${textContext}
 
 قدمي:
-═══════════════════════════════════════
-📖 القصة التسويقية
-═══════════════════════════════════════
-[قصة مؤثرة عن المنتج: الإلهام، التميز، الشعور - 3 فقرات]
-
 ═══════════════════════════════════════
 ✨ الكابشنات
 ═══════════════════════════════════════
@@ -301,7 +334,8 @@ ${imageContext}${textContext}
   };
 
   const handleGenerate = async () => {
-    if (!checkUsageLimit()) { setShowPricing(true); return; }
+    if (!user) { setShowPricing(true); return; }
+    if (!checkUsageLimit()) { alert('انتهت توليداتك! جددي اشتراكك 💎'); setShowPricing(true); return; }
     setLoading(true); setResult('');
     try {
       const formData = new FormData();
@@ -344,13 +378,17 @@ ${imageContext}${textContext}
             </div>
           </div>
           <div className="header-actions">
-            <div className="usage-info">
-              <span>الاستخدام: {usageCount}/{plans[user?.plan || 'free'].limit}</span>
-              <div className="usage-bar">
-                <div className="usage-fill" style={{width: `${(usageCount/plans[user?.plan||'free'].limit)*100}%`}}></div>
+            {user && (
+              <div className="usage-info">
+                <span>الاستخدام: {usageCount}/{plans[user.plan]?.limit || 0}</span>
+                <div className="usage-bar">
+                  <div className="usage-fill" style={{width: `${(usageCount/(plans[user.plan]?.limit || 1))*100}%`}}></div>
+                </div>
               </div>
-            </div>
-            <button onClick={() => setShowPricing(true)} className="upgrade-btn">💎 ترقية</button>
+            )}
+            <button onClick={() => setShowPricing(true)} className="upgrade-btn">
+              {user ? '💎 ترقية' : '🔐 اشتركي'}
+            </button>
           </div>
         </header>
 
@@ -476,8 +514,10 @@ ${imageContext}${textContext}
                   <div className="option-group">
                     <label>المنصة:</label>
                     <div className="option-buttons">
-                      {platforms.slice(0,4).map(p => (
-                        <button key={p} onClick={() => setPlatform(p)} className={`option-btn ${platform===p?'active':''}`}>{p}</button>
+                      {platforms.map(p => (
+                        <button key={p} onClick={() => setPlatform(p)} className={`option-btn ${platform===p?'active':''}`}>
+                          {p === 'story' ? '📖 قصة تسويقية' : p}
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -524,20 +564,14 @@ ${imageContext}${textContext}
             <div className="modal">
               <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
               <h2 className="modal-title">💎 اختاري باقتك</h2>
+              <p className="modal-sub">اشتركي الآن وابدئي بإنشاء برومبتات احترافية</p>
               <div className="pricing-grid">
-                <div className="pricing-card">
-                  <div className="plan-icon">🌸</div>
-                  <h3>مجاني</h3>
-                  <div className="plan-price">$0<span>/شهر</span></div>
-                  <ul><li>✓ 5 توليدات</li><li>✓ جميع الأدوات</li></ul>
-                  <button onClick={() => handleSubscribe('free')} className="subscribe-btn free">الحالية</button>
-                </div>
                 <div className="pricing-card">
                   <div className="plan-icon">✨</div>
                   <h3>Basic</h3>
                   <div className="plan-price">$15<span>/شهر</span></div>
                   <ul><li>✓ 200 توليد</li><li>✓ جميع الأدوات</li><li>✓ دعم إيميل</li></ul>
-                  <button onClick={() => handleSubscribe('basic')} className="subscribe-btn">اشتركي</button>
+                  <button onClick={() => handleSubscribe('basic')} className="subscribe-btn">اشتركي الآن</button>
                 </div>
                 <div className="pricing-card featured">
                   <div className="popular-badge">⭐ الأكثر شعبية</div>
@@ -545,14 +579,14 @@ ${imageContext}${textContext}
                   <h3>Pro</h3>
                   <div className="plan-price">$35<span>/شهر</span></div>
                   <ul><li>✓ 400 توليد</li><li>✓ أولوية دعم</li><li>✓ ميزات حصرية</li></ul>
-                  <button onClick={() => handleSubscribe('pro')} className="subscribe-btn pro">اشتركي</button>
+                  <button onClick={() => handleSubscribe('pro')} className="subscribe-btn pro">اشتركي الآن</button>
                 </div>
                 <div className="pricing-card">
                   <div className="plan-icon">👑</div>
                   <h3>Enterprise</h3>
                   <div className="plan-price">$70<span>/شهر</span></div>
                   <ul><li>✓ 700 توليد</li><li>✓ مدير حساب</li><li>✓ API Access</li></ul>
-                  <button onClick={() => handleSubscribe('enterprise')} className="subscribe-btn">اشتركي</button>
+                  <button onClick={() => handleSubscribe('enterprise')} className="subscribe-btn">اشتركي الآن</button>
                 </div>
               </div>
             </div>
@@ -612,10 +646,12 @@ ${imageContext}${textContext}
         .result-content { white-space: pre-wrap; line-height: 1.9; color: #374151; }
         .placeholder { color: #a78bfa; text-align: center; padding: 3rem; }
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-        .modal { background: white; border-radius: 30px; padding: 2.5rem; max-width: 1000px; width: 95%; max-height: 90vh; overflow-y: auto; position: relative; }
+        .modal { background: white; border-radius: 30px; padding: 2.5rem; max-width: 900px; width: 95%; max-height: 90vh; overflow-y: auto; position: relative; }
         .close-modal { position: absolute; top: 1rem; left: 1rem; background: #f3e8ff; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; color: #7c3aed; }
-        .modal-title { text-align: center; font-size: 2rem; color: #7c3aed; margin-bottom: 2rem; }
-        .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; }
+        .modal-title { text-align: center; font-size: 2rem; color: #7c3aed; margin-bottom: 0.5rem; }
+        .modal-sub { text-align: center; color: #9ca3af; margin-bottom: 2rem; }
+        .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
+        @media (max-width: 800px) { .pricing-grid { grid-template-columns: 1fr; } }
         .pricing-card { background: white; border-radius: 25px; padding: 2rem; text-align: center; border: 2px solid #e9d5ff; position: relative; }
         .pricing-card.featured { border-color: #a855f7; box-shadow: 0 10px 40px rgba(168,85,247,0.2); transform: scale(1.05); }
         .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; padding: 0.4rem 1.2rem; border-radius: 20px; font-size: 0.8rem; font-weight: 700; }
@@ -626,7 +662,6 @@ ${imageContext}${textContext}
         .pricing-card ul { list-style: none; margin-bottom: 1.5rem; text-align: right; }
         .pricing-card li { padding: 0.5rem 0; }
         .subscribe-btn { width: 100%; padding: 1rem; background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border: none; border-radius: 15px; font-weight: 700; cursor: pointer; }
-        .subscribe-btn.free { background: #e5e7eb; color: #6b7280; }
         .subscribe-btn.pro { box-shadow: 0 4px 15px rgba(168,85,247,0.4); }
         .footer { text-align: center; padding: 2rem; color: #9ca3af; }
       `}</style>
