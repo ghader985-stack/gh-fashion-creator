@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 
 export default function Home() {
@@ -9,8 +9,10 @@ export default function Home() {
   const [imagePreview, setImagePreview] = useState('');
   const [textInput, setTextInput] = useState('');
   const [inputMode, setInputMode] = useState('text');
+  const [showPricing, setShowPricing] = useState(false);
+  const [user, setUser] = useState(null);
+  const [usageCount, setUsageCount] = useState(0);
   
-  // Design states
   const [style, setStyle] = useState('elegant');
   const [category, setCategory] = useState('dress');
   const [gender, setGender] = useState('women');
@@ -19,6 +21,23 @@ export default function Home() {
   const [tone, setTone] = useState('luxury');
   const [videoType, setVideoType] = useState('reel');
   const [shotStyle, setShotStyle] = useState('closeup');
+  const [sceneCount, setSceneCount] = useState(3);
+  const [startFrame, setStartFrame] = useState('');
+  const [endFrame, setEndFrame] = useState('');
+
+  const plans = {
+    free: { name: 'مجاني', limit: 5, price: 0 },
+    basic: { name: 'Basic', limit: 200, price: 15 },
+    pro: { name: 'Pro', limit: 400, price: 35 },
+    enterprise: { name: 'Enterprise', limit: 700, price: 70 }
+  };
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem('gh_user');
+    if (savedUser) setUser(JSON.parse(savedUser));
+    const savedUsage = localStorage.getItem('gh_usage');
+    if (savedUsage) setUsageCount(parseInt(savedUsage));
+  }, []);
 
   const tabs = [
     { id: 'extract', name: 'استخراج برومبت', icon: '🔍' },
@@ -29,7 +48,7 @@ export default function Home() {
     { id: 'marketing', name: 'محتوى تسويقي', icon: '📱' },
   ];
 
-  const styles = ['elegant', 'casual', 'couture', 'minimalist', 'dramatic', 'romantic', 'edgy', 'classic'];
+  const stylesArr = ['elegant', 'casual', 'couture', 'minimalist', 'dramatic', 'romantic', 'edgy', 'classic'];
   const categories = ['dress', 'abaya', 'suit', 'jacket', 'gown', 'casual', 'sportswear', 'accessories'];
   const moods = ['dramatic', 'soft', 'energetic', 'mysterious', 'romantic', 'bold', 'natural', 'cinematic'];
   const platforms = ['instagram', 'tiktok', 'pinterest', 'website', 'print'];
@@ -42,336 +61,338 @@ export default function Home() {
     if (file) {
       setImage(file);
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result);
-      };
+      reader.onloadend = () => setImagePreview(reader.result);
       reader.readAsDataURL(file);
     }
   };
 
-  const removeImage = () => {
-    setImage(null);
-    setImagePreview('');
+  const removeImage = () => { setImage(null); setImagePreview(''); };
+  const checkUsageLimit = () => usageCount < plans[user?.plan || 'free'].limit;
+  const incrementUsage = () => {
+    const newCount = usageCount + 1;
+    setUsageCount(newCount);
+    localStorage.setItem('gh_usage', newCount.toString());
   };
 
   const getPromptByTab = () => {
-    const imageContext = image ? `\n\nالمستخدم رفع صورة - حللها واستخدمها كمرجع أساسي للبرومبت.` : '';
+    const imageContext = image ? `\n\n📸 صورة مرفقة - حللها بدقة واستخدمها كمرجع أساسي.` : '';
     const textContext = textInput ? `\n\nوصف المستخدم: ${textInput}` : '';
     
     switch(activeTab) {
       case 'extract':
-        return `أنت خبير في كتابة برومبتات توليد الصور الاحترافية للأزياء والموضة.
-
-المطلوب: استخراج برومبت احترافي بالإنجليزية جاهز للاستخدام في Midjourney أو Stable Diffusion.
+        return `أنتِ خبيرة في برومبتات توليد صور الأزياء.
 ${imageContext}${textContext}
 
-قدم:
-1. **البرومبت الرئيسي (بالإنجليزية):**
-   - برومبت مفصل يشمل: الموضوع، الإضاءة، زاوية الكاميرا، الألوان، الستايل، الجودة
-   
-2. **Negative Prompt:**
-   - ما يجب تجنبه
+قدمي:
+═══════════════════════════════════════
+🎯 البرومبت الرئيسي (إنجليزي - جاهز للنسخ)
+═══════════════════════════════════════
+[برومبت كامل مع: الوصف، الإضاءة، العدسة، الزاوية، الجودة 8K]
 
-3. **الإعدادات المقترحة:**
-   - Aspect Ratio
-   - Style parameters
+═══════════════════════════════════════
+🚫 Negative Prompt
+═══════════════════════════════════════
+[ما يجب تجنبه]
 
-4. **الترجمة العربية:**
-   - ترجمة البرومبت للعربية للفهم`;
+═══════════════════════════════════════
+⚙️ الإعدادات الموصى بها
+═══════════════════════════════════════
+• الأداة: Midjourney v6 / Leonardo AI
+• Aspect Ratio: [النسبة]
+• الإعدادات: [--q 2, --stylize 100]
+
+═══════════════════════════════════════
+🌐 الترجمة العربية الكاملة
+═══════════════════════════════════════
+[ترجمة كاملة ومفصلة]`;
 
       case 'fashion':
-        return `أنت مصور أزياء محترف ومتخصص في كتابة برومبتات تصوير الموديلز والأزياء.
-
-المطلوب: برومبت تصوير أزياء احترافي
-الستايل: ${style}
-الفئة: ${category}
-الجنس: ${gender === 'women' ? 'نساء' : 'رجال'}
+        return `أنتِ مصورة أزياء محترفة.
+الستايل: ${style} | الفئة: ${category} | الجنس: ${gender === 'women' ? 'نساء' : 'رجال'}
 ${imageContext}${textContext}
 
-قدم برومبت احترافي يشمل:
+قدمي:
+═══════════════════════════════════════
+📸 برومبت التصوير (إنجليزي)
+═══════════════════════════════════════
+[وصف الموديل، الملابس، الإضاءة، العدسة 85mm f/1.4، الخلفية، المود]
 
-1. **برومبت التصوير (بالإنجليزية):**
-   - وصف الموديل والوقفة
-   - تفاصيل الملابس والأكسسوارات
-   - الإضاءة (نوعها، اتجاهها، شدتها)
-   - الخلفية والأجواء
-   - زاوية الكاميرا والعدسة
-   - المود والإحساس العام
+═══════════════════════════════════════
+🚫 Negative Prompt
+═══════════════════════════════════════
 
-2. **Negative Prompt**
+═══════════════════════════════════════
+📷 إعدادات الكاميرا
+═══════════════════════════════════════
+• العدسة: Canon 85mm f/1.2L
+• الفتحة: f/2.8 | ISO: 100
+• الإضاءة: [وصف تفصيلي]
 
-3. **إعدادات الكاميرا المقترحة:**
-   - نوع العدسة
-   - الإعدادات التقنية
+═══════════════════════════════════════
+💡 نصائح التصوير
+═══════════════════════════════════════
 
-4. **نصائح للتصوير**
-
-5. **الترجمة العربية للبرومبت**`;
+═══════════════════════════════════════
+🌐 الترجمة العربية
+═══════════════════════════════════════`;
 
       case 'product':
-        return `أنت مصور منتجات محترف متخصص في تصوير الأزياء والإكسسوارات.
-
-المطلوب: برومبت تصوير منتج أزياء احترافي
-الفئة: ${category}
-نوع اللقطة: ${shotStyle}
+        return `أنتِ مصورة منتجات أزياء.
+الفئة: ${category} | اللقطة: ${shotStyle}
 ${imageContext}${textContext}
 
-قدم:
+قدمي:
+═══════════════════════════════════════
+📦 برومبت تصوير المنتج (إنجليزي)
+═══════════════════════════════════════
 
-1. **برومبت تصوير المنتج (بالإنجليزية):**
-   - وصف دقيق للمنتج
-   - نوع الخلفية والسطح
-   - إعداد الإضاءة المثالي
-   - زاوية التصوير
-   - التفاصيل البارزة للإظهار
+═══════════════════════════════════════
+🚫 Negative Prompt
+═══════════════════════════════════════
 
-2. **Negative Prompt**
+═══════════════════════════════════════
+📷 الإعدادات التقنية
+═══════════════════════════════════════
 
-3. **إعدادات احترافية:**
-   - نوع العدسة الماكرو/عادية
-   - إعدادات الكاميرا
+═══════════════════════════════════════
+🎨 3 زوايا مختلفة مقترحة
+═══════════════════════════════════════
+1. [برومبت الزاوية الأولى]
+2. [برومبت الزاوية الثانية]
+3. [برومبت الزاوية الثالثة]
 
-4. **أفكار للتنويع:**
-   - 3 زوايا مختلفة مقترحة
-   - أفكار للتصوير الإبداعي
-
-5. **الترجمة العربية**`;
+═══════════════════════════════════════
+🌐 الترجمة العربية
+═══════════════════════════════════════`;
 
       case 'video':
-        return `أنت مخرج فيديوهات أزياء ومحتوى محترف.
-
-المطلوب: برومبت فيديو احترافي
-نوع الفيديو: ${videoType}
-المود: ${mood}
-المنصة: ${platform}
+        return `أنتِ مخرجة فيديوهات أزياء.
+النوع: ${videoType} | المود: ${mood} | المنصة: ${platform}
 ${imageContext}${textContext}
 
-قدم:
+قدمي:
+═══════════════════════════════════════
+🎬 برومبت الفيديو (إنجليزي)
+═══════════════════════════════════════
 
-1. **برومبت الفيديو (بالإنجليزية):**
-   - وصف المشهد العام
-   - حركة الكاميرا
-   - الإضاءة والألوان
-   - المود والأجواء
+═══════════════════════════════════════
+📝 السيناريو المفصل
+═══════════════════════════════════════
 
-2. **سيناريو مفصل:**
-   - المشهد 1 (0-3 ثواني): الافتتاحية
-   - المشهد 2 (3-8 ثواني): الكشف
-   - المشهد 3 (8-15 ثواني): التفاصيل
-   - المشهد 4 (15-25 ثواني): الأسلوب
-   - المشهد 5 (25-30 ثواني): الختام والـ CTA
+🎬 المشهد 1 | الافتتاحية (0:00-0:03)
+• اللقطة: [وصف]
+• الكاميرا: [حركة]
+• الإضاءة: [وصف]
+• الهدف: إيقاف السكرول
 
-3. **حركات الكاميرا:**
-   - لكل مشهد بالتفصيل
+🎬 المشهد 2 | الكشف (0:03-0:08)
+• اللقطة: [وصف]
+• الكاميرا: [slow motion]
+• الهدف: لحظة WOW
 
-4. **الموسيقى والصوت:**
-   - نوع الموسيقى المقترحة
-   - المؤثرات الصوتية
+🎬 المشهد 3 | التفاصيل (0:08-0:15)
+• 4 لقطات سريعة للقماش والتفاصيل
 
-5. **الترجمة العربية**`;
+🎬 المشهد 4 | أسلوب الحياة (0:15-0:22)
+
+🎬 المشهد 5 | CTA (0:22-0:30)
+
+═══════════════════════════════════════
+🎵 الموسيقى
+═══════════════════════════════════════
+
+═══════════════════════════════════════
+🌐 الترجمة العربية
+═══════════════════════════════════════`;
 
       case 'scene':
-        return `أنت مخرج سينمائي ومصور مشاهد أزياء محترف.
-
-المطلوب: إخراج مشهد سينمائي للأزياء
-الستايل: ${style}
-المود: ${mood}
+        return `أنتِ مخرجة سينمائية للأزياء.
+عدد اللقطات: ${sceneCount} | الستايل: ${style} | المود: ${mood}
+${startFrame ? `لقطة البداية: ${startFrame}` : ''}
+${endFrame ? `لقطة النهاية: ${endFrame}` : ''}
 ${imageContext}${textContext}
 
-قدم:
+قدمي:
+═══════════════════════════════════════
+🎭 المشهد السينمائي
+═══════════════════════════════════════
+الفكرة: [وصف المشهد والقصة]
 
-1. **وصف المشهد السينمائي (بالإنجليزية):**
-   - الموقع والديكور
-   - الإضاءة السينمائية
-   - تكوين الكادر
-   - حركة الممثل/الموديل
-   - الملابس والستايلينغ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎬 اللقطة 1 | البداية
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+**البرومبت:** [إنجليزي كامل]
+• نوع اللقطة: [Close-up/Wide/Medium]
+• العدسة: [mm]
+• حركة الكاميرا: [Static/Dolly/Crane]
+• الإضاءة: [وصف]
+• المدة: [ثواني]
 
-2. **التفاصيل التقنية:**
-   - نوع العدسة
-   - حركة الكاميرا
-   - Color grading مقترح
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎬 اللقطة 2 | التطور
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[نفس التنسيق]
 
-3. **المرجعيات البصرية:**
-   - أفلام أو مصورين للإلهام
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎬 اللقطة 3 | النهاية
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[نفس التنسيق]
 
-4. **Mood Board وصفي:**
-   - الألوان الرئيسية
-   - الأجواء والمشاعر
+═══════════════════════════════════════
+🎨 Color Grading
+═══════════════════════════════════════
 
-5. **الترجمة العربية**`;
+═══════════════════════════════════════
+🎬 مرجعيات بصرية
+═══════════════════════════════════════
+
+═══════════════════════════════════════
+🌐 الترجمة العربية
+═══════════════════════════════════════`;
 
       case 'marketing':
-        return `أنت خبير تسويق رقمي ومحتوى للأزياء والموضة.
-
-المطلوب: محتوى تسويقي احترافي
-المنصة: ${platform}
-النبرة: ${tone}
+        return `أنتِ خبيرة تسويق أزياء فاخرة.
+المنصة: ${platform} | النبرة: ${tone}
 ${imageContext}${textContext}
 
-قدم:
+قدمي:
+═══════════════════════════════════════
+📖 القصة التسويقية
+═══════════════════════════════════════
+[قصة مؤثرة عن المنتج: الإلهام، التميز، الشعور - 3 فقرات]
 
-1. **الكابشن (3 نسخ):**
-   - قصير (سطر واحد)
-   - متوسط (2-3 أسطر)
-   - طويل (فقرة كاملة)
+═══════════════════════════════════════
+✨ الكابشنات
+═══════════════════════════════════════
+📝 قصير: [سطر]
+📝 متوسط: [2-3 أسطر]
+📝 طويل: [فقرة]
 
-2. **الهاشتاقات:**
-   - 10 هاشتاقات عربية
-   - 10 هاشتاقات إنجليزية
+═══════════════════════════════════════
+📱 5 أفكار ريل
+═══════════════════════════════════════
+🎬 ريل 1: [العنوان والفكرة والترند]
+🎬 ريل 2:
+🎬 ريل 3:
+🎬 ريل 4:
+🎬 ريل 5:
 
-3. **Call to Action:**
-   - 5 خيارات مختلفة
+═══════════════════════════════════════
+📸 5 أفكار ستوري
+═══════════════════════════════════════
 
-4. **أفكار للستوري:**
-   - 5 أفكار للستوري مع وصف كل واحدة
+═══════════════════════════════════════
+#️⃣ الهاشتاقات
+═══════════════════════════════════════
+عربي: [15 هاشتاق]
+إنجليزي: [15 هاشتاق]
 
-5. **سكريبت ريل قصير:**
-   - 15-30 ثانية مع التوقيت
+═══════════════════════════════════════
+🎯 Call to Action
+═══════════════════════════════════════
+1. [قوي] 2. [عاطفي] 3. [عاجل] 4. [فضولي] 5. [حصري]
 
-6. **استراتيجية النشر:**
-   - أفضل الأوقات
-   - نصائح للتفاعل`;
+═══════════════════════════════════════
+📊 استراتيجية النشر
+═══════════════════════════════════════`;
 
-      default:
-        return '';
+      default: return '';
     }
   };
 
   const handleGenerate = async () => {
-    setLoading(true);
-    setResult('');
-
+    if (!checkUsageLimit()) { setShowPricing(true); return; }
+    setLoading(true); setResult('');
     try {
       const formData = new FormData();
       formData.append('prompt', getPromptByTab());
       formData.append('tab', activeTab);
-      if (image) {
-        formData.append('image', image);
-      }
-
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        body: formData,
-      });
-
+      if (image) formData.append('image', image);
+      const response = await fetch('/api/generate', { method: 'POST', body: formData });
       const data = await response.json();
-      
-      if (data.error) {
-        setResult('❌ خطأ: ' + data.error);
-      } else {
-        setResult(data.result);
-      }
-    } catch (error) {
-      setResult('❌ حدث خطأ في الاتصال. حاولي مرة أخرى.');
-    }
-
+      if (data.error) setResult('❌ خطأ: ' + data.error);
+      else { setResult(data.result); incrementUsage(); }
+    } catch (error) { setResult('❌ خطأ في الاتصال'); }
     setLoading(false);
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(result);
-    alert('تم النسخ! ✅');
+  const copyToClipboard = () => { navigator.clipboard.writeText(result); alert('تم النسخ! ✅'); };
+  
+  const handleSubscribe = (plan) => {
+    setUser({ plan, subscribedAt: new Date().toISOString() });
+    localStorage.setItem('gh_user', JSON.stringify({ plan }));
+    setUsageCount(0); localStorage.setItem('gh_usage', '0');
+    setShowPricing(false);
+    alert(`تم الاشتراك في ${plans[plan].name}! 🎉`);
   };
 
   return (
     <>
       <Head>
-        <title>GH Fashion Creator - AI Fashion Prompt Generator</title>
+        <title>GH Fashion Creator</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
       </Head>
 
-      <div style={containerStyle}>
-        {/* Header */}
-        <header style={headerStyle}>
-          <div style={logoStyle}>
-            <span style={logoIconStyle}>GH</span>
+      <div className="container">
+        <header className="header">
+          <div className="logo-container">
+            <div className="logo-icon">GH</div>
             <div>
-              <h1 style={logoTextStyle}>GH Fashion Creator</h1>
-              <p style={logoSubStyle}>مولد البرومبتات الاحترافي للأزياء</p>
+              <h1 className="logo-text">GH Fashion Creator</h1>
+              <p className="logo-sub">مولد البرومبتات الاحترافي للأزياء ✨</p>
             </div>
+          </div>
+          <div className="header-actions">
+            <div className="usage-info">
+              <span>الاستخدام: {usageCount}/{plans[user?.plan || 'free'].limit}</span>
+              <div className="usage-bar">
+                <div className="usage-fill" style={{width: `${(usageCount/plans[user?.plan||'free'].limit)*100}%`}}></div>
+              </div>
+            </div>
+            <button onClick={() => setShowPricing(true)} className="upgrade-btn">💎 ترقية</button>
           </div>
         </header>
 
-        {/* Tabs */}
-        <nav style={tabsContainerStyle}>
+        <nav className="tabs-container">
           {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                ...tabStyle,
-                ...(activeTab === tab.id ? activeTabStyle : {}),
-              }}
-            >
-              <span style={{ marginLeft: '8px' }}>{tab.icon}</span>
-              {tab.name}
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`tab ${activeTab === tab.id ? 'active' : ''}`}>
+              <span>{tab.icon}</span> {tab.name}
             </button>
           ))}
         </nav>
 
-        {/* Main Content */}
-        <main style={mainStyle}>
-          {/* Input Section */}
-          <section style={inputSectionStyle}>
-            <h2 style={sectionTitleStyle}>
-              {tabs.find(t => t.id === activeTab)?.icon} {tabs.find(t => t.id === activeTab)?.name}
-            </h2>
+        <main className="main">
+          <section className="input-section">
+            <h2 className="section-title">{tabs.find(t => t.id === activeTab)?.icon} {tabs.find(t => t.id === activeTab)?.name}</h2>
 
-            {/* Input Mode Toggle */}
-            <div style={inputModeStyle}>
-              <button
-                onClick={() => setInputMode('text')}
-                style={{
-                  ...modeButtonStyle,
-                  ...(inputMode === 'text' ? activeModeStyle : {}),
-                }}
-              >
-                ✏️ من وصف نصي
-              </button>
-              <button
-                onClick={() => setInputMode('image')}
-                style={{
-                  ...modeButtonStyle,
-                  ...(inputMode === 'image' ? activeModeStyle : {}),
-                }}
-              >
-                🖼️ من صورة
-              </button>
+            <div className="input-mode">
+              <button onClick={() => setInputMode('text')} className={`mode-btn ${inputMode === 'text' ? 'active' : ''}`}>✏️ من وصف نصي</button>
+              <button onClick={() => setInputMode('image')} className={`mode-btn ${inputMode === 'image' ? 'active' : ''}`}>🖼️ من صورة</button>
             </div>
 
-            {/* Text Input */}
             {inputMode === 'text' && (
-              <div style={inputGroupStyle}>
-                <label style={labelStyle}>اشرحي فكرتك أو المشهد المطلوب:</label>
-                <textarea
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  placeholder="مثال: فستان سهرة أحمر فاخر مع تطريز ذهبي، تصوير في قصر كلاسيكي..."
-                  style={textareaStyle}
-                />
+              <div className="input-group">
+                <label>اشرحي فكرتك:</label>
+                <textarea value={textInput} onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="مثال: فستان سهرة أحمر فاخر مع تطريز ذهبي..."></textarea>
               </div>
             )}
 
-            {/* Image Upload */}
             {inputMode === 'image' && (
-              <div style={inputGroupStyle}>
-                <label style={labelStyle}>ارفعي صورة للتحليل:</label>
-                <div style={uploadAreaStyle}>
+              <div className="input-group">
+                <label>ارفعي صورة:</label>
+                <div className="upload-area">
                   {imagePreview ? (
-                    <div style={imagePreviewContainerStyle}>
-                      <img src={imagePreview} alt="Preview" style={previewImageStyle} />
-                      <button onClick={removeImage} style={removeImageStyle}>✕</button>
+                    <div className="image-preview">
+                      <img src={imagePreview} alt="Preview" />
+                      <button onClick={removeImage} className="remove-img">✕</button>
                     </div>
                   ) : (
-                    <label style={uploadLabelStyle}>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleImageUpload}
-                        style={{ display: 'none' }}
-                      />
-                      <span style={uploadIconStyle}>📁</span>
+                    <label className="upload-label">
+                      <input type="file" accept="image/*" onChange={handleImageUpload} style={{display:'none'}} />
+                      <span className="upload-icon">📁</span>
                       <span>اضغطي لرفع صورة</span>
                     </label>
                   )}
@@ -379,547 +400,236 @@ ${imageContext}${textContext}
               </div>
             )}
 
-            {/* Options based on tab */}
-            <div style={optionsGridStyle}>
+            {activeTab === 'scene' && (
+              <div className="scene-options">
+                <div className="input-group">
+                  <label>عدد اللقطات:</label>
+                  <div className="option-buttons">
+                    {[2,3,4,5].map(n => (
+                      <button key={n} onClick={() => setSceneCount(n)} className={`option-btn ${sceneCount===n?'active':''}`}>{n} لقطات</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label>لقطة البداية (اختياري):</label>
+                  <input type="text" value={startFrame} onChange={(e) => setStartFrame(e.target.value)} placeholder="كلوز أب على يد تلمس القماش..." />
+                </div>
+                <div className="input-group">
+                  <label>لقطة النهاية (اختياري):</label>
+                  <input type="text" value={endFrame} onChange={(e) => setEndFrame(e.target.value)} placeholder="لقطة واسعة..." />
+                </div>
+              </div>
+            )}
+
+            <div className="options-grid">
               {(activeTab === 'fashion' || activeTab === 'scene') && (
-                <>
-                  <div style={optionGroupStyle}>
-                    <label style={labelStyle}>الستايل:</label>
-                    <div style={optionButtonsStyle}>
-                      {styles.slice(0, 4).map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => setStyle(s)}
-                          style={{
-                            ...optionBtnStyle,
-                            ...(style === s ? activeOptionStyle : {}),
-                          }}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
+                <div className="option-group">
+                  <label>الستايل:</label>
+                  <div className="option-buttons">
+                    {stylesArr.slice(0,4).map(s => (
+                      <button key={s} onClick={() => setStyle(s)} className={`option-btn ${style===s?'active':''}`}>{s}</button>
+                    ))}
                   </div>
-
-                  {activeTab === 'fashion' && (
-                    <div style={optionGroupStyle}>
-                      <label style={labelStyle}>الجنس:</label>
-                      <div style={optionButtonsStyle}>
-                        <button
-                          onClick={() => setGender('women')}
-                          style={{
-                            ...optionBtnStyle,
-                            ...(gender === 'women' ? activeOptionStyle : {}),
-                          }}
-                        >
-                          👩 نساء
-                        </button>
-                        <button
-                          onClick={() => setGender('men')}
-                          style={{
-                            ...optionBtnStyle,
-                            ...(gender === 'men' ? activeOptionStyle : {}),
-                          }}
-                        >
-                          👨 رجال
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </>
+                </div>
               )}
-
+              {activeTab === 'fashion' && (
+                <div className="option-group">
+                  <label>الجنس:</label>
+                  <div className="option-buttons">
+                    <button onClick={() => setGender('women')} className={`option-btn ${gender==='women'?'active':''}`}>👩 نساء</button>
+                    <button onClick={() => setGender('men')} className={`option-btn ${gender==='men'?'active':''}`}>👨 رجال</button>
+                  </div>
+                </div>
+              )}
               {(activeTab === 'fashion' || activeTab === 'product') && (
-                <div style={optionGroupStyle}>
-                  <label style={labelStyle}>الفئة:</label>
-                  <div style={optionButtonsStyle}>
-                    {categories.slice(0, 4).map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => setCategory(c)}
-                        style={{
-                          ...optionBtnStyle,
-                          ...(category === c ? activeOptionStyle : {}),
-                        }}
-                      >
-                        {c}
-                      </button>
+                <div className="option-group">
+                  <label>الفئة:</label>
+                  <div className="option-buttons">
+                    {categories.slice(0,4).map(c => (
+                      <button key={c} onClick={() => setCategory(c)} className={`option-btn ${category===c?'active':''}`}>{c}</button>
                     ))}
                   </div>
                 </div>
               )}
-
               {(activeTab === 'video' || activeTab === 'scene') && (
-                <div style={optionGroupStyle}>
-                  <label style={labelStyle}>المود:</label>
-                  <div style={optionButtonsStyle}>
-                    {moods.slice(0, 4).map((m) => (
-                      <button
-                        key={m}
-                        onClick={() => setMood(m)}
-                        style={{
-                          ...optionBtnStyle,
-                          ...(mood === m ? activeOptionStyle : {}),
-                        }}
-                      >
-                        {m}
-                      </button>
+                <div className="option-group">
+                  <label>المود:</label>
+                  <div className="option-buttons">
+                    {moods.slice(0,4).map(m => (
+                      <button key={m} onClick={() => setMood(m)} className={`option-btn ${mood===m?'active':''}`}>{m}</button>
                     ))}
                   </div>
                 </div>
               )}
-
               {activeTab === 'video' && (
-                <div style={optionGroupStyle}>
-                  <label style={labelStyle}>نوع الفيديو:</label>
-                  <div style={optionButtonsStyle}>
-                    {videoTypes.slice(0, 4).map((v) => (
-                      <button
-                        key={v}
-                        onClick={() => setVideoType(v)}
-                        style={{
-                          ...optionBtnStyle,
-                          ...(videoType === v ? activeOptionStyle : {}),
-                        }}
-                      >
-                        {v}
-                      </button>
+                <div className="option-group">
+                  <label>نوع الفيديو:</label>
+                  <div className="option-buttons">
+                    {videoTypes.slice(0,4).map(v => (
+                      <button key={v} onClick={() => setVideoType(v)} className={`option-btn ${videoType===v?'active':''}`}>{v}</button>
                     ))}
                   </div>
                 </div>
               )}
-
               {activeTab === 'marketing' && (
                 <>
-                  <div style={optionGroupStyle}>
-                    <label style={labelStyle}>المنصة:</label>
-                    <div style={optionButtonsStyle}>
-                      {platforms.slice(0, 4).map((p) => (
-                        <button
-                          key={p}
-                          onClick={() => setPlatform(p)}
-                          style={{
-                            ...optionBtnStyle,
-                            ...(platform === p ? activeOptionStyle : {}),
-                          }}
-                        >
-                          {p}
-                        </button>
+                  <div className="option-group">
+                    <label>المنصة:</label>
+                    <div className="option-buttons">
+                      {platforms.slice(0,4).map(p => (
+                        <button key={p} onClick={() => setPlatform(p)} className={`option-btn ${platform===p?'active':''}`}>{p}</button>
                       ))}
                     </div>
                   </div>
-
-                  <div style={optionGroupStyle}>
-                    <label style={labelStyle}>النبرة:</label>
-                    <div style={optionButtonsStyle}>
-                      {tones.slice(0, 4).map((t) => (
-                        <button
-                          key={t}
-                          onClick={() => setTone(t)}
-                          style={{
-                            ...optionBtnStyle,
-                            ...(tone === t ? activeOptionStyle : {}),
-                          }}
-                        >
-                          {t}
-                        </button>
+                  <div className="option-group">
+                    <label>النبرة:</label>
+                    <div className="option-buttons">
+                      {tones.slice(0,4).map(t => (
+                        <button key={t} onClick={() => setTone(t)} className={`option-btn ${tone===t?'active':''}`}>{t}</button>
                       ))}
                     </div>
                   </div>
                 </>
               )}
-
               {activeTab === 'product' && (
-                <div style={optionGroupStyle}>
-                  <label style={labelStyle}>نوع اللقطة:</label>
-                  <div style={optionButtonsStyle}>
-                    {shotStyles.slice(0, 4).map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => setShotStyle(s)}
-                        style={{
-                          ...optionBtnStyle,
-                          ...(shotStyle === s ? activeOptionStyle : {}),
-                        }}
-                      >
-                        {s}
-                      </button>
+                <div className="option-group">
+                  <label>نوع اللقطة:</label>
+                  <div className="option-buttons">
+                    {shotStyles.slice(0,4).map(s => (
+                      <button key={s} onClick={() => setShotStyle(s)} className={`option-btn ${shotStyle===s?'active':''}`}>{s}</button>
                     ))}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Generate Button */}
-            <button
-              onClick={handleGenerate}
-              disabled={loading}
-              style={{
-                ...generateButtonStyle,
-                opacity: loading ? 0.7 : 1,
-              }}
-            >
-              {loading ? (
-                <>
-                  <span style={spinnerStyle}></span>
-                  جاري التوليد...
-                </>
-              ) : (
-                <>✨ استخرج البرومبت</>
-              )}
+            <button onClick={handleGenerate} disabled={loading} className="generate-btn">
+              {loading ? <><span className="spinner"></span> جاري التوليد...</> : <>✨ استخرج البرومبت</>}
             </button>
           </section>
 
-          {/* Result Section */}
-          <section style={resultSectionStyle}>
-            <div style={resultHeaderStyle}>
-              <h2 style={sectionTitleStyle}>📋 النتيجة</h2>
-              {result && (
-                <button onClick={copyToClipboard} style={copyButtonStyle}>
-                  📋 نسخ
-                </button>
-              )}
+          <section className="result-section">
+            <div className="result-header">
+              <h2 className="section-title">📋 النتيجة</h2>
+              {result && <button onClick={copyToClipboard} className="copy-btn">📋 نسخ</button>}
             </div>
-            <div style={resultAreaStyle}>
-              {result ? (
-                <div style={resultContentStyle}>{result}</div>
-              ) : (
-                <p style={placeholderStyle}>
-                  النتيجة ستظهر هنا بعد التوليد...
-                </p>
-              )}
+            <div className="result-area">
+              {result ? <div className="result-content">{result}</div> : <p className="placeholder">✨ النتيجة ستظهر هنا...</p>}
             </div>
           </section>
         </main>
 
-        {/* Footer */}
-        <footer style={footerStyle}>
-          <p>© 2026 GH Fashion Creator - Professional AI Fashion Prompt Generator</p>
-        </footer>
+        {showPricing && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
+              <h2 className="modal-title">💎 اختاري باقتك</h2>
+              <div className="pricing-grid">
+                <div className="pricing-card">
+                  <div className="plan-icon">🌸</div>
+                  <h3>مجاني</h3>
+                  <div className="plan-price">$0<span>/شهر</span></div>
+                  <ul><li>✓ 5 توليدات</li><li>✓ جميع الأدوات</li></ul>
+                  <button onClick={() => handleSubscribe('free')} className="subscribe-btn free">الحالية</button>
+                </div>
+                <div className="pricing-card">
+                  <div className="plan-icon">✨</div>
+                  <h3>Basic</h3>
+                  <div className="plan-price">$15<span>/شهر</span></div>
+                  <ul><li>✓ 200 توليد</li><li>✓ جميع الأدوات</li><li>✓ دعم إيميل</li></ul>
+                  <button onClick={() => handleSubscribe('basic')} className="subscribe-btn">اشتركي</button>
+                </div>
+                <div className="pricing-card featured">
+                  <div className="popular-badge">⭐ الأكثر شعبية</div>
+                  <div className="plan-icon">💎</div>
+                  <h3>Pro</h3>
+                  <div className="plan-price">$35<span>/شهر</span></div>
+                  <ul><li>✓ 400 توليد</li><li>✓ أولوية دعم</li><li>✓ ميزات حصرية</li></ul>
+                  <button onClick={() => handleSubscribe('pro')} className="subscribe-btn pro">اشتركي</button>
+                </div>
+                <div className="pricing-card">
+                  <div className="plan-icon">👑</div>
+                  <h3>Enterprise</h3>
+                  <div className="plan-price">$70<span>/شهر</span></div>
+                  <ul><li>✓ 700 توليد</li><li>✓ مدير حساب</li><li>✓ API Access</li></ul>
+                  <button onClick={() => handleSubscribe('enterprise')} className="subscribe-btn">اشتركي</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <footer className="footer">© 2026 GH Fashion Creator 🌸</footer>
       </div>
 
       <style jsx global>{`
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-        body {
-          font-family: 'Tajawal', 'Segoe UI', sans-serif;
-          background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
-          min-height: 100vh;
-          direction: rtl;
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Tajawal', sans-serif; background: linear-gradient(135deg, #fdf2f8 0%, #faf5ff 50%, #f0f9ff 100%); min-height: 100vh; direction: rtl; }
+        .container { min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #ec4899 0%, #a855f7 50%, #6366f1 100%); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+        .logo-container { display: flex; align-items: center; gap: 1rem; }
+        .logo-icon { width: 55px; height: 55px; background: rgba(255,255,255,0.2); border-radius: 15px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 1.3rem; }
+        .logo-text { font-size: 1.6rem; font-weight: 800; color: white; }
+        .logo-sub { font-size: 0.85rem; color: rgba(255,255,255,0.9); }
+        .header-actions { display: flex; align-items: center; gap: 1rem; }
+        .usage-info { background: rgba(255,255,255,0.2); padding: 0.5rem 1rem; border-radius: 20px; color: white; font-size: 0.85rem; }
+        .usage-bar { width: 100px; height: 6px; background: rgba(255,255,255,0.3); border-radius: 3px; margin-top: 4px; }
+        .usage-fill { height: 100%; background: white; border-radius: 3px; }
+        .upgrade-btn { background: white; color: #ec4899; border: none; padding: 0.6rem 1.2rem; border-radius: 25px; font-weight: 700; cursor: pointer; }
+        .tabs-container { display: flex; justify-content: center; gap: 0.5rem; padding: 1.5rem; flex-wrap: wrap; background: white; }
+        .tab { background: white; border: 2px solid #e9d5ff; padding: 0.75rem 1.25rem; border-radius: 30px; color: #7c3aed; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .tab.active { background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border-color: transparent; }
+        .main { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; padding: 2rem; max-width: 1400px; margin: 0 auto; }
+        @media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
+        .input-section, .result-section { background: white; border-radius: 25px; padding: 2rem; box-shadow: 0 10px 40px rgba(0,0,0,0.08); }
+        .section-title { font-size: 1.4rem; margin-bottom: 1.5rem; color: #7c3aed; font-weight: 700; }
+        .input-mode { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+        .mode-btn { flex: 1; padding: 1rem; border: 2px solid #e9d5ff; border-radius: 15px; background: white; color: #7c3aed; cursor: pointer; font-weight: 600; }
+        .mode-btn.active { background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border-color: transparent; }
+        .input-group { margin-bottom: 1.5rem; }
+        .input-group label { display: block; margin-bottom: 0.5rem; color: #7c3aed; font-weight: 600; }
+        .input-group textarea, .input-group input { width: 100%; padding: 1rem; border: 2px solid #e9d5ff; border-radius: 15px; background: #fdf4ff; font-size: 1rem; font-family: 'Tajawal'; }
+        .input-group textarea { min-height: 120px; resize: vertical; }
+        .upload-area { border: 3px dashed #d8b4fe; border-radius: 20px; padding: 2rem; text-align: center; background: linear-gradient(135deg, #fdf4ff 0%, #faf5ff 100%); }
+        .upload-label { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; cursor: pointer; color: #a855f7; }
+        .upload-icon { font-size: 2.5rem; }
+        .image-preview { position: relative; display: inline-block; }
+        .image-preview img { max-width: 100%; max-height: 200px; border-radius: 15px; }
+        .remove-img { position: absolute; top: -10px; right: -10px; width: 30px; height: 30px; border-radius: 50%; background: #ef4444; color: white; border: none; cursor: pointer; }
+        .scene-options { background: #fdf4ff; padding: 1.5rem; border-radius: 15px; margin-bottom: 1.5rem; }
+        .options-grid { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem; }
+        .option-group { margin-bottom: 0.5rem; }
+        .option-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+        .option-btn { padding: 0.6rem 1.2rem; border: 2px solid #e9d5ff; border-radius: 25px; background: white; color: #7c3aed; cursor: pointer; font-weight: 500; }
+        .option-btn.active { background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border-color: transparent; }
+        .generate-btn { width: 100%; padding: 1.2rem; background: linear-gradient(135deg, #ec4899 0%, #a855f7 50%, #6366f1 100%); color: white; border: none; border-radius: 15px; font-size: 1.2rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+        .generate-btn:disabled { opacity: 0.7; }
+        .spinner { width: 22px; height: 22px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .copy-btn { padding: 0.6rem 1.2rem; background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; }
+        .result-area { background: linear-gradient(135deg, #fdf4ff 0%, #faf5ff 100%); border-radius: 15px; padding: 1.5rem; min-height: 400px; overflow-y: auto; border: 1px solid #e9d5ff; }
+        .result-content { white-space: pre-wrap; line-height: 1.9; color: #374151; }
+        .placeholder { color: #a78bfa; text-align: center; padding: 3rem; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal { background: white; border-radius: 30px; padding: 2.5rem; max-width: 1000px; width: 95%; max-height: 90vh; overflow-y: auto; position: relative; }
+        .close-modal { position: absolute; top: 1rem; left: 1rem; background: #f3e8ff; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; color: #7c3aed; }
+        .modal-title { text-align: center; font-size: 2rem; color: #7c3aed; margin-bottom: 2rem; }
+        .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; }
+        .pricing-card { background: white; border-radius: 25px; padding: 2rem; text-align: center; border: 2px solid #e9d5ff; position: relative; }
+        .pricing-card.featured { border-color: #a855f7; box-shadow: 0 10px 40px rgba(168,85,247,0.2); transform: scale(1.05); }
+        .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; padding: 0.4rem 1.2rem; border-radius: 20px; font-size: 0.8rem; font-weight: 700; }
+        .plan-icon { font-size: 3rem; margin-bottom: 1rem; }
+        .pricing-card h3 { font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .plan-price { font-size: 2.5rem; font-weight: 800; color: #7c3aed; margin-bottom: 1rem; }
+        .plan-price span { font-size: 1rem; font-weight: 400; color: #9ca3af; }
+        .pricing-card ul { list-style: none; margin-bottom: 1.5rem; text-align: right; }
+        .pricing-card li { padding: 0.5rem 0; }
+        .subscribe-btn { width: 100%; padding: 1rem; background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border: none; border-radius: 15px; font-weight: 700; cursor: pointer; }
+        .subscribe-btn.free { background: #e5e7eb; color: #6b7280; }
+        .subscribe-btn.pro { box-shadow: 0 4px 15px rgba(168,85,247,0.4); }
+        .footer { text-align: center; padding: 2rem; color: #9ca3af; }
       `}</style>
     </>
   );
 }
-
-// Styles
-const containerStyle = {
-  minHeight: '100vh',
-  color: '#fff',
-};
-
-const headerStyle = {
-  background: 'linear-gradient(135deg, #d4a574 0%, #c4956a 100%)',
-  padding: '1rem 2rem',
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-};
-
-const logoStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '1rem',
-};
-
-const logoIconStyle = {
-  width: '50px',
-  height: '50px',
-  background: 'linear-gradient(135deg, #8B4513 0%, #A0522D 100%)',
-  borderRadius: '12px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: 'white',
-  fontWeight: '800',
-  fontSize: '1.2rem',
-};
-
-const logoTextStyle = {
-  fontSize: '1.5rem',
-  fontWeight: '700',
-  color: '#1a1a2e',
-  margin: 0,
-};
-
-const logoSubStyle = {
-  fontSize: '0.8rem',
-  color: '#333',
-  margin: 0,
-};
-
-const tabsContainerStyle = {
-  display: 'flex',
-  justifyContent: 'center',
-  gap: '0.5rem',
-  padding: '1.5rem',
-  flexWrap: 'wrap',
-  background: 'rgba(255,255,255,0.05)',
-};
-
-const tabStyle = {
-  background: 'rgba(255,255,255,0.1)',
-  border: '2px solid rgba(212, 165, 116, 0.3)',
-  padding: '0.75rem 1.25rem',
-  borderRadius: '25px',
-  color: '#fff',
-  cursor: 'pointer',
-  fontSize: '0.9rem',
-  fontWeight: '500',
-  transition: 'all 0.3s',
-  display: 'flex',
-  alignItems: 'center',
-};
-
-const activeTabStyle = {
-  background: 'linear-gradient(135deg, #d4a574 0%, #c4956a 100%)',
-  color: '#1a1a2e',
-  borderColor: '#d4a574',
-};
-
-const mainStyle = {
-  display: 'grid',
-  gridTemplateColumns: '1fr 1fr',
-  gap: '2rem',
-  padding: '2rem',
-  maxWidth: '1400px',
-  margin: '0 auto',
-};
-
-const inputSectionStyle = {
-  background: 'rgba(255,255,255,0.05)',
-  borderRadius: '20px',
-  padding: '2rem',
-  border: '1px solid rgba(255,255,255,0.1)',
-};
-
-const sectionTitleStyle = {
-  fontSize: '1.3rem',
-  marginBottom: '1.5rem',
-  color: '#d4a574',
-};
-
-const inputModeStyle = {
-  display: 'flex',
-  gap: '1rem',
-  marginBottom: '1.5rem',
-};
-
-const modeButtonStyle = {
-  flex: 1,
-  padding: '1rem',
-  border: '2px solid rgba(212, 165, 116, 0.3)',
-  borderRadius: '12px',
-  background: 'rgba(255,255,255,0.05)',
-  color: '#fff',
-  cursor: 'pointer',
-  fontSize: '1rem',
-  transition: 'all 0.3s',
-};
-
-const activeModeStyle = {
-  background: 'linear-gradient(135deg, #d4a574 0%, #c4956a 100%)',
-  color: '#1a1a2e',
-  borderColor: '#d4a574',
-};
-
-const inputGroupStyle = {
-  marginBottom: '1.5rem',
-};
-
-const labelStyle = {
-  display: 'block',
-  marginBottom: '0.5rem',
-  color: '#d4a574',
-  fontWeight: '500',
-};
-
-const textareaStyle = {
-  width: '100%',
-  padding: '1rem',
-  border: '2px solid rgba(212, 165, 116, 0.3)',
-  borderRadius: '12px',
-  background: 'rgba(255,255,255,0.05)',
-  color: '#fff',
-  fontSize: '1rem',
-  minHeight: '120px',
-  resize: 'vertical',
-  fontFamily: 'inherit',
-};
-
-const uploadAreaStyle = {
-  border: '3px dashed rgba(212, 165, 116, 0.5)',
-  borderRadius: '15px',
-  padding: '2rem',
-  textAlign: 'center',
-  background: 'rgba(212, 165, 116, 0.05)',
-  cursor: 'pointer',
-};
-
-const uploadLabelStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  gap: '0.5rem',
-  cursor: 'pointer',
-  color: '#d4a574',
-};
-
-const uploadIconStyle = {
-  fontSize: '2rem',
-};
-
-const imagePreviewContainerStyle = {
-  position: 'relative',
-  display: 'inline-block',
-};
-
-const previewImageStyle = {
-  maxWidth: '100%',
-  maxHeight: '200px',
-  borderRadius: '10px',
-};
-
-const removeImageStyle = {
-  position: 'absolute',
-  top: '-10px',
-  right: '-10px',
-  width: '30px',
-  height: '30px',
-  borderRadius: '50%',
-  background: '#e74c3c',
-  color: '#fff',
-  border: 'none',
-  cursor: 'pointer',
-  fontSize: '1rem',
-};
-
-const optionsGridStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '1rem',
-  marginBottom: '1.5rem',
-};
-
-const optionGroupStyle = {
-  marginBottom: '0.5rem',
-};
-
-const optionButtonsStyle = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: '0.5rem',
-};
-
-const optionBtnStyle = {
-  padding: '0.5rem 1rem',
-  border: '2px solid rgba(212, 165, 116, 0.3)',
-  borderRadius: '20px',
-  background: 'rgba(255,255,255,0.05)',
-  color: '#fff',
-  cursor: 'pointer',
-  fontSize: '0.85rem',
-  transition: 'all 0.3s',
-};
-
-const activeOptionStyle = {
-  background: '#d4a574',
-  color: '#1a1a2e',
-  borderColor: '#d4a574',
-};
-
-const generateButtonStyle = {
-  width: '100%',
-  padding: '1.2rem',
-  background: 'linear-gradient(135deg, #d4a574 0%, #8B4513 100%)',
-  color: '#fff',
-  border: 'none',
-  borderRadius: '12px',
-  fontSize: '1.1rem',
-  fontWeight: '700',
-  cursor: 'pointer',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: '0.5rem',
-};
-
-const spinnerStyle = {
-  width: '20px',
-  height: '20px',
-  border: '3px solid rgba(255,255,255,0.3)',
-  borderTopColor: '#fff',
-  borderRadius: '50%',
-  animation: 'spin 1s linear infinite',
-};
-
-const resultSectionStyle = {
-  background: 'rgba(255,255,255,0.05)',
-  borderRadius: '20px',
-  padding: '2rem',
-  border: '1px solid rgba(255,255,255,0.1)',
-  display: 'flex',
-  flexDirection: 'column',
-};
-
-const resultHeaderStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  marginBottom: '1rem',
-};
-
-const copyButtonStyle = {
-  padding: '0.5rem 1rem',
-  background: '#d4a574',
-  color: '#1a1a2e',
-  border: 'none',
-  borderRadius: '8px',
-  cursor: 'pointer',
-  fontWeight: '600',
-};
-
-const resultAreaStyle = {
-  flex: 1,
-  background: 'rgba(0,0,0,0.2)',
-  borderRadius: '12px',
-  padding: '1.5rem',
-  minHeight: '400px',
-  overflowY: 'auto',
-};
-
-const resultContentStyle = {
-  whiteSpace: 'pre-wrap',
-  lineHeight: '1.8',
-  color: '#e0e0e0',
-};
-
-const placeholderStyle = {
-  color: '#888',
-  textAlign: 'center',
-  padding: '2rem',
-};
-
-const footerStyle = {
-  textAlign: 'center',
-  padding: '2rem',
-  color: '#888',
-  fontSize: '0.9rem',
-  borderTop: '1px solid rgba(255,255,255,0.1)',
-};
