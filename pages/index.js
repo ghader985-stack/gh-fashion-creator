@@ -14,7 +14,7 @@ export default function Home() {
   const [usageCount, setUsageCount] = useState(0);
   const [adminCode, setAdminCode] = useState('');
   const [showAdminInput, setShowAdminInput] = useState(false);
-  
+
   const [style, setStyle] = useState('elegant');
   const [category, setCategory] = useState('dress');
   const [gender, setGender] = useState('women');
@@ -26,6 +26,12 @@ export default function Home() {
   const [sceneCount, setSceneCount] = useState(3);
   const [startFrame, setStartFrame] = useState('');
   const [endFrame, setEndFrame] = useState('');
+
+  // ===== حالة المود بورد =====
+  const [moodDescription, setMoodDescription] = useState('');
+  const [moodLoading, setMoodLoading] = useState(false);
+  const [moodBoard, setMoodBoard] = useState(null);
+  const [moodError, setMoodError] = useState('');
 
   const ADMIN_PASSWORD = 'SalyGh85';
 
@@ -50,6 +56,7 @@ export default function Home() {
     { id: 'video', name: 'برومبت فيديو', icon: '🎬' },
     { id: 'scene', name: 'إخراج المشهد', icon: '🎭' },
     { id: 'marketing', name: 'محتوى تسويقي', icon: '📱' },
+    { id: 'moodboard', name: 'المود بورد', icon: '🎨' },
   ];
 
   const stylesArr = ['elegant', 'casual', 'couture', 'minimalist', 'dramatic', 'romantic', 'edgy', 'classic'];
@@ -71,13 +78,13 @@ export default function Home() {
   };
 
   const removeImage = () => { setImage(null); setImagePreview(''); };
-  
+
   const checkUsageLimit = () => {
     if (!user) return false;
     if (user.plan === 'admin') return true;
     return usageCount < plans[user.plan]?.limit;
   };
-  
+
   const incrementUsage = () => {
     if (user?.plan === 'admin') return;
     const newCount = usageCount + 1;
@@ -101,7 +108,7 @@ export default function Home() {
   const getPromptByTab = () => {
     const imageContext = image ? `\n\n📸 صورة مرفقة - حللها بدقة واستخدمها كمرجع أساسي.` : '';
     const textContext = textInput ? `\n\nوصف المستخدم: ${textInput}` : '';
-    
+
     switch(activeTab) {
       case 'extract':
         return `أنتِ خبيرة في برومبتات توليد صور الأزياء.
@@ -308,7 +315,7 @@ ${imageContext}${textContext}
 ═══════════════════════════════════════
 [3 خيارات للشعار]`;
         }
-        
+
         return `أنتِ خبيرة تسويق أزياء فاخرة.
 المنصة: ${platform} | النبرة: ${tone}
 ${imageContext}${textContext}
@@ -370,8 +377,29 @@ ${imageContext}${textContext}
     setLoading(false);
   };
 
+  // ===== توليد المود بورد =====
+  const handleMoodboard = async () => {
+    if (!user) { setShowPricing(true); return; }
+    if (!checkUsageLimit()) { alert('انتهت توليداتك! جددي اشتراكك 💎'); setShowPricing(true); return; }
+    if (!moodDescription.trim()) { alert('اكتبي وصف الكونسبت أولاً'); return; }
+    setMoodLoading(true); setMoodBoard(null); setMoodError('');
+    try {
+      const response = await fetch('/api/moodboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: moodDescription }),
+      });
+      const data = await response.json();
+      if (data.error) { setMoodError(data.error); }
+      else { setMoodBoard(data); incrementUsage(); }
+    } catch (error) {
+      setMoodError('خطأ في الاتصال، حاولي مرة ثانية');
+    }
+    setMoodLoading(false);
+  };
+
   const copyToClipboard = () => { navigator.clipboard.writeText(result); alert('تم النسخ! ✅'); };
-  
+
   const handleSubscribe = (plan) => {
     setUser({ plan, subscribedAt: new Date().toISOString() });
     localStorage.setItem('gh_user', JSON.stringify({ plan }));
@@ -392,7 +420,7 @@ ${imageContext}${textContext}
       <Head>
         <title>GH Fashion Creator</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
       </Head>
 
       <div className="container">
@@ -441,6 +469,92 @@ ${imageContext}${textContext}
           ))}
         </nav>
 
+        {/* ===== تبويب المود بورد ===== */}
+        {activeTab === 'moodboard' ? (
+          <main className="mood-main">
+            <section className="mood-input-section">
+              <h2 className="section-title">🎨 مولّد المود بورد</h2>
+              <p className="mood-hint">اكتبي وصف الكونسبت، وسيولّد لكِ مود بورد احترافية كاملة</p>
+              <div className="input-group">
+                <label>وصف الكونسبت:</label>
+                <textarea
+                  value={moodDescription}
+                  onChange={(e) => setMoodDescription(e.target.value)}
+                  placeholder="مثال: فستان سهرة مستوحى من أعماق البحر، ألوان زمردية وفيروزية، إحساس غامض وساحر..."
+                ></textarea>
+              </div>
+              <button onClick={handleMoodboard} disabled={moodLoading} className="generate-btn">
+                {moodLoading ? <><span className="spinner"></span> جاري إنشاء المود بورد... (قد يأخذ دقيقة)</> : <>🎨 أنشئي المود بورد</>}
+              </button>
+              {moodError && <div className="mood-error">❌ {moodError}</div>}
+            </section>
+
+            <section className="mood-result-section">
+              {moodLoading && (
+                <div className="mood-loading">
+                  <span className="spinner-lg"></span>
+                  <p>يتم توليد الرسمة والصور والألوان...</p>
+                </div>
+              )}
+              {!moodLoading && !moodBoard && (
+                <p className="placeholder">✨ المود بورد ستظهر هنا...</p>
+              )}
+              {moodBoard && (
+                <div id="moodboard-canvas" className={`board board-${moodBoard.layout?.heroSide || 'left'}`}>
+                  <div className="board-header">
+                    <h1 className="board-title">{moodBoard.title}</h1>
+                    <p className="board-subtitle">{moodBoard.subtitle}</p>
+                  </div>
+
+                  <div className="board-grid">
+                    <div className="board-hero">
+                      <img src={moodBoard.heroImage} alt="hero" />
+                    </div>
+                    <div className="board-tiles">
+                      {moodBoard.moodImages?.map((img, i) => (
+                        <div className="board-tile" key={i}>
+                          <img src={img} alt={`mood-${i}`} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="board-inspiration">
+                    <div className="insp-divider">— Inspiration —</div>
+                    <p className="insp-text">{moodBoard.inspiration}</p>
+                  </div>
+
+                  <div className="board-details">
+                    <div className="board-palette">
+                      {moodBoard.palette?.map((c, i) => (
+                        <div className="swatch-wrap" key={i}>
+                          <div className="swatch" style={{ background: c.hex }}></div>
+                          <span className="swatch-name">{c.name}</span>
+                          <span className="swatch-hex">{c.hex}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="board-meta">
+                      <div className="meta-block">
+                        <span className="meta-label">FABRICS</span>
+                        <span className="meta-value">{moodBoard.fabrics?.join(' · ')}</span>
+                      </div>
+                      <div className="meta-block">
+                        <span className="meta-label">SILHOUETTE</span>
+                        <span className="meta-value">{moodBoard.silhouette}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="board-footer">GH Fashion Creator 🌸</div>
+                </div>
+              )}
+              {moodBoard && (
+                <p className="download-hint">💡 لحفظ المود بورد: اضغطي بالزر الأيمن على اللوحة واختاري "حفظ الصورة"، أو خذي لقطة شاشة</p>
+              )}
+            </section>
+          </main>
+        ) : (
         <main className="main">
           <section className="input-section">
             <h2 className="section-title">{tabs.find(t => t.id === activeTab)?.icon} {tabs.find(t => t.id === activeTab)?.name}</h2>
@@ -598,6 +712,7 @@ ${imageContext}${textContext}
             </div>
           </section>
         </main>
+        )}
 
         {showPricing && (
           <div className="modal-overlay">
@@ -605,16 +720,16 @@ ${imageContext}${textContext}
               <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
               <h2 className="modal-title">💎 اختاري باقتك</h2>
               <p className="modal-sub">اشتركي الآن وابدئي بإنشاء برومبتات احترافية</p>
-              
+
               {/* Admin Login */}
               <div className="admin-section">
                 {!showAdminInput ? (
                   <button onClick={() => setShowAdminInput(true)} className="admin-link">🔑 دخول المالك</button>
                 ) : (
                   <div className="admin-input-group">
-                    <input 
-                      type="password" 
-                      value={adminCode} 
+                    <input
+                      type="password"
+                      value={adminCode}
                       onChange={(e) => setAdminCode(e.target.value)}
                       placeholder="كلمة السر"
                       className="admin-input"
@@ -701,12 +816,51 @@ ${imageContext}${textContext}
         .generate-btn { width: 100%; padding: 1.2rem; background: linear-gradient(135deg, #ec4899 0%, #a855f7 50%, #6366f1 100%); color: white; border: none; border-radius: 15px; font-size: 1.2rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
         .generate-btn:disabled { opacity: 0.7; }
         .spinner { width: 22px; height: 22px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite; }
+        .spinner-lg { width: 50px; height: 50px; border: 4px solid #e9d5ff; border-top-color: #a855f7; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
         .copy-btn { padding: 0.6rem 1.2rem; background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; }
         .result-area { background: linear-gradient(135deg, #fdf4ff 0%, #faf5ff 100%); border-radius: 15px; padding: 1.5rem; min-height: 400px; overflow-y: auto; border: 1px solid #e9d5ff; }
         .result-content { white-space: pre-wrap; line-height: 1.9; color: #374151; }
         .placeholder { color: #a78bfa; text-align: center; padding: 3rem; }
+
+        /* ===== المود بورد ===== */
+        .mood-main { max-width: 1100px; margin: 0 auto; padding: 2rem; display: flex; flex-direction: column; gap: 2rem; }
+        .mood-input-section { background: white; border-radius: 25px; padding: 2rem; box-shadow: 0 10px 40px rgba(0,0,0,0.08); }
+        .mood-hint { color: #a78bfa; margin-bottom: 1.5rem; font-size: 0.95rem; }
+        .mood-error { margin-top: 1rem; padding: 1rem; background: #fef2f2; color: #dc2626; border-radius: 12px; }
+        .mood-result-section { min-height: 200px; }
+        .mood-loading { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 4rem; color: #a855f7; }
+        .download-hint { text-align: center; margin-top: 1rem; color: #a78bfa; font-size: 0.9rem; }
+
+        .board { background: linear-gradient(135deg, #fdf4ff 0%, #faf5ff 100%); border-radius: 20px; padding: 2.5rem; box-shadow: 0 15px 50px rgba(0,0,0,0.12); }
+        .board-header { text-align: center; margin-bottom: 2rem; }
+        .board-title { font-family: 'Cormorant Garamond', serif; font-size: 3rem; font-weight: 600; color: #7c3aed; letter-spacing: 2px; }
+        .board-subtitle { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 1.2rem; color: #a855f7; margin-top: 0.3rem; }
+        .board-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+        .board-left .board-grid { grid-template-columns: 1.2fr 1fr; }
+        .board-right .board-grid { grid-template-columns: 1fr 1.2fr; direction: ltr; }
+        .board-center .board-grid { grid-template-columns: 1fr; }
+        .board-hero img { width: 100%; height: 100%; object-fit: cover; border-radius: 15px; box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+        .board-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .board-center .board-tiles { grid-template-columns: 1fr 1fr 1fr; }
+        .board-tile img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
+        .board-inspiration { text-align: center; margin: 2rem 0; padding: 0 2rem; }
+        .insp-divider { font-family: 'Cormorant Garamond', serif; letter-spacing: 4px; color: #a855f7; margin-bottom: 1rem; font-size: 1.1rem; }
+        .insp-text { font-family: 'Cormorant Garamond', serif; font-size: 1.25rem; line-height: 1.8; color: #6b21a8; direction: ltr; }
+        .board-details { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2rem; align-items: start; }
+        @media (max-width: 700px) { .board-details { grid-template-columns: 1fr; } .board-grid { grid-template-columns: 1fr !important; } }
+        .board-palette { display: flex; flex-wrap: wrap; gap: 0.8rem; justify-content: center; }
+        .swatch-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+        .swatch { width: 60px; height: 60px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .swatch-name { font-size: 0.7rem; color: #6b21a8; direction: ltr; }
+        .swatch-hex { font-size: 0.65rem; color: #a78bfa; direction: ltr; }
+        .board-meta { display: flex; flex-direction: column; gap: 1rem; }
+        .meta-block { display: flex; flex-direction: column; gap: 0.3rem; }
+        .meta-label { font-family: 'Cormorant Garamond', serif; letter-spacing: 3px; color: #a855f7; font-size: 0.85rem; direction: ltr; }
+        .meta-value { color: #6b21a8; direction: ltr; font-size: 0.95rem; }
+        .board-footer { text-align: center; margin-top: 2rem; color: #c4b5fd; font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; }
+
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
         .modal { background: white; border-radius: 30px; padding: 2.5rem; max-width: 900px; width: 95%; max-height: 90vh; overflow-y: auto; position: relative; }
         .close-modal { position: absolute; top: 1rem; left: 1rem; background: #f3e8ff; border: none; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; font-size: 1.2rem; color: #7c3aed; }
