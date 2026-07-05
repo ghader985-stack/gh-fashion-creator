@@ -72,7 +72,11 @@ async function getConceptData(userDescription, claudeKey) {
     throw new Error("Claude: " + (data.error.message || JSON.stringify(data.error)));
   }
 
-  let raw = data.content[0].text.trim();
+  const textBlock = (data.content || []).find((b) => b.type === "text");
+  if (!textBlock) {
+    throw new Error("Claude لم يرجّع نصاً");
+  }
+  let raw = textBlock.text.trim();
   raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
   return JSON.parse(raw);
 }
