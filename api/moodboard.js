@@ -4,6 +4,7 @@ export const config = {
       sizeLimit: "2mb",
     },
   },
+  maxDuration: 60,
 };
 
 // ===== إعدادات =====
@@ -81,8 +82,8 @@ async function getConceptData(userDescription, claudeKey) {
   return JSON.parse(raw);
 }
 
-// نداء Replicate: يولّد صورة وحدة ويرجّع رابطها
-async function generateImage(prompt, aspectRatio, token) {
+// نداء Replicate: يولّد صورة وحدة ويرجّع رابطها (مع إعادة محاولة عند الازدحام)
+async function generateImage(prompt, aspectRatio, token, attempt = 0) {
   const createRes = await fetch(REPLICATE_URL, {
     method: "POST",
     headers: {
@@ -106,6 +107,12 @@ async function generateImage(prompt, aspectRatio, token) {
     prediction = JSON.parse(bodyText);
   } catch (e) {
     throw new Error("رد غير متوقع من Replicate: " + bodyText.slice(0, 200));
+  }
+
+  // إذا وصلنا حد الطلبات (429): ننتظر ونعيد المحاولة تلقائياً حتى 5 مرات
+  if (createRes.status === 429 && attempt < 5) {
+    await new Promise((r) => setTimeout(r, 12000));
+    return generateImage(prompt, aspectRatio, token, attempt + 1);
   }
 
   if (!createRes.ok) {
@@ -175,16 +182,25 @@ export default async function handler(req, res) {
     const layout =
       LAYOUT_VARIANTS[Math.floor(Math.random() * LAYOUT_VARIANTS.length)];
 
-    // 3) توليد الصور بالتوازي
-    const heroPromise = generateImage(concept.heroPrompt, layout.heroAspect, replicateToken);
-    const moodPromises = concept.moodPrompts
-      .slice(0, 3)
-      .map((p) => generateImage(p, layout.tileAspect, replicateToken));
+    // 3) توليد الصور: نبعت كل طلب بفاصل بسيط (عشان حد Replicate)
+    //    بس نخلّيهم يشتغلوا بالتوازي عشان السرعة
+    const allPrompts = [
+      { prompt: concept.heroPrompt, aspect: layout.heroAspect },
+      ...concept.moodPrompts.slice(0, 3).map((p) => ({
+        prompt: p,
+        aspect: layout.tileAspect,
+      })),
+    ];
 
-    const [heroImage, ...moodImages] = await Promise.all([
-      heroPromise,
-      ...moodPromises,
-    ]);
+    const imagePromises = allPrompts.map((item, i) =>
+      new Promise((resolve) => setTimeout(resolve, i * 1200)).then(() =>
+        generateImage(item.prompt, item.aspect, replicateToken)
+      )
+    );
+
+    const allImages = await Promise.all(imagePromises);
+    const heroImage = allImages[0];
+    const moodImages = allImages.slice(1);
 
     // 4) نرجّع كل شي للواجهة
     res.status(200).json({
