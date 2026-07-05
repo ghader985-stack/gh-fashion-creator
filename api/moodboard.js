@@ -94,14 +94,24 @@ async function generateImage(prompt, aspectRatio, token) {
       input: {
         prompt: prompt,
         aspect_ratio: aspectRatio,
-        output_format: "webp",
-        output_quality: 90,
+        output_format: "jpg",
         safety_tolerance: 2,
       },
     }),
   });
 
-  const prediction = await createRes.json();
+  const bodyText = await createRes.text();
+  let prediction;
+  try {
+    prediction = JSON.parse(bodyText);
+  } catch (e) {
+    throw new Error("رد غير متوقع من Replicate: " + bodyText.slice(0, 200));
+  }
+
+  if (!createRes.ok) {
+    const msg = prediction.detail || prediction.error || bodyText.slice(0, 200);
+    throw new Error("Replicate (" + createRes.status + "): " + msg);
+  }
 
   if (prediction.error) {
     throw new Error("Replicate: " + prediction.error);
