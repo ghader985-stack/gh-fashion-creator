@@ -1,5 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
-
 export const config = {
   api: {
     bodyParser: {
@@ -12,37 +10,18 @@ export const config = {
 const REPLICATE_MODEL = "black-forest-labs/flux-1.1-pro";
 const REPLICATE_URL =
   "https://api.replicate.com/v1/models/" + REPLICATE_MODEL + "/predictions";
+const CLAUDE_URL = "https://api.anthropic.com/v1/messages";
 
 // نسب أبعاد متنوّعة عشان الترتيب يتغيّر كل مرة (مش قالب ثابت)
 const LAYOUT_VARIANTS = [
-  {
-    id: "editorial-left",
-    heroAspect: "2:3",
-    tileAspect: "1:1",
-    heroSide: "left",
-  },
-  {
-    id: "editorial-right",
-    heroAspect: "2:3",
-    tileAspect: "1:1",
-    heroSide: "right",
-  },
-  {
-    id: "collage-center",
-    heroAspect: "3:4",
-    tileAspect: "4:3",
-    heroSide: "center",
-  },
-  {
-    id: "poster-tall",
-    heroAspect: "9:16",
-    tileAspect: "1:1",
-    heroSide: "left",
-  },
+  { id: "editorial-left", heroAspect: "2:3", tileAspect: "1:1", heroSide: "left" },
+  { id: "editorial-right", heroAspect: "2:3", tileAspect: "1:1", heroSide: "right" },
+  { id: "collage-center", heroAspect: "3:4", tileAspect: "4:3", heroSide: "center" },
+  { id: "poster-tall", heroAspect: "9:16", tileAspect: "1:1", heroSide: "left" },
 ];
 
-// نداء كلود: يرجّع بيانات المود بورد كـ JSON
-async function getConceptData(client, userDescription) {
+// نداء كلود مباشرة (بدون مكتبة): يرجّع بيانات المود بورد كـ JSON
+async function getConceptData(userDescription, claudeKey) {
   const systemPrompt = `أنتِ مديرة فنية لعلامة أزياء راقية. مهمتك تحويل وصف المستخدم إلى بيانات مود بورد احترافية.
 
 أرجعي JSON فقط بدون أي نص قبله أو بعده، وبدون علامات markdown. البنية بالضبط:
@@ -60,30 +39,40 @@ async function getConceptData(client, userDescription) {
   ],
   "fabrics": ["خامة 1 بالإنجليزي", "خامة 2", "خامة 3"],
   "silhouette": "وصف السيلويت بالإنجليزي بجملة واحدة",
-  "heroPrompt": "برومبت إنجليزي مفصّل جداً لتوليد رسمة أزياء رئيسية: fashion illustration of a model wearing [التصميم]، مع تفاصيل الإضاءة والخلفية والأسلوب. أسلوب editorial fashion sketch أنيق. بدون أي نص أو كتابة داخل الصورة.",
+  "heroPrompt": "برومبت إنجليزي مفصّل جداً لتوليد رسمة أزياء رئيسية: fashion illustration of a model wearing [التصميم]، مع تفاصيل الإضاءة والخلفية والأسلوب. أسلوب editorial fashion sketch أنيق. no text, no letters, no words in the image.",
   "moodPrompts": [
-    "برومبت إنجليزي لصورة إلهام أجواء (خامة/منظر/تفصيل) مرتبطة بالكونسبت. بدون نص داخل الصورة.",
-    "برومبت إنجليزي لصورة إلهام ثانية مختلفة. بدون نص.",
-    "برومبت إنجليزي لصورة إلهام ثالثة مختلفة. بدون نص."
+    "برومبت إنجليزي لصورة إلهام أجواء مرتبطة بالكونسبت. no text, no letters, no words in the image.",
+    "برومبت إنجليزي لصورة إلهام ثانية مختلفة. no text, no letters, no words in the image.",
+    "برومبت إنجليزي لصورة إلهام ثالثة مختلفة. no text, no letters, no words in the image."
   ]
 }
 
-مهم جداً: كل البرومبتات يجب أن تنتهي بـ "no text, no letters, no words in the image" عشان الصور تطلع بدون حروف. الألوان يجب أن تكون منسجمة ومستوحاة فعلياً من الوصف.`;
+الألوان يجب أن تكون منسجمة ومستوحاة فعلياً من الوصف.`;
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2000,
-    system: systemPrompt,
-    messages: [
-      {
-        role: "user",
-        content: `وصف المستخدم للكونسبت: ${userDescription}`,
-      },
-    ],
+  const res = await fetch(CLAUDE_URL, {
+    method: "POST",
+    headers: {
+      "x-api-key": claudeKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: [
+        { role: "user", content: `وصف المستخدم للكونسبت: ${userDescription}` },
+      ],
+    }),
   });
 
-  let raw = response.content[0].text.trim();
-  // تنظيف أي markdown محتمل
+  const data = await res.json();
+
+  if (data.error) {
+    throw new Error("Claude: " + (data.error.message || JSON.stringify(data.error)));
+  }
+
+  let raw = data.content[0].text.trim();
   raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
   return JSON.parse(raw);
 }
@@ -114,7 +103,6 @@ async function generateImage(prompt, aspectRatio, token) {
     throw new Error("Replicate: " + prediction.error);
   }
 
-  // مع Prefer: wait غالباً بترجع مباشرة، بس نعمل polling احتياطاً
   let result = prediction;
   let tries = 0;
   while (
@@ -126,9 +114,7 @@ async function generateImage(prompt, aspectRatio, token) {
     await new Promise((r) => setTimeout(r, 1500));
     const pollRes = await fetch(
       "https://api.replicate.com/v1/predictions/" + result.id,
-      {
-        headers: { Authorization: "Bearer " + token },
-      }
+      { headers: { Authorization: "Bearer " + token } }
     );
     result = await pollRes.json();
     tries++;
@@ -138,7 +124,6 @@ async function generateImage(prompt, aspectRatio, token) {
     throw new Error("فشل توليد الصورة: " + (result.error || result.status));
   }
 
-  // الناتج ممكن يكون string أو array
   const output = result.output;
   return Array.isArray(output) ? output[0] : output;
 }
@@ -149,10 +134,13 @@ export default async function handler(req, res) {
   }
 
   const replicateToken = process.env.REPLICATE_API_TOKEN;
+  const claudeKey = process.env.ANTHROPIC_API_KEY;
+
   if (!replicateToken) {
-    return res
-      .status(500)
-      .json({ error: "مفتاح Replicate غير موجود في الإعدادات" });
+    return res.status(500).json({ error: "مفتاح Replicate غير موجود في الإعدادات" });
+  }
+  if (!claudeKey) {
+    return res.status(500).json({ error: "مفتاح Claude غير موجود في الإعدادات" });
   }
 
   try {
@@ -162,22 +150,15 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "الوصف فارغ" });
     }
 
-    // 1) نجيب بيانات الكونسبت من كلود
-    const client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
-    const concept = await getConceptData(client, description);
+    // 1) بيانات الكونسبت من كلود
+    const concept = await getConceptData(description, claudeKey);
 
-    // 2) نختار ترتيب عشوائي عشان التنوّع
+    // 2) ترتيب عشوائي للتنوّع
     const layout =
       LAYOUT_VARIANTS[Math.floor(Math.random() * LAYOUT_VARIANTS.length)];
 
-    // 3) نولّد الصور بالتوازي (رئيسية + 3 إلهام)
-    const heroPromise = generateImage(
-      concept.heroPrompt,
-      layout.heroAspect,
-      replicateToken
-    );
+    // 3) توليد الصور بالتوازي
+    const heroPromise = generateImage(concept.heroPrompt, layout.heroAspect, replicateToken);
     const moodPromises = concept.moodPrompts
       .slice(0, 3)
       .map((p) => generateImage(p, layout.tileAspect, replicateToken));
@@ -187,7 +168,7 @@ export default async function handler(req, res) {
       ...moodPromises,
     ]);
 
-    // 4) نرجّع كل شي للواجهة عشان تركّبه لوحة
+    // 4) نرجّع كل شي للواجهة
     res.status(200).json({
       title: concept.title,
       subtitle: concept.subtitle,
