@@ -57,7 +57,8 @@ export default async function handler(req, res) {
       max_tokens: 4096,
       messages: messages,
     });
-    const result = response.content[0].text;
+    const textBlock = (response.content || []).find((b) => b.type === "text");
+    const result = textBlock ? textBlock.text : "";
     res.status(200).json({ result });
   } catch (error) {
     console.error("API Error:", error);
