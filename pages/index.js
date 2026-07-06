@@ -32,6 +32,7 @@ export default function Home() {
   const [moodLoading, setMoodLoading] = useState(false);
   const [moodBoard, setMoodBoard] = useState(null);
   const [moodError, setMoodError] = useState('');
+  const [downloading, setDownloading] = useState(false);
 
   const ADMIN_PASSWORD = 'SalyGh85';
 
@@ -398,6 +399,54 @@ ${imageContext}${textContext}
     setMoodLoading(false);
   };
 
+  // تحميل مكتبة html2canvas عند الحاجة
+  const loadHtml2Canvas = () => new Promise((resolve, reject) => {
+    if (typeof window !== 'undefined' && window.html2canvas) return resolve(window.html2canvas);
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = () => resolve(window.html2canvas);
+    script.onerror = () => reject(new Error('فشل تحميل أداة الحفظ'));
+    document.body.appendChild(script);
+  });
+
+  // حفظ المود بورد كاملة كصورة PNG
+  const downloadBoard = async () => {
+    const el = document.getElementById('moodboard-canvas');
+    if (!el) return;
+    setDownloading(true);
+    try {
+      const html2canvas = await loadHtml2Canvas();
+      const canvas = await html2canvas(el, {
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: '#f6f1ea',
+        scale: 2,
+      });
+      const link = document.createElement('a');
+      link.download = (moodBoard?.title || 'moodboard').replace(/\s+/g, '-') + '.png';
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } catch (e) {
+      alert('تعذّر حفظ الصورة كاملة. جرّبي مرة ثانية، أو احفظي كل صورة بالضغط عليها.');
+    }
+    setDownloading(false);
+  };
+
+  // حفظ صورة وحدة عند الضغط عليها
+  const downloadImage = async (url, idx) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const link = document.createElement('a');
+      link.download = 'moodboard-image-' + (idx + 1) + '.png';
+      link.href = URL.createObjectURL(blob);
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (e) {
+      window.open(url, '_blank');
+    }
+  };
+
   const copyToClipboard = () => { navigator.clipboard.writeText(result); alert('تم النسخ! ✅'); };
 
   const handleSubscribe = (plan) => {
@@ -415,12 +464,14 @@ ${imageContext}${textContext}
     setUsageCount(0);
   };
 
+  const moodImgs = moodBoard?.moodImages || [];
+
   return (
     <>
       <Head>
         <title>GH Fashion Creator</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet" />
       </Head>
 
       <div className="container">
@@ -489,31 +540,55 @@ ${imageContext}${textContext}
               {moodError && <div className="mood-error">❌ {moodError}</div>}
             </section>
 
-            <section className="mood-result-section">
-              {moodLoading && (
-                <div className="mood-loading">
-                  <span className="spinner-lg"></span>
-                  <p>يتم توليد الرسمة والصور والألوان...</p>
+            {moodLoading && (
+              <div className="mood-loading">
+                <span className="spinner-lg"></span>
+                <p>يتم توليد الرسمة والصور والألوان...</p>
+              </div>
+            )}
+
+            {!moodLoading && !moodBoard && (
+              <p className="placeholder">✨ المود بورد ستظهر هنا...</p>
+            )}
+
+            {moodBoard && (
+              <>
+                <div className="board-actions">
+                  <button onClick={downloadBoard} disabled={downloading} className="download-board-btn">
+                    {downloading ? <><span className="spinner"></span> جاري الحفظ...</> : <>⬇️ حفظ المود بورد كصورة (PNG)</>}
+                  </button>
+                  <span className="board-actions-hint">أو اضغطي على أي صورة لحفظها لوحدها</span>
                 </div>
-              )}
-              {!moodLoading && !moodBoard && (
-                <p className="placeholder">✨ المود بورد ستظهر هنا...</p>
-              )}
-              {moodBoard && (
-                <div id="moodboard-canvas" className={`board board-${moodBoard.layout?.heroSide || 'left'}`}>
+
+                <div id="moodboard-canvas" className="board">
                   <div className="board-header">
+                    <div className="board-corner tl"></div>
+                    <div className="board-corner tr"></div>
                     <h1 className="board-title">{moodBoard.title}</h1>
+                    <div className="board-rule"></div>
                     <p className="board-subtitle">{moodBoard.subtitle}</p>
                   </div>
 
-                  <div className="board-grid">
-                    <div className="board-hero">
-                      <img src={moodBoard.heroImage} alt="hero" />
+                  <div className="board-collage">
+                    <div
+                      className="collage-hero"
+                      onClick={() => downloadImage(moodBoard.heroImage, 0)}
+                      title="اضغطي لحفظ الصورة"
+                    >
+                      <img src={moodBoard.heroImage} alt="hero" crossOrigin="anonymous" />
+                      <span className="save-badge">⬇</span>
                     </div>
-                    <div className="board-tiles">
-                      {moodBoard.moodImages?.map((img, i) => (
-                        <div className="board-tile" key={i}>
-                          <img src={img} alt={`mood-${i}`} />
+
+                    <div className="collage-tiles">
+                      {moodImgs.map((img, i) => (
+                        <div
+                          className="collage-tile"
+                          key={i}
+                          onClick={() => downloadImage(img, i + 1)}
+                          title="اضغطي لحفظ الصورة"
+                        >
+                          <img src={img} alt={`mood-${i}`} crossOrigin="anonymous" />
+                          <span className="save-badge">⬇</span>
                         </div>
                       ))}
                     </div>
@@ -525,34 +600,32 @@ ${imageContext}${textContext}
                   </div>
 
                   <div className="board-details">
-                    <div className="board-palette">
-                      {moodBoard.palette?.map((c, i) => (
-                        <div className="swatch-wrap" key={i}>
-                          <div className="swatch" style={{ background: c.hex }}></div>
-                          <span className="swatch-name">{c.name}</span>
-                          <span className="swatch-hex">{c.hex}</span>
-                        </div>
-                      ))}
+                    <div className="detail-col">
+                      <div className="detail-label">FABRICS</div>
+                      <div className="detail-value">{(moodBoard.fabrics || []).join('  ·  ')}</div>
                     </div>
-                    <div className="board-meta">
-                      <div className="meta-block">
-                        <span className="meta-label">FABRICS</span>
-                        <span className="meta-value">{moodBoard.fabrics?.join(' · ')}</span>
-                      </div>
-                      <div className="meta-block">
-                        <span className="meta-label">SILHOUETTE</span>
-                        <span className="meta-value">{moodBoard.silhouette}</span>
+                    <div className="detail-col">
+                      <div className="detail-label">SILHOUETTE</div>
+                      <div className="detail-value">{moodBoard.silhouette}</div>
+                    </div>
+                    <div className="detail-col palette-col">
+                      <div className="detail-label">COLOR PALETTE</div>
+                      <div className="palette-row">
+                        {(moodBoard.palette || []).map((c, i) => (
+                          <div className="swatch-wrap" key={i}>
+                            <div className="swatch" style={{ background: c.hex }}></div>
+                            <span className="swatch-name">{c.name}</span>
+                            <span className="swatch-hex">{c.hex}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
 
-                  <div className="board-footer">GH Fashion Creator 🌸</div>
+                  <div className="board-footer">✿ GH Fashion Creator</div>
                 </div>
-              )}
-              {moodBoard && (
-                <p className="download-hint">💡 لحفظ المود بورد: اضغطي بالزر الأيمن على اللوحة واختاري "حفظ الصورة"، أو خذي لقطة شاشة</p>
-              )}
-            </section>
+              </>
+            )}
           </main>
         ) : (
         <main className="main">
@@ -721,7 +794,6 @@ ${imageContext}${textContext}
               <h2 className="modal-title">💎 اختاري باقتك</h2>
               <p className="modal-sub">اشتركي الآن وابدئي بإنشاء برومبتات احترافية</p>
 
-              {/* Admin Login */}
               <div className="admin-section">
                 {!showAdminInput ? (
                   <button onClick={() => setShowAdminInput(true)} className="admin-link">🔑 دخول المالك</button>
@@ -825,41 +897,71 @@ ${imageContext}${textContext}
         .placeholder { color: #a78bfa; text-align: center; padding: 3rem; }
 
         /* ===== المود بورد ===== */
-        .mood-main { max-width: 1100px; margin: 0 auto; padding: 2rem; display: flex; flex-direction: column; gap: 2rem; }
+        .mood-main { max-width: 1000px; margin: 0 auto; padding: 2rem; display: flex; flex-direction: column; gap: 1.5rem; }
         .mood-input-section { background: white; border-radius: 25px; padding: 2rem; box-shadow: 0 10px 40px rgba(0,0,0,0.08); }
         .mood-hint { color: #a78bfa; margin-bottom: 1.5rem; font-size: 0.95rem; }
         .mood-error { margin-top: 1rem; padding: 1rem; background: #fef2f2; color: #dc2626; border-radius: 12px; }
-        .mood-result-section { min-height: 200px; }
         .mood-loading { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 4rem; color: #a855f7; }
-        .download-hint { text-align: center; margin-top: 1rem; color: #a78bfa; font-size: 0.9rem; }
 
-        .board { background: linear-gradient(135deg, #fdf4ff 0%, #faf5ff 100%); border-radius: 20px; padding: 2.5rem; box-shadow: 0 15px 50px rgba(0,0,0,0.12); }
-        .board-header { text-align: center; margin-bottom: 2rem; }
-        .board-title { font-family: 'Cormorant Garamond', serif; font-size: 3rem; font-weight: 600; color: #7c3aed; letter-spacing: 2px; }
-        .board-subtitle { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 1.2rem; color: #a855f7; margin-top: 0.3rem; }
-        .board-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1rem; margin-bottom: 2rem; }
-        .board-left .board-grid { grid-template-columns: 1.2fr 1fr; }
-        .board-right .board-grid { grid-template-columns: 1fr 1.2fr; direction: ltr; }
-        .board-center .board-grid { grid-template-columns: 1fr; }
-        .board-hero img { width: 100%; height: 100%; object-fit: cover; border-radius: 15px; box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
-        .board-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-        .board-center .board-tiles { grid-template-columns: 1fr 1fr 1fr; }
-        .board-tile img { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
-        .board-inspiration { text-align: center; margin: 2rem 0; padding: 0 2rem; }
-        .insp-divider { font-family: 'Cormorant Garamond', serif; letter-spacing: 4px; color: #a855f7; margin-bottom: 1rem; font-size: 1.1rem; }
-        .insp-text { font-family: 'Cormorant Garamond', serif; font-size: 1.25rem; line-height: 1.8; color: #6b21a8; direction: ltr; }
-        .board-details { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2rem; align-items: start; }
-        @media (max-width: 700px) { .board-details { grid-template-columns: 1fr; } .board-grid { grid-template-columns: 1fr !important; } }
-        .board-palette { display: flex; flex-wrap: wrap; gap: 0.8rem; justify-content: center; }
-        .swatch-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
-        .swatch { width: 60px; height: 60px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .swatch-name { font-size: 0.7rem; color: #6b21a8; direction: ltr; }
-        .swatch-hex { font-size: 0.65rem; color: #a78bfa; direction: ltr; }
-        .board-meta { display: flex; flex-direction: column; gap: 1rem; }
-        .meta-block { display: flex; flex-direction: column; gap: 0.3rem; }
-        .meta-label { font-family: 'Cormorant Garamond', serif; letter-spacing: 3px; color: #a855f7; font-size: 0.85rem; direction: ltr; }
-        .meta-value { color: #6b21a8; direction: ltr; font-size: 0.95rem; }
-        .board-footer { text-align: center; margin-top: 2rem; color: #c4b5fd; font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; }
+        .board-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+        .download-board-btn { padding: 0.9rem 1.8rem; background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%); color: white; border: none; border-radius: 14px; font-weight: 700; font-size: 1rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; box-shadow: 0 6px 20px rgba(168,85,247,0.3); }
+        .download-board-btn:disabled { opacity: 0.7; }
+        .board-actions-hint { color: #a78bfa; font-size: 0.85rem; }
+
+        /* اللوحة - ستايل مجلة أزياء راقية */
+        .board {
+          background: #f6f1ea;
+          background-image: radial-gradient(circle at 20% 10%, rgba(255,255,255,0.6), transparent 40%);
+          border-radius: 6px;
+          padding: 3.5rem 3rem;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+          border: 1px solid #e6ddd0;
+        }
+        .board-header { text-align: center; position: relative; margin-bottom: 2.5rem; padding: 0 1rem; }
+        .board-corner { position: absolute; width: 26px; height: 26px; border: 1.5px solid #b08d57; }
+        .board-corner.tl { top: -12px; right: -6px; border-left: none; border-bottom: none; }
+        .board-corner.tr { top: -12px; left: -6px; border-right: none; border-bottom: none; }
+        .board-title {
+          font-family: 'Cormorant Garamond', serif;
+          font-size: 3.4rem; font-weight: 600; color: #2c2420;
+          letter-spacing: 3px; line-height: 1.1; direction: ltr;
+        }
+        .board-rule { width: 90px; height: 1px; background: #b08d57; margin: 0.9rem auto; }
+        .board-subtitle {
+          font-family: 'Cormorant Garamond', serif; font-style: italic;
+          font-size: 1.25rem; color: #7a6a58; direction: ltr;
+        }
+
+        .board-collage { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; margin-bottom: 2.5rem; }
+        .collage-hero { position: relative; border-radius: 3px; overflow: hidden; cursor: pointer; box-shadow: 0 10px 30px rgba(0,0,0,0.18); min-height: 460px; }
+        .collage-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .collage-tiles { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 14px; }
+        .collage-tile { position: relative; border-radius: 3px; overflow: hidden; cursor: pointer; box-shadow: 0 8px 22px rgba(0,0,0,0.12); min-height: 145px; }
+        .collage-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .save-badge { position: absolute; top: 8px; left: 8px; width: 26px; height: 26px; background: rgba(0,0,0,0.5); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; opacity: 0; transition: opacity 0.2s; }
+        .collage-hero:hover .save-badge, .collage-tile:hover .save-badge { opacity: 1; }
+
+        .board-inspiration { text-align: center; margin: 0 auto 2.5rem; max-width: 720px; }
+        .insp-divider { font-family: 'Cormorant Garamond', serif; letter-spacing: 5px; color: #b08d57; margin-bottom: 1rem; font-size: 1.05rem; }
+        .insp-text { font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; line-height: 1.75; color: #3a322c; direction: ltr; font-weight: 500; }
+
+        .board-details { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 2rem; padding-top: 2rem; border-top: 1px solid #e0d5c5; }
+        @media (max-width: 760px) {
+          .board { padding: 2rem 1.2rem; }
+          .board-title { font-size: 2.3rem; }
+          .board-collage { grid-template-columns: 1fr; }
+          .collage-hero { min-height: 380px; }
+          .board-details { grid-template-columns: 1fr; gap: 1.5rem; }
+        }
+        .detail-col { }
+        .detail-label { font-family: 'Cormorant Garamond', serif; letter-spacing: 3px; color: #b08d57; font-size: 0.9rem; margin-bottom: 0.6rem; direction: ltr; }
+        .detail-value { color: #4a4038; direction: ltr; font-size: 0.92rem; line-height: 1.6; font-family: 'Cormorant Garamond', serif; }
+        .palette-row { display: flex; flex-wrap: wrap; gap: 0.7rem; }
+        .swatch-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; width: 58px; }
+        .swatch { width: 48px; height: 48px; border-radius: 3px; box-shadow: 0 3px 10px rgba(0,0,0,0.18); border: 1px solid rgba(0,0,0,0.05); }
+        .swatch-name { font-size: 0.62rem; color: #4a4038; direction: ltr; text-align: center; font-family: 'Cormorant Garamond', serif; }
+        .swatch-hex { font-size: 0.58rem; color: #9a8a76; direction: ltr; }
+        .board-footer { text-align: center; margin-top: 2.5rem; color: #b08d57; font-family: 'Cormorant Garamond', serif; letter-spacing: 3px; font-size: 1rem; }
 
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
         .modal { background: white; border-radius: 30px; padding: 2.5rem; max-width: 900px; width: 95%; max-height: 90vh; overflow-y: auto; position: relative; }
