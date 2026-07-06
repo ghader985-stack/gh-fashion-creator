@@ -42,9 +42,11 @@ async function getConceptData(userDescription, claudeKey) {
   "silhouette": "وصف السيلويت بالإنجليزي بجملة واحدة",
   "heroPrompt": "برومبت إنجليزي مفصّل جداً لتوليد رسمة أزياء رئيسية: fashion illustration of a model wearing [التصميم]، مع تفاصيل الإضاءة والخلفية والأسلوب. أسلوب editorial fashion sketch أنيق. no text, no letters, no words in the image.",
   "moodPrompts": [
-    "برومبت إنجليزي لصورة إلهام أجواء مرتبطة بالكونسبت. no text, no letters, no words in the image.",
-    "برومبت إنجليزي لصورة إلهام ثانية مختلفة. no text, no letters, no words in the image.",
-    "برومبت إنجليزي لصورة إلهام ثالثة مختلفة. no text, no letters, no words in the image."
+    "برومبت إنجليزي لصورة إلهام أجواء مرتبطة بالكونسبت (منظر/بيئة). no text, no letters, no words in the image.",
+    "برومبت إنجليزي لصورة قماش/خامة قريبة (fabric texture close-up) مرتبطة بالكونسبت. no text, no letters, no words in the image.",
+    "برومبت إنجليزي لصورة تفصيل أنيق (تطريز/إكسسوار/مجوهرات) مرتبطة بالكونسبت. no text, no letters, no words in the image.",
+    "برومبت إنجليزي لصورة إلهام رابعة مختلفة (لون/ضوء/طبيعة). no text, no letters, no words in the image.",
+    "برومبت إنجليزي لصورة إلهام خامسة مختلفة (تفصيل تصميم أو خلفية). no text, no letters, no words in the image."
   ]
 }
 
@@ -186,7 +188,7 @@ export default async function handler(req, res) {
     //    بس نخلّيهم يشتغلوا بالتوازي عشان السرعة
     const allPrompts = [
       { prompt: concept.heroPrompt, aspect: layout.heroAspect },
-      ...concept.moodPrompts.slice(0, 3).map((p) => ({
+      ...concept.moodPrompts.slice(0, 5).map((p) => ({
         prompt: p,
         aspect: layout.tileAspect,
       })),
