@@ -13,6 +13,16 @@ const REPLICATE_URL =
   "https://api.replicate.com/v1/models/" + REPLICATE_MODEL + "/predictions";
 const CLAUDE_URL = "https://api.anthropic.com/v1/messages";
 
+// توجيه فني موحّد يُضاف لكل صورة حتى تبدو الصور الست من نفس العالم البصري الفخم
+const STYLE_DIRECTION =
+  "refined luxury fashion editorial aesthetic, soft diffused natural lighting, " +
+  "elegant muted tones, cream and warm neutral atmosphere with subtle golden accents, " +
+  "high-end magazine quality, delicate composition, fine detail, tasteful and uncluttered, " +
+  "photorealistic where appropriate, 8k, sharp focus";
+
+// عبارة نفي قوية لمنع الحروف والكلمات المشوّهة (مشكلة شائعة في FLUX)
+const NO_TEXT = "no text, no letters, no words, no watermark, no logo, no typography";
+
 // نسب أبعاد متنوّعة عشان الترتيب يتغيّر كل مرة (مش قالب ثابت)
 const LAYOUT_VARIANTS = [
   { id: "editorial-left", heroAspect: "2:3", tileAspect: "1:1", heroSide: "left" },
@@ -21,16 +31,23 @@ const LAYOUT_VARIANTS = [
   { id: "poster-tall", heroAspect: "9:16", tileAspect: "1:1", heroSide: "left" },
 ];
 
+// دمج البرومبت الأساسي مع التوجيه الفني الموحّد وعبارة النفي
+function composePrompt(corePrompt) {
+  const clean = (corePrompt || "").replace(/no text[^.]*\.?/gi, "").trim();
+  return `${clean}. ${STYLE_DIRECTION}. ${NO_TEXT}.`;
+}
+
 // نداء كلود مباشرة (بدون مكتبة): يرجّع بيانات المود بورد كـ JSON
 async function getConceptData(userDescription, claudeKey) {
-  const systemPrompt = `أنتِ مديرة فنية لعلامة أزياء راقية. مهمتك تحويل وصف المستخدم إلى بيانات مود بورد احترافية.
+  const systemPrompt = `أنتِ مديرة فنية لعلامة أزياء راقية، ذائقتكِ رفيعة ومرجعكِ مجلات الموضة العالمية الفاخرة.
+مهمتكِ تحويل وصف المستخدم إلى بيانات مود بورد احترافية فخمة ومتناسقة.
 
 أرجعي JSON فقط بدون أي نص قبله أو بعده، وبدون علامات markdown. البنية بالضبط:
 
 {
-  "title": "اسم الكولكشن بالإنجليزي، كلمة أو كلمتين أنيقتين",
-  "subtitle": "سطر شعري قصير بالإنجليزي يوصف الروح",
-  "inspiration": "فقرة Inspiration احترافية بالإنجليزي (3-4 أسطر) تحكي قصة التصميم وإلهامه وإحساسه. يجب أن تكون فريدة ومعبّرة، ليست قالباً جامداً.",
+  "title": "اسم الكولكشن بالإنجليزي، كلمة أو كلمتين أنيقتين تعبّران عن روح التصميم",
+  "subtitle": "سطر شعري قصير بالإنجليزي يصف الروح والإحساس",
+  "inspiration": "فقرة Inspiration احترافية بالإنجليزي (3-4 أسطر) تحكي قصة التصميم وإلهامه وإحساسه بلغة راقية معبّرة وفريدة، بأسلوب المديرين الفنيين في دور الأزياء الكبرى. ليست قالباً جامداً.",
   "palette": [
     {"hex": "#xxxxxx", "name": "اسم اللون بالإنجليزي"},
     {"hex": "#xxxxxx", "name": "..."},
@@ -40,17 +57,19 @@ async function getConceptData(userDescription, claudeKey) {
   ],
   "fabrics": ["خامة 1 بالإنجليزي", "خامة 2", "خامة 3"],
   "silhouette": "وصف السيلويت بالإنجليزي بجملة واحدة",
-  "heroPrompt": "برومبت إنجليزي مفصّل جداً لتوليد رسمة أزياء رئيسية: fashion illustration of a model wearing [التصميم]، مع تفاصيل الإضاءة والخلفية والأسلوب. أسلوب editorial fashion sketch أنيق. no text, no letters, no words in the image.",
+  "heroPrompt": "برومبت إنجليزي مفصّل جداً لرسمة أزياء رئيسية أنيقة: an elegant fashion illustration of a model wearing [التصميم بتفاصيله]، مع وصف القماش وحركته والقصّة والإحساس العام. أسلوب editorial fashion sketch راقٍ.",
   "moodPrompts": [
-    "برومبت إنجليزي لصورة إلهام أجواء مرتبطة بالكونسبت (منظر/بيئة). no text, no letters, no words in the image.",
-    "برومبت إنجليزي لصورة قماش/خامة قريبة (fabric texture close-up) مرتبطة بالكونسبت. no text, no letters, no words in the image.",
-    "برومبت إنجليزي لصورة تفصيل أنيق (تطريز/إكسسوار/مجوهرات) مرتبطة بالكونسبت. no text, no letters, no words in the image.",
-    "برومبت إنجليزي لصورة إلهام رابعة مختلفة (لون/ضوء/طبيعة). no text, no letters, no words in the image.",
-    "برومبت إنجليزي لصورة إلهام خامسة مختلفة (تفصيل تصميم أو خلفية). no text, no letters, no words in the image."
+    "برومبت إنجليزي لصورة أجواء/بيئة مرتبطة بجوهر الكونسبت (منظر أو مكان يعبّر عن الروح).",
+    "برومبت إنجليزي لصورة قماش/خامة قريبة جداً (luxurious fabric texture close-up) بلون وملمس مرتبطين بالكونسبت.",
+    "برومبت إنجليزي لصورة تفصيل أنيق (تطريز راقٍ أو إكسسوار أو مجوهرات فاخرة) مرتبط بالكونسبت.",
+    "برومبت إنجليزي لصورة إلهام مختلفة (ضوء أو لون أو عنصر طبيعي) تعزّز الحالة اللونية للوحة.",
+    "برومبت إنجليزي لصورة تفصيل تصميم أو خلفية فخمة تكمّل تناسق اللوحة."
   ]
 }
 
-الألوان يجب أن تكون منسجمة ومستوحاة فعلياً من الوصف.`;
+مهم جداً:
+- الألوان الخمسة يجب أن تكون منسجمة ومتناغمة فعلياً مع بعضها ومستوحاة من الوصف (باليت متكاملة، ليست ألواناً متضاربة).
+- كل البرومبتات يجب أن تنتمي لنفس العالم البصري والحالة اللونية حتى تبدو اللوحة موحّدة وفخمة.`;
 
   const res = await fetch(CLAUDE_URL, {
     method: "POST",
@@ -98,6 +117,7 @@ async function generateImage(prompt, aspectRatio, token, attempt = 0) {
         prompt: prompt,
         aspect_ratio: aspectRatio,
         output_format: "jpg",
+        output_quality: 95,
         safety_tolerance: 2,
       },
     }),
@@ -185,11 +205,11 @@ export default async function handler(req, res) {
       LAYOUT_VARIANTS[Math.floor(Math.random() * LAYOUT_VARIANTS.length)];
 
     // 3) توليد الصور: نبعت كل طلب بفاصل بسيط (عشان حد Replicate)
-    //    بس نخلّيهم يشتغلوا بالتوازي عشان السرعة
+    //    مع دمج التوجيه الفني الموحّد في كل برومبت
     const allPrompts = [
-      { prompt: concept.heroPrompt, aspect: layout.heroAspect },
+      { prompt: composePrompt(concept.heroPrompt), aspect: layout.heroAspect },
       ...concept.moodPrompts.slice(0, 5).map((p) => ({
-        prompt: p,
+        prompt: composePrompt(p),
         aspect: layout.tileAspect,
       })),
     ];
