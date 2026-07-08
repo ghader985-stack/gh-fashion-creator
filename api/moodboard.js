@@ -4,7 +4,7 @@ export const config = {
       sizeLimit: "2mb",
     },
   },
-  maxDuration: 60,
+  maxDuration: 300,
 };
 
 // ===== إعدادات =====
