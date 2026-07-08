@@ -8,7 +8,7 @@ import fs from 'fs';
 
 export const config = {
   api: { bodyParser: false },
-  maxDuration: 60,
+  maxDuration: 300,
 };
 
 const CLAUDE_MODEL = 'claude-sonnet-5';
