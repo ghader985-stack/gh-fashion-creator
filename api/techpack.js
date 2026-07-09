@@ -143,7 +143,7 @@ function safeJsonParse(raw) {
   let s = (raw || '').trim();
   // إزالة أسوار الماركداون إن وُجدت
   s = s.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  // محاولة التقاط أول كائن JSON
+  // التقاط من أول قوس فتح لآخر قوس إغلاق
   const start = s.indexOf('{');
   const end = s.lastIndexOf('}');
   if (start !== -1 && end !== -1 && end > start) {
@@ -257,7 +257,7 @@ ${INDUSTRY_RULES}
 
     const payload = {
       model: MODEL,
-      max_tokens: 4000,
+      max_tokens: 128000,
       messages: [
         {
           role: 'user',
