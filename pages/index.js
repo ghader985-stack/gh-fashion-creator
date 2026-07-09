@@ -914,6 +914,7 @@ function TechpackView({ tp, preview }) {
         <table className="tp-table">
           <thead>
             <tr>
+              <th>Ref</th>
               <th className="ltr">Point of Measure</th>
               <th>Tol.</th>
               <th>XS</th><th>S</th><th className="hl">M</th><th>L</th><th>XL</th>
@@ -922,6 +923,7 @@ function TechpackView({ tp, preview }) {
           <tbody>
             {(tp.measurements || []).map((m, i) => (
               <tr key={i}>
+                <td className="ref-code">{m.code || String.fromCharCode(65 + i)}</td>
                 <td className="ltr left">{m.pom}</td>
                 <td>{m.tolerance}</td>
                 <td>{m.sizes?.XS}</td>
@@ -1290,6 +1292,7 @@ function StyleBlock() {
       .tp-table td.left { text-align: left; }
       .tp-table td.sm { font-size: 0.76rem; color: var(--ink-soft); }
       .tp-table .hl { background: #f3ead6; font-weight: 700; }
+      .ref-code { font-weight: 700; color: var(--gold-deep); background: var(--cream); font-family: 'Cormorant Garamond', serif; }
 
       .tp-flat { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; }
       .tp-flat img { width: 100%; display: block; }
