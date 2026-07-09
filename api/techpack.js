@@ -14,6 +14,50 @@ const MODEL = 'claude-sonnet-5';
 const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
 const REPLICATE_URL =
   'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
+// موديل Recraft V4 SVG المتخصص بالرسم المتجهي النظيف (للرسمة التقنية)
+const RECRAFT_SVG_MODEL = 'recraft-ai/recraft-v4-svg';
+const RECRAFT_URL =
+  'https://api.replicate.com/v1/models/' + RECRAFT_SVG_MODEL + '/predictions';
+
+// توليد رسمة تقنية متجهية (SVG) عبر Recraft V4 — يرجّع رابط ملف SVG
+async function generateFlatSketch(prompt, token, attempt = 0) {
+  const createRes = await fetch(RECRAFT_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      Prefer: 'wait',
+    },
+    body: JSON.stringify({
+      input: { prompt: prompt, size: '1820x1024' },
+    }),
+  });
+  const bodyText = await createRes.text();
+  let prediction;
+  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Recraft رد غير متوقع'); }
+  if (createRes.status === 429 && attempt < 5) {
+    await new Promise((r) => setTimeout(r, 12000));
+    return generateFlatSketch(prompt, token, attempt + 1);
+  }
+  if (!createRes.ok || prediction.error) throw new Error('Recraft فشل');
+  let result = prediction;
+  let tries = 0;
+  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 60) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    result = await pollRes.json();
+    tries++;
+  }
+  if (result.status !== 'succeeded') throw new Error('Recraft لم يكتمل');
+  const output = result.output;
+  return Array.isArray(output) ? output[0] : output;
+}
+
+async function safeFlatSketch(prompt, token) {
+  try { return await generateFlatSketch(prompt, token); } catch (e) { return null; }
+}
 
 // توليد صورة واحدة عبر Replicate FLUX (مع إعادة محاولة عند الازدحام 429)
 async function generateImage(prompt, aspectRatio, token, attempt = 0) {
@@ -220,7 +264,7 @@ ${INDUSTRY_RULES}
   "silhouette": "وصف السيلويت والقصّة بالإنجليزية",
   "sampleSize": "المقاس الأساسي مثل M",
   "measurements": [
-    { "pom": "اسم نقطة القياس بالإنجليزية", "tolerance": "±X.X", "sizes": { "XS": 0, "S": 0, "M": 0, "L": 0, "XL": 0 } }
+    { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "tolerance": "±X.X", "sizes": { "XS": 0, "S": 0, "M": 0, "L": 0, "XL": 0 } }
   ],
   "bom": [
     { "item": "اسم المادة بالإنجليزية", "description": "وصف", "placement": "مكان الاستخدام", "qty": "الكمية", "unit": "الوحدة" }
@@ -241,7 +285,7 @@ ${INDUSTRY_RULES}
   "artwork": [
     { "name": "اسم العنصر مثل Main Label", "placement": "مكانه", "size": "قياسه التقديري", "notes": "ملاحظات" }
   ],
-  "flatSketchPrompt": "برومبت إنجليزي دقيق لتوليد رسمة تقنية مسطّحة (technical flat fashion sketch / CAD flat drawing) للقطعة، تُظهر المنظر الأمامي والخلفي جنباً إلى جنب، خطوط سوداء نظيفة على خلفية بيضاء، بأسلوب الرسومات التقنية في التيك باك الصناعي، مع إظهار الدرزات والتفاصيل والجيوب. صف القطعة الفعلية بدقة. مثال بنية: 'technical flat sketch, front and back view, [garment description], clean black line art on white background, fashion CAD technical drawing, production spec illustration'.",
+  "flatSketchPrompt": "برومبت إنجليزي دقيق لتوليد رسمة تقنية مسطّحة متجهية (technical flat sketch) للقطعة بأسلوب Recraft vector. صف القطعة الفعلية بدقة (النوع، القصّة، الياقة، الأكمام، الجيوب، الدرزات، السحابات). استخدم هذه الصياغة تحديداً: 'clean technical flat fashion sketch of a [garment], front view and back view side by side, thin uniform black outline strokes only, no fill, no color, no shading, flat white background, garment construction lines and seams visible, apparel CAD production drawing style, minimal'.",
   "materialSwatches": [
     { "name": "اسم الخامة", "swatchPrompt": "برومبت إنجليزي لصورة قريبة جداً (close-up macro) لعينة القماش/الخامة توضّح ملمسها ولونها الحقيقي، fabric swatch macro photography, soft even studio lighting" }
   ]
@@ -253,7 +297,8 @@ ${INDUSTRY_RULES}
 - إن كانت خامة مقترحة منكِ (وليست من المصممة)، أشيري لذلك في notes.
 - استخدمي أكواد Pantone و Hex منطقية للألوان الظاهرة في التصميم فعلاً.
 - flatSketchPrompt و materialSwatches ضروريان لتوليد الرسومات التوضيحية — اكتبيهما بدقة تصف القطعة والخامات الفعلية.
-- materialSwatches: عنصر واحد لكل خامة رئيسية (بحد أقصى 4 خامات).`;
+- materialSwatches: عنصر واحد لكل خامة رئيسية (بحد أقصى 4 خامات).
+- كل نقطة قياس لها رمز حرفي متسلسل (A, B, C, D...) في حقل code — هذه الرموز تُطابق الأسهم على الرسمة التقنية مع صفوف جدول القياسات (معيار صناعي).`;
 
     const payload = {
       model: MODEL,
@@ -308,14 +353,10 @@ ${INDUSTRY_RULES}
 
       const jobs = [];
 
-      // الرسمة التقنية المسطّحة (أمامي وخلفي)
+      // الرسمة التقنية المسطّحة عبر Recraft V4 SVG (متجهي نظيف)
       if (techpack.flatSketchPrompt) {
         jobs.push(
-          safeGenerate(
-            `${techpack.flatSketchPrompt}. ${STYLE}. ${NO_TEXT}.`,
-            '16:9',
-            replicateToken
-          ).then((url) => {
+          safeFlatSketch(techpack.flatSketchPrompt, replicateToken).then((url) => {
             techpack.flatSketchImage = url;
           })
         );
