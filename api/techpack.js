@@ -11,6 +11,80 @@ export const config = {
 };
 
 const MODEL = 'claude-sonnet-5';
+const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
+const REPLICATE_URL =
+  'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
+
+// توليد صورة واحدة عبر Replicate FLUX (مع إعادة محاولة عند الازدحام 429)
+async function generateImage(prompt, aspectRatio, token, attempt = 0) {
+  const createRes = await fetch(REPLICATE_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      Prefer: 'wait',
+    },
+    body: JSON.stringify({
+      input: {
+        prompt: prompt,
+        aspect_ratio: aspectRatio,
+        output_format: 'jpg',
+        output_quality: 95,
+        safety_tolerance: 2,
+      },
+    }),
+  });
+
+  const bodyText = await createRes.text();
+  let prediction;
+  try {
+    prediction = JSON.parse(bodyText);
+  } catch (e) {
+    throw new Error('رد غير متوقع من Replicate');
+  }
+
+  if (createRes.status === 429 && attempt < 5) {
+    await new Promise((r) => setTimeout(r, 12000));
+    return generateImage(prompt, aspectRatio, token, attempt + 1);
+  }
+  if (!createRes.ok) {
+    throw new Error('Replicate (' + createRes.status + ')');
+  }
+  if (prediction.error) {
+    throw new Error('Replicate: ' + prediction.error);
+  }
+
+  let result = prediction;
+  let tries = 0;
+  while (
+    result.status !== 'succeeded' &&
+    result.status !== 'failed' &&
+    result.status !== 'canceled' &&
+    tries < 60
+  ) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const pollRes = await fetch(
+      'https://api.replicate.com/v1/predictions/' + result.id,
+      { headers: { Authorization: 'Bearer ' + token } }
+    );
+    result = await pollRes.json();
+    tries++;
+  }
+  if (result.status !== 'succeeded') {
+    throw new Error('فشل توليد الصورة');
+  }
+  const output = result.output;
+  return Array.isArray(output) ? output[0] : output;
+}
+
+// توليد صورة مع تجاهل الفشل (لا نُسقط التيك باك كله لو فشلت صورة توضيحية)
+async function safeGenerate(prompt, aspect, token) {
+  try {
+    return await generateImage(prompt, aspect, token);
+  } catch (e) {
+    return null;
+  }
+}
 
 // قواعد صناعية ثابتة يمشي عليها التحليل — مش قوالب جامدة، بل مرجع معايير
 // النموذج يستخرج خصائص القطعة من الصورة ويطبّق عليها هذه القواعد بشكل تكيّفي
@@ -46,6 +120,25 @@ function extractText(content) {
   return textBlock ? textBlock.text : '';
 }
 
+// يكتشف نوع الصورة الحقيقي من أول بايتات الملف (magic bytes)
+// بدل الاعتماد على الامتداد الذي يرسله المتصفح، لأنه قد يكون غير مطابق
+function detectImageType(buffer) {
+  if (!buffer || buffer.length < 12) return 'image/jpeg';
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  // PNG: 89 50 4E 47
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png';
+  // GIF: 47 49 46
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif';
+  // WEBP: RIFF....WEBP
+  if (
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+    buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+  ) return 'image/webp';
+  // افتراضي آمن
+  return 'image/jpeg';
+}
+
 function safeJsonParse(raw) {
   let s = (raw || '').trim();
   // إزالة أسوار الماركداون إن وُجدت
@@ -68,6 +161,7 @@ export default async function handler(req, res) {
   if (!apiKey) {
     return res.status(500).json({ error: 'مفتاح Claude غير مضبوط على الخادم' });
   }
+  const replicateToken = process.env.REPLICATE_API_TOKEN;
 
   try {
     const form = formidable({ maxFileSize: 12 * 1024 * 1024 });
@@ -97,7 +191,8 @@ export default async function handler(req, res) {
 
     const imgBuffer = fs.readFileSync(imageFile.filepath);
     const base64 = imgBuffer.toString('base64');
-    const mediaType = imageFile.mimetype || 'image/jpeg';
+    // نكتشف النوع الحقيقي من محتوى الملف بدل الامتداد الذي يرسله المتصفح
+    const mediaType = detectImageType(imgBuffer);
 
     const instruction = `أنتِ مصمِّمة تقنية (Technical Designer) خبيرة في إعداد التيك باك الاحترافي للمصانع.
 
@@ -145,6 +240,10 @@ ${INDUSTRY_RULES}
   ],
   "artwork": [
     { "name": "اسم العنصر مثل Main Label", "placement": "مكانه", "size": "قياسه التقديري", "notes": "ملاحظات" }
+  ],
+  "flatSketchPrompt": "برومبت إنجليزي دقيق لتوليد رسمة تقنية مسطّحة (technical flat fashion sketch / CAD flat drawing) للقطعة، تُظهر المنظر الأمامي والخلفي جنباً إلى جنب، خطوط سوداء نظيفة على خلفية بيضاء، بأسلوب الرسومات التقنية في التيك باك الصناعي، مع إظهار الدرزات والتفاصيل والجيوب. صف القطعة الفعلية بدقة. مثال بنية: 'technical flat sketch, front and back view, [garment description], clean black line art on white background, fashion CAD technical drawing, production spec illustration'.",
+  "materialSwatches": [
+    { "name": "اسم الخامة", "swatchPrompt": "برومبت إنجليزي لصورة قريبة جداً (close-up macro) لعينة القماش/الخامة توضّح ملمسها ولونها الحقيقي، fabric swatch macro photography, soft even studio lighting" }
   ]
 }
 
@@ -152,7 +251,9 @@ ${INDUSTRY_RULES}
 - القياسات لازم تكون منطقية ومتدرّجة بشكل صحيح بين المقاسات.
 - كل الأقسام مطلوبة وممتلئة بمحتوى حقيقي مبني على الصورة.
 - إن كانت خامة مقترحة منكِ (وليست من المصممة)، أشيري لذلك في notes.
-- استخدمي أكواد Pantone و Hex منطقية للألوان الظاهرة في التصميم فعلاً.`;
+- استخدمي أكواد Pantone و Hex منطقية للألوان الظاهرة في التصميم فعلاً.
+- flatSketchPrompt و materialSwatches ضروريان لتوليد الرسومات التوضيحية — اكتبيهما بدقة تصف القطعة والخامات الفعلية.
+- materialSwatches: عنصر واحد لكل خامة رئيسية (بحد أقصى 4 خامات).`;
 
     const payload = {
       model: MODEL,
@@ -198,6 +299,53 @@ ${INDUSTRY_RULES}
 
     techpack.brandName = brandName;
     techpack.generatedAt = new Date().toISOString();
+
+    // توليد الرسومات التوضيحية عبر Replicate (رسمة تقنية + صور خامات)
+    // نولّدها بالتوازي مع تجاهل الفشل حتى لا يسقط التيك باك كله
+    if (replicateToken) {
+      const STYLE = 'professional fashion technical documentation, high quality, clean, 8k';
+      const NO_TEXT = 'no text, no letters, no words, no watermark';
+
+      const jobs = [];
+
+      // الرسمة التقنية المسطّحة (أمامي وخلفي)
+      if (techpack.flatSketchPrompt) {
+        jobs.push(
+          safeGenerate(
+            `${techpack.flatSketchPrompt}. ${STYLE}. ${NO_TEXT}.`,
+            '16:9',
+            replicateToken
+          ).then((url) => {
+            techpack.flatSketchImage = url;
+          })
+        );
+      }
+
+      // صور الخامات (بحد أقصى 4)
+      const swatches = Array.isArray(techpack.materialSwatches)
+        ? techpack.materialSwatches.slice(0, 4)
+        : [];
+      techpack.swatchImages = [];
+      swatches.forEach((sw, i) => {
+        if (sw && sw.swatchPrompt) {
+          jobs.push(
+            new Promise((r) => setTimeout(r, i * 1000))
+              .then(() =>
+                safeGenerate(
+                  `${sw.swatchPrompt}. ${STYLE}. ${NO_TEXT}.`,
+                  '1:1',
+                  replicateToken
+                )
+              )
+              .then((url) => {
+                techpack.swatchImages.push({ name: sw.name || '', url });
+              })
+          );
+        }
+      });
+
+      await Promise.all(jobs);
+    }
 
     return res.status(200).json(techpack);
   } catch (error) {
