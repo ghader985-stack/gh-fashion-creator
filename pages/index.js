@@ -20,7 +20,7 @@ export default function Home() {
   const [studioDesc, setStudioDesc] = useState('');
   const [studioImage, setStudioImage] = useState(null);
   const [studioPreview, setStudioPreview] = useState('');
-  const [studioShot, setStudioShot] = useState('ecommerce');
+  const [studioShot, setStudioShot] = useState('catalog');
   const [studioBg, setStudioBg] = useState('cream');
   const [studioLoading, setStudioLoading] = useState(false);
   const [studioResult, setStudioResult] = useState(null);
@@ -500,10 +500,9 @@ export default function Home() {
                 <label>نوع اللقطة</label>
                 <div className="chips">
                   {[
-                    { id: 'ecommerce', n: 'كتالوج' },
-                    { id: 'editorial', n: 'افتتاحية' },
+                    { id: 'catalog', n: 'معلّقة (كتالوج)' },
                     { id: 'onmodel', n: 'على موديل' },
-                    { id: 'flatlay', n: 'فلات لاي' },
+                    { id: 'flatlay', n: 'مسطّحة' },
                     { id: 'detail', n: 'تفاصيل' },
                   ].map((s) => (
                     <button key={s.id} onClick={() => setStudioShot(s.id)} className={`chip ${studioShot === s.id ? 'active' : ''}`}>{s.n}</button>
@@ -516,8 +515,7 @@ export default function Home() {
                 <div className="chips">
                   {[
                     { id: 'cream', n: 'كريمي' },
-                    { id: 'studio', n: 'استوديو رمادي' },
-                    { id: 'marble', n: 'رخام' },
+                    { id: 'white', n: 'أبيض' },
                     { id: 'dark', n: 'داكن' },
                   ].map((b) => (
                     <button key={b.id} onClick={() => setStudioBg(b.id)} className={`chip ${studioBg === b.id ? 'active' : ''}`}>{b.n}</button>
@@ -902,6 +900,15 @@ function TechpackView({ tp, preview }) {
         </div>
       </div>
 
+      {/* الرسمة التقنية المسطّحة */}
+      {tp.flatSketchImage && (
+        <TpSection title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية (أمامي وخلفي)">
+          <div className="tp-flat">
+            <img src={tp.flatSketchImage} alt="technical flat" crossOrigin="anonymous" />
+          </div>
+        </TpSection>
+      )}
+
       {/* القياسات */}
       <TpSection title="MEASUREMENT SPECIFICATION" subtitle="جدول القياسات المتدرّج (سم)">
         <table className="tp-table">
@@ -930,6 +937,16 @@ function TechpackView({ tp, preview }) {
 
       {/* الخامات */}
       <TpSection title="MATERIALS" subtitle="الخامات">
+        {tp.swatchImages && tp.swatchImages.length > 0 && (
+          <div className="tp-swatches">
+            {tp.swatchImages.filter((s) => s.url).map((s, i) => (
+              <div className="tp-swatch-card" key={i}>
+                <img src={s.url} alt={s.name} crossOrigin="anonymous" />
+                <div className="tp-swatch-name">{s.name}</div>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="tp-materials">
           {(tp.materials || []).map((m, i) => (
             <div className="tp-mat" key={i}>
@@ -1274,6 +1291,13 @@ function StyleBlock() {
       .tp-table td.sm { font-size: 0.76rem; color: var(--ink-soft); }
       .tp-table .hl { background: #f3ead6; font-weight: 700; }
 
+      .tp-flat { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; }
+      .tp-flat img { width: 100%; display: block; }
+      .tp-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin-bottom: 1.2rem; }
+      @media (max-width: 700px) { .tp-swatches { grid-template-columns: repeat(2, 1fr); } }
+      .tp-swatch-card { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--cream); }
+      .tp-swatch-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+      .tp-swatch-name { padding: 0.5rem; font-size: 0.78rem; color: var(--ink); text-align: center; }
       .tp-materials { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
       @media (max-width: 700px) { .tp-materials { grid-template-columns: 1fr; } }
       .tp-mat { border: 1px solid var(--line); border-radius: 4px; padding: 0.9rem; background: var(--cream); }
