@@ -29,17 +29,19 @@ async function generateFlatSketch(prompt, token, attempt = 0) {
       Prefer: 'wait',
     },
     body: JSON.stringify({
-      input: { prompt: prompt, size: '1820x1024' },
+      input: { prompt: prompt, aspect_ratio: '3:2' },
     }),
   });
   const bodyText = await createRes.text();
   let prediction;
-  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Recraft رد غير متوقع'); }
+  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Recraft رد غير متوقع: ' + bodyText.slice(0, 120)); }
   if (createRes.status === 429 && attempt < 5) {
     await new Promise((r) => setTimeout(r, 12000));
     return generateFlatSketch(prompt, token, attempt + 1);
   }
-  if (!createRes.ok || prediction.error) throw new Error('Recraft فشل');
+  if (!createRes.ok || prediction.error) {
+    throw new Error('Recraft فشل (' + createRes.status + '): ' + (prediction.detail || prediction.error || bodyText.slice(0, 120)));
+  }
   let result = prediction;
   let tries = 0;
   while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 60) {
