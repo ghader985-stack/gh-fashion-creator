@@ -66,6 +66,32 @@ async function safeFlatSketch(imageDataUri, instruction, token) {
   try { return await generateFlatSketch(imageDataUri, instruction, token); } catch (e) { return null; }
 }
 
+// يرفع الصورة إلى Replicate ويرجّع رابط https عام (بدل base64 المحدود بـ1MB)
+async function uploadToReplicate(buffer, mediaType, token) {
+  const ext = mediaType.split('/')[1] || 'jpg';
+  const boundary = '----ghBoundary' + Date.now();
+  const pre = Buffer.from(
+    '--' + boundary + '\r\n' +
+    'Content-Disposition: form-data; name="content"; filename="design.' + ext + '"\r\n' +
+    'Content-Type: ' + mediaType + '\r\n\r\n'
+  );
+  const post = Buffer.from('\r\n--' + boundary + '--\r\n');
+  const body = Buffer.concat([pre, buffer, post]);
+
+  const res = await fetch('https://api.replicate.com/v1/files', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'multipart/form-data; boundary=' + boundary,
+    },
+    body: body,
+  });
+  if (!res.ok) throw new Error('فشل رفع الصورة (' + res.status + ')');
+  const data = await res.json();
+  // الرابط العام للملف المرفوع
+  return data.urls && data.urls.get ? data.urls.get : null;
+}
+
 // توليد صورة واحدة عبر Replicate FLUX (مع إعادة محاولة عند الازدحام 429)
 async function generateImage(prompt, aspectRatio, token, attempt = 0) {
   const createRes = await fetch(REPLICATE_URL, {
@@ -301,7 +327,7 @@ ${INDUSTRY_RULES}
   ],
   "flatSketchPrompt": "برومبت إنجليزي مفصّل لتوليد رسمة تقنية عبر Recraft vector. صف القطعة الفعلية بدقة، واطلب أسهم قياس بأحرف مرجعية. استخدم هذه الصياغة مع تعديل وصف القطعة: 'Technical fashion flat sketch of a [garment description], FRONT view and BACK view side by side. Thin clean black vector outlines on plain white background, flat design, no color, no shading. Add measurement dimension lines with double-headed arrows at bust, waist, hip, length and hem, each arrow labeled with a small circled reference letter A B C D E F. Apparel production CAD technical drawing, precise minimal uniform stroke weight.'",
   "materialSwatches": [
-    { "name": "اسم الخامة", "swatchPrompt": "برومبت إنجليزي لصورة قريبة جداً (close-up macro) لعينة القماش/الخامة توضّح ملمسها ولونها الحقيقي، fabric swatch macro photography, soft even studio lighting" }
+    { "name": "اسم الخامة", "swatchPrompt": "برومبت إنجليزي لصورة قريبة جداً (close-up macro) لعينة القماش/الخامة. مهم جداً: اذكري اللون الدقيق للخامة كما هو في التصميم الفعلي صراحةً في بداية البرومبت (مثلاً 'emerald green silk chiffon fabric swatch'). لا تتركي اللون للصدفة. fabric swatch macro photography, soft even studio lighting" }
   ]
 }
 
@@ -370,37 +396,50 @@ ${INDUSTRY_RULES}
       // الرسمة التقنية المسطّحة عبر Qwen: تحويل صورة القطعة الفعلية إلى رسمة مطابقة
       const flatInstruction =
         'Convert this garment into a clean professional technical flat sketch (fashion CAD flat drawing). Show the garment FRONT view and BACK view side by side, on a plain white background. Use thin clean black outlines only, no model, no body, keep the exact same garment shape, silhouette, seams, neckline, and construction details as the original. Flat technical apparel drawing style, no shading, no arrows, no measurements, no text.';
-      const flatImageDataUri = 'data:' + mediaType + ';base64,' + base64;
+      // نرفع الصورة لـ Replicate أولاً للحصول على رابط (base64 محدود بـ1MB وصورة التصميم أكبر)
       jobs.push(
-        safeFlatSketch(flatImageDataUri, flatInstruction, replicateToken).then((url) => {
-          techpack.flatSketchImage = url;
-        })
+        (async () => {
+          try {
+            const imgUrl = await uploadToReplicate(imgBuffer, mediaType, replicateToken);
+            if (imgUrl) {
+              techpack.flatSketchImage = await safeFlatSketch(imgUrl, flatInstruction, replicateToken);
+            }
+          } catch (e) {
+            techpack.flatSketchImage = null;
+          }
+        })()
       );
 
       // صور الخامات (بحد أقصى 4)
+      // نبني تلميح لون من ألوان التصميم لمنع انحراف اللون في الخامات
+      const paletteHint = Array.isArray(techpack.colorway) && techpack.colorway.length
+        ? 'garment color palette: ' + techpack.colorway.map((c) => (c.part || '') + ' ' + (c.hex || '')).join(', ') + '. '
+        : '';
       const swatches = Array.isArray(techpack.materialSwatches)
         ? techpack.materialSwatches.slice(0, 4)
         : [];
       techpack.swatchImages = [];
+      const swatchResults = new Array(swatches.length);
       swatches.forEach((sw, i) => {
         if (sw && sw.swatchPrompt) {
           jobs.push(
             new Promise((r) => setTimeout(r, i * 1000))
               .then(() =>
                 safeGenerate(
-                  `${sw.swatchPrompt}. ${STYLE}. ${NO_TEXT}.`,
+                  `${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`,
                   '1:1',
                   replicateToken
                 )
               )
               .then((url) => {
-                techpack.swatchImages.push({ name: sw.name || '', url });
+                swatchResults[i] = { name: sw.name || '', url };
               })
           );
         }
       });
 
       await Promise.all(jobs);
+      techpack.swatchImages = swatchResults.filter((s) => s && s.url);
     }
 
     return res.status(200).json(techpack);
