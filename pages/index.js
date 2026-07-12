@@ -900,6 +900,26 @@ function TechpackView({ tp, preview }) {
         </div>
       </div>
 
+      {/* معلومات القطعة */}
+      {tp.garmentInfo && (
+        <TpSection title="GARMENT INFORMATION" subtitle="معلومات القطعة">
+          <div className="tp-garment-info">
+            <div className="tp-gi-item">
+              <div className="tp-gi-label">Type</div>
+              <div className="tp-gi-value">{tp.garmentInfo.type}</div>
+            </div>
+            <div className="tp-gi-item">
+              <div className="tp-gi-label">Silhouette</div>
+              <div className="tp-gi-value">{tp.garmentInfo.silhouette}</div>
+            </div>
+            <div className="tp-gi-item">
+              <div className="tp-gi-label">Construction</div>
+              <div className="tp-gi-value">{tp.garmentInfo.construction}</div>
+            </div>
+          </div>
+        </TpSection>
+      )}
+
       {/* الرسمة التقنية المسطّحة */}
       {tp.flatSketchImage && (
         <TpSection title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية (أمامي وخلفي)">
@@ -996,18 +1016,67 @@ function TechpackView({ tp, preview }) {
         </table>
       </TpSection>
 
+      {/* التفاصيل الإنشائية (Detailed Views) */}
+      {tp.detailViews && tp.detailViews.length > 0 && (
+        <TpSection title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية">
+          {tp.flatSketchImage && (
+            <div className="tp-detail-sketch">
+              <img src={tp.flatSketchImage} alt="detailed flat" crossOrigin="anonymous" />
+            </div>
+          )}
+          <table className="tp-table">
+            <thead><tr><th className="ltr">Area</th><th className="ltr">Detail</th><th className="ltr">Spec</th></tr></thead>
+            <tbody>
+              {tp.detailViews.map((d, i) => (
+                <tr key={i}>
+                  <td className="ltr left">{d.area}</td>
+                  <td className="ltr left sm">{d.detail}</td>
+                  <td className="ltr left sm">{d.spec}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TpSection>
+      )}
+
+      {/* مواضع الليبلات */}
+      {tp.labelPlacement && tp.labelPlacement.length > 0 && (
+        <TpSection title="LABEL PLACEMENT" subtitle="مواضع الليبلات">
+          <table className="tp-table">
+            <thead><tr><th className="ltr">Label</th><th className="ltr">Location</th><th className="ltr">Size</th><th className="ltr">Method</th></tr></thead>
+            <tbody>
+              {tp.labelPlacement.map((l, i) => (
+                <tr key={i}>
+                  <td className="ltr left">{l.label}</td>
+                  <td className="ltr left sm">{l.location}</td>
+                  <td className="ltr left sm">{l.size}</td>
+                  <td className="ltr left sm">{l.method}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TpSection>
+      )}
+
       {/* الألوان */}
       <TpSection title="COLORWAY & PANTONE" subtitle="الألوان">
-        <div className="tp-colors">
-          {(tp.colorway || []).map((c, i) => (
-            <div className="tp-color" key={i}>
-              <div className="tp-color-sw" style={{ background: c.hex }}></div>
-              <div>
-                <div className="tp-color-part">{c.part}</div>
-                <div className="tp-color-code">{c.pantone} · {c.hex}</div>
-              </div>
+        <div className="tp-colorway-layout">
+          {tp.flatSketchImage && (
+            <div className="tp-colorway-sketch">
+              <img src={tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" />
             </div>
-          ))}
+          )}
+          <div className="tp-colors">
+            {(tp.colorway || []).map((c, i) => (
+              <div className="tp-color" key={i}>
+                <div className="tp-color-sw" style={{ background: c.hex }}></div>
+                <div>
+                  <div className="tp-color-part">{c.part}</div>
+                  <div className="tp-color-code">{c.pantone} · {c.hex}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </TpSection>
 
@@ -1295,6 +1364,11 @@ function StyleBlock() {
       .ref-code { font-weight: 700; color: var(--gold-deep); background: var(--cream); font-family: 'Cormorant Garamond', serif; }
 
       .tp-flat { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; }
+      .tp-garment-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
+      @media (max-width: 700px) { .tp-garment-info { grid-template-columns: 1fr; } }
+      .tp-gi-item { border-right: 2px solid var(--gold); padding-right: 0.9rem; }
+      .tp-gi-label { font-family: 'Cormorant Garamond', serif; letter-spacing: 1px; color: var(--gold-deep); font-size: 0.85rem; margin-bottom: 0.3rem; direction: ltr; text-align: right; }
+      .tp-gi-value { color: var(--ink); font-size: 0.9rem; line-height: 1.5; direction: ltr; text-align: right; }
       .tp-flat img { width: 100%; display: block; }
       .tp-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin-bottom: 1.2rem; }
       @media (max-width: 700px) { .tp-swatches { grid-template-columns: repeat(2, 1fr); } }
@@ -1309,6 +1383,12 @@ function StyleBlock() {
       .tp-mat-notes { color: var(--ink-soft); font-size: 0.8rem; line-height: 1.5; }
 
       .tp-colors { display: flex; flex-wrap: wrap; gap: 1.2rem; }
+      .tp-colorway-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1.5rem; align-items: center; }
+      @media (max-width: 700px) { .tp-colorway-layout { grid-template-columns: 1fr; } }
+      .tp-colorway-sketch { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; }
+      .tp-colorway-sketch img { width: 100%; display: block; }
+      .tp-detail-sketch { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; margin-bottom: 1.2rem; }
+      .tp-detail-sketch img { width: 100%; display: block; }
       .tp-color { display: flex; gap: 0.6rem; align-items: center; }
       .tp-color-sw { width: 42px; height: 42px; border-radius: 4px; border: 1px solid var(--line); }
       .tp-color-part { font-weight: 600; color: var(--ink); font-size: 0.85rem; }
