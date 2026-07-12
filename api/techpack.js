@@ -31,7 +31,7 @@ async function generateFlatSketch(imageDataUri, instruction, token, attempt = 0)
     },
     body: JSON.stringify({
       input: {
-        image: imageDataUri,
+        image: [imageDataUri],
         prompt: instruction,
         output_format: 'png',
       },
