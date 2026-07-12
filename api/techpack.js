@@ -14,14 +14,15 @@ const MODEL = 'claude-sonnet-5';
 const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
 const REPLICATE_URL =
   'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
-// موديل Recraft V4 SVG المتخصص بالرسم المتجهي النظيف (للرسمة التقنية)
-const RECRAFT_SVG_MODEL = 'recraft-ai/recraft-v4-svg';
-const RECRAFT_URL =
-  'https://api.replicate.com/v1/models/' + RECRAFT_SVG_MODEL + '/predictions';
+// موديل Qwen Image Edit Plus — يحوّل صورة القطعة الفعلية إلى رسمة تقنية مطابقة
+const QWEN_MODEL = 'qwen/qwen-image-edit-plus';
+const QWEN_URL =
+  'https://api.replicate.com/v1/models/' + QWEN_MODEL + '/predictions';
 
-// توليد رسمة تقنية متجهية (SVG) عبر Recraft V4 — يرجّع رابط ملف SVG
-async function generateFlatSketch(prompt, token, attempt = 0) {
-  const createRes = await fetch(RECRAFT_URL, {
+// يحوّل صورة القطعة المرفوعة (base64 data URI) إلى رسمة تقنية مسطّحة أمامي/خلفي
+// عبر Qwen Image Edit — النتيجة مطابقة للتصميم لأنها مبنية على الصورة الفعلية
+async function generateFlatSketch(imageDataUri, instruction, token, attempt = 0) {
+  const createRes = await fetch(QWEN_URL, {
     method: 'POST',
     headers: {
       Authorization: 'Bearer ' + token,
@@ -29,18 +30,22 @@ async function generateFlatSketch(prompt, token, attempt = 0) {
       Prefer: 'wait',
     },
     body: JSON.stringify({
-      input: { prompt: prompt, aspect_ratio: '3:2' },
+      input: {
+        image: imageDataUri,
+        prompt: instruction,
+        output_format: 'png',
+      },
     }),
   });
   const bodyText = await createRes.text();
   let prediction;
-  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Recraft رد غير متوقع: ' + bodyText.slice(0, 120)); }
+  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Qwen رد غير متوقع: ' + bodyText.slice(0, 120)); }
   if (createRes.status === 429 && attempt < 5) {
     await new Promise((r) => setTimeout(r, 12000));
-    return generateFlatSketch(prompt, token, attempt + 1);
+    return generateFlatSketch(imageDataUri, instruction, token, attempt + 1);
   }
   if (!createRes.ok || prediction.error) {
-    throw new Error('Recraft فشل (' + createRes.status + '): ' + (prediction.detail || prediction.error || bodyText.slice(0, 120)));
+    throw new Error('Qwen فشل (' + createRes.status + '): ' + (prediction.detail || prediction.error || bodyText.slice(0, 120)));
   }
   let result = prediction;
   let tries = 0;
@@ -52,13 +57,13 @@ async function generateFlatSketch(prompt, token, attempt = 0) {
     result = await pollRes.json();
     tries++;
   }
-  if (result.status !== 'succeeded') throw new Error('Recraft لم يكتمل');
+  if (result.status !== 'succeeded') throw new Error('Qwen لم يكتمل');
   const output = result.output;
   return Array.isArray(output) ? output[0] : output;
 }
 
-async function safeFlatSketch(prompt, token) {
-  try { return await generateFlatSketch(prompt, token); } catch (e) { return null; }
+async function safeFlatSketch(imageDataUri, instruction, token) {
+  try { return await generateFlatSketch(imageDataUri, instruction, token); } catch (e) { return null; }
 }
 
 // توليد صورة واحدة عبر Replicate FLUX (مع إعادة محاولة عند الازدحام 429)
@@ -264,6 +269,7 @@ ${INDUSTRY_RULES}
   "season": "الموسم",
   "description": "وصف دقيق للقطعة كما ظهرت في الصورة (بالعربية، سطرين)",
   "silhouette": "وصف السيلويت والقصّة بالإنجليزية",
+  "garmentInfo": { "type": "نوع القطعة بالإنجليزية", "silhouette": "وصف السيلويت", "construction": "وصف البناء العام" },
   "sampleSize": "المقاس الأساسي مثل M",
   "measurements": [
     { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "tolerance": "±X.X", "sizes": { "XS": 0, "S": 0, "M": 0, "L": 0, "XL": 0 } }
@@ -287,7 +293,13 @@ ${INDUSTRY_RULES}
   "artwork": [
     { "name": "اسم العنصر مثل Main Label", "placement": "مكانه", "size": "قياسه التقديري", "notes": "ملاحظات" }
   ],
-  "flatSketchPrompt": "برومبت إنجليزي دقيق لتوليد رسمة تقنية مسطّحة متجهية (technical flat sketch) للقطعة بأسلوب Recraft vector. صف القطعة الفعلية بدقة (النوع، القصّة، الياقة، الأكمام، الجيوب، الدرزات، السحابات). استخدم هذه الصياغة تحديداً: 'clean technical flat fashion sketch of a [garment], front view and back view side by side, thin uniform black outline strokes only, no fill, no color, no shading, flat white background, garment construction lines and seams visible, apparel CAD production drawing style, minimal'.",
+  "detailViews": [
+    { "area": "المنطقة بالإنجليزية مثل Neckline / Cuff / Pocket", "detail": "وصف التفصيل الإنشائي بالإنجليزية", "spec": "مواصفة تقنية أو قياس تقديري" }
+  ],
+  "labelPlacement": [
+    { "label": "اسم الليبل بالإنجليزية مثل Main Brand Label", "location": "المكان الدقيق على القطعة", "size": "القياس التقديري", "method": "طريقة التثبيت مثل Woven / Printed / Heat-seal" }
+  ],
+  "flatSketchPrompt": "برومبت إنجليزي مفصّل لتوليد رسمة تقنية عبر Recraft vector. صف القطعة الفعلية بدقة، واطلب أسهم قياس بأحرف مرجعية. استخدم هذه الصياغة مع تعديل وصف القطعة: 'Technical fashion flat sketch of a [garment description], FRONT view and BACK view side by side. Thin clean black vector outlines on plain white background, flat design, no color, no shading. Add measurement dimension lines with double-headed arrows at bust, waist, hip, length and hem, each arrow labeled with a small circled reference letter A B C D E F. Apparel production CAD technical drawing, precise minimal uniform stroke weight.'",
   "materialSwatches": [
     { "name": "اسم الخامة", "swatchPrompt": "برومبت إنجليزي لصورة قريبة جداً (close-up macro) لعينة القماش/الخامة توضّح ملمسها ولونها الحقيقي، fabric swatch macro photography, soft even studio lighting" }
   ]
@@ -355,14 +367,15 @@ ${INDUSTRY_RULES}
 
       const jobs = [];
 
-      // الرسمة التقنية المسطّحة عبر Recraft V4 SVG (متجهي نظيف)
-      if (techpack.flatSketchPrompt) {
-        jobs.push(
-          safeFlatSketch(techpack.flatSketchPrompt, replicateToken).then((url) => {
-            techpack.flatSketchImage = url;
-          })
-        );
-      }
+      // الرسمة التقنية المسطّحة عبر Qwen: تحويل صورة القطعة الفعلية إلى رسمة مطابقة
+      const flatInstruction =
+        'Convert this garment into a clean professional technical flat sketch (fashion CAD flat drawing). Show the garment FRONT view and BACK view side by side, on a plain white background. Use thin clean black outlines only, no model, no body, keep the exact same garment shape, silhouette, seams, neckline, and construction details as the original. Flat technical apparel drawing style, no shading, no arrows, no measurements, no text.';
+      const flatImageDataUri = 'data:' + mediaType + ';base64,' + base64;
+      jobs.push(
+        safeFlatSketch(flatImageDataUri, flatInstruction, replicateToken).then((url) => {
+          techpack.flatSketchImage = url;
+        })
+      );
 
       // صور الخامات (بحد أقصى 4)
       const swatches = Array.isArray(techpack.materialSwatches)
