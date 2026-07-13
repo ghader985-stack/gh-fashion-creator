@@ -33,7 +33,8 @@ async function generateFlatSketch(imageDataUri, instruction, token, attempt = 0)
       input: {
         image: [imageDataUri],
         prompt: instruction,
-        output_format: 'png',
+        output_format: 'jpg',
+        output_quality: 85,
       },
     }),
   });
@@ -58,8 +59,15 @@ async function generateFlatSketch(imageDataUri, instruction, token, attempt = 0)
     tries++;
   }
   if (result.status !== 'succeeded') throw new Error('Qwen لم يكتمل');
-  const output = result.output;
-  return Array.isArray(output) ? output[0] : output;
+  let output = result.output;
+  output = Array.isArray(output) ? output[0] : output;
+  if (typeof output !== 'string') return null;
+  // رابط https مباشر: نقبله (يظهر ودائم بما يكفي للعرض والتصدير)
+  if (output.startsWith('http')) return output;
+  // data URI: يظهر في المتصفح، لكن نقبله فقط إن كان أصغر من 3.5MB
+  // حتى لا ينتفخ حجم رد Vercel (الحد ~4.5MB)
+  if (output.startsWith('data:') && output.length < 3500000) return output;
+  return null;
 }
 
 async function safeFlatSketch(imageDataUri, instruction, token) {
@@ -150,8 +158,13 @@ async function generateImage(prompt, aspectRatio, token, attempt = 0) {
   if (result.status !== 'succeeded') {
     throw new Error('فشل توليد الصورة');
   }
-  const output = result.output;
-  return Array.isArray(output) ? output[0] : output;
+  let output = result.output;
+  output = Array.isArray(output) ? output[0] : output;
+  // نقبل فقط روابط https المباشرة (تظهر في المتصفح)
+  if (typeof output === 'string' && output.startsWith('http')) {
+    return output;
+  }
+  return null;
 }
 
 // توليد صورة مع تجاهل الفشل (لا نُسقط التيك باك كله لو فشلت صورة توضيحية)
@@ -334,7 +347,7 @@ ${INDUSTRY_RULES}
 مهم جداً:
 - القياسات لازم تكون منطقية ومتدرّجة بشكل صحيح بين المقاسات.
 - كل الأقسام مطلوبة وممتلئة بمحتوى حقيقي مبني على الصورة.
-- إن كانت خامة مقترحة منكِ (وليست من المصممة)، أشيري لذلك في notes.
+- مهم جداً: لا تضيفي أي خامة لم تذكرها المصممة صراحةً في مواصفات القماش. اعتمدي فقط على ما ذكرته. إن كان التصميم يحتاج خامة إنشائية أساسية غير مذكورة (مثل خيط)، أضيفيها فقط إن كانت ضرورية جداً وبدون مبالغة.
 - استخدمي أكواد Pantone و Hex منطقية للألوان الظاهرة في التصميم فعلاً.
 - flatSketchPrompt و materialSwatches ضروريان لتوليد الرسومات التوضيحية — اكتبيهما بدقة تصف القطعة والخامات الفعلية.
 - materialSwatches: عنصر واحد لكل خامة رئيسية (بحد أقصى 4 خامات).
