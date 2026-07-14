@@ -3,6 +3,7 @@ import Head from 'next/head';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('moodboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   const [user, setUser] = useState(null);
   const [usageCount, setUsageCount] = useState(0);
@@ -69,13 +70,31 @@ export default function Home() {
     if (savedUsage) setUsageCount(parseInt(savedUsage));
   }, []);
 
-  const tabs = [
-    { id: 'moodboard', name: 'المود بورد', num: '01' },
-    { id: 'studio', name: 'استوديو AI', num: '02' },
-    { id: 'techpack', name: 'التيك باك', num: '03' },
-    { id: 'marketing', name: 'المحتوى التسويقي', num: '04' },
-    { id: 'video', name: 'الفيديو', num: '05' },
+  // مجموعات السايدبار — مرتبة مثل المنصات الاحترافية
+  const navGroups = [
+    {
+      label: 'التصميم',
+      items: [
+        { id: 'moodboard', name: 'المود بورد', num: '01', desc: 'لوحة الإلهام' },
+        { id: 'studio', name: 'استوديو AI', num: '02', desc: 'توليد صورة القطعة' },
+      ],
+    },
+    {
+      label: 'الإنتاج',
+      items: [
+        { id: 'techpack', name: 'التيك باك', num: '03', desc: 'الحزمة التقنية' },
+      ],
+    },
+    {
+      label: 'التسويق',
+      items: [
+        { id: 'marketing', name: 'المحتوى التسويقي', num: '04', desc: 'كابشنات وأفكار' },
+        { id: 'video', name: 'الفيديو', num: '05', desc: 'برومبتات سينمائية' },
+      ],
+    },
   ];
+  const allTabs = navGroups.flatMap((g) => g.items);
+  const currentTab = allTabs.find((t) => t.id === activeTab) || allTabs[0];
 
   const platforms = ['instagram', 'tiktok', 'pinterest', 'story'];
   const tones = ['luxury', 'friendly', 'professional', 'inspiring'];
@@ -111,7 +130,6 @@ export default function Home() {
   };
 
   const handleAdminLogin = () => {
-    // كلمة السر تُقارن على الخادم عبر متغير بيئة — الطلب يمر عبر api/admin
     fetch('/api/admin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -302,7 +320,6 @@ export default function Home() {
     { name: 'Google Veo', note: 'واقعية عالية ومشاهد متكاملة' },
     { name: 'Higgsfield', note: 'حركات كاميرا درامية جاهزة' },
   ];
-
   return (
     <>
       <Head>
@@ -314,499 +331,471 @@ export default function Home() {
         />
       </Head>
 
-      <div className="container">
-        {/* ===== الهيدر ===== */}
-        <header className="header">
-          <div className="logo-container">
-            <div className="logo-icon">GH</div>
+      <div className="app">
+        {/* ===== السايدبار ===== */}
+        <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+          <div className="sb-brand">
+            <div className="sb-logo">GH</div>
             <div>
-              <h1 className="logo-text">GH Couture AI</h1>
-              <p className="logo-sub">منصة تصميم الأزياء بالذكاء الاصطناعي</p>
+              <div className="sb-title">GH Couture AI</div>
+              <div className="sb-sub">مصنع الأزياء الرقمي</div>
             </div>
           </div>
-          <div className="header-actions">
-            {user && (
-              <div className="usage-info">
+
+          <nav className="sb-nav">
+            {navGroups.map((group) => (
+              <div className="sb-group" key={group.label}>
+                <div className="sb-group-label">{group.label}</div>
+                {group.items.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => { setActiveTab(item.id); setSidebarOpen(false); }}
+                    className={`sb-item ${activeTab === item.id ? 'active' : ''}`}
+                  >
+                    <span className="sb-item-num">{item.num}</span>
+                    <span className="sb-item-body">
+                      <span className="sb-item-name">{item.name}</span>
+                      <span className="sb-item-desc">{item.desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+
+          <div className="sb-foot">
+            {user ? (
+              <div className="sb-user">
                 {user.plan === 'admin' ? (
-                  <span>وضع المالكة — بلا حدود</span>
+                  <div className="sb-plan admin">وضع المالكة — بلا حدود</div>
                 ) : (
                   <>
-                    <span>الاستخدام: {usageCount}/{plans[user.plan]?.limit || 0}</span>
-                    <div className="usage-bar">
-                      <div className="usage-fill" style={{ width: `${(usageCount / (plans[user.plan]?.limit || 1)) * 100}%` }}></div>
+                    <div className="sb-plan">
+                      باقة {plans[user.plan]?.name} · {usageCount}/{plans[user.plan]?.limit}
+                    </div>
+                    <div className="sb-usage-bar">
+                      <div className="sb-usage-fill" style={{ width: `${(usageCount / (plans[user.plan]?.limit || 1)) * 100}%` }}></div>
+                    </div>
+                  </>
+                )}
+                <div className="sb-user-actions">
+                  {user.plan !== 'admin' && (
+                    <button onClick={() => setShowPricing(true)} className="sb-btn primary">ترقية</button>
+                  )}
+                  <button onClick={handleLogout} className="sb-btn ghost">خروج</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setShowPricing(true)} className="sb-btn primary full">اشتركي الآن</button>
+            )}
+          </div>
+        </aside>
+
+        {sidebarOpen && <div className="sb-overlay" onClick={() => setSidebarOpen(false)}></div>}
+
+        {/* ===== المنطقة الرئيسية ===== */}
+        <div className="main-area">
+          {/* شريط علوي */}
+          <header className="topbar">
+            <button className="menu-btn" onClick={() => setSidebarOpen(true)} aria-label="menu">☰</button>
+            <div className="topbar-title">
+              <span className="topbar-eyebrow">المرحلة {currentTab.num}</span>
+              <h1 className="topbar-h1">{currentTab.name}</h1>
+            </div>
+            <div className="topbar-actions">
+              {user && user.plan !== 'admin' && (
+                <div className="topbar-usage">
+                  <span>{usageCount}/{plans[user.plan]?.limit}</span>
+                  <div className="topbar-usage-bar"><div style={{ width: `${(usageCount / (plans[user.plan]?.limit || 1)) * 100}%` }}></div></div>
+                </div>
+              )}
+              {!user && <button onClick={() => setShowPricing(true)} className="topbar-cta">اشتركي</button>}
+            </div>
+          </header>
+
+          <div className="content">
+
+            {/* ===== المود بورد ===== */}
+            {activeTab === 'moodboard' && (
+              <div className="tool">
+                <section className="card">
+                  <p className="card-hint">اكتبي وصف الكونسبت، وتُبنى لكِ لوحة إلهام احترافية كاملة: رسمة، صور، باليت ألوان، وخامات.</p>
+                  <div className="field">
+                    <label>وصف الكونسبت</label>
+                    <textarea value={moodDescription} onChange={(e) => setMoodDescription(e.target.value)}
+                      placeholder="مثال: فستان سهرة مستوحى من أعماق البحر، ألوان زمردية وفيروزية، إحساس غامض وساحر..."></textarea>
+                  </div>
+                  <button onClick={handleMoodboard} disabled={moodLoading} className="cta">
+                    {moodLoading ? <><span className="spinner"></span> جاري إنشاء اللوحة...</> : 'أنشئي المود بورد'}
+                  </button>
+                  {moodError && <div className="err">{moodError}</div>}
+                </section>
+
+                {moodLoading && <div className="loading-block"><span className="spinner-lg"></span><p>يتم توليد الرسمة والصور والألوان...</p></div>}
+                {!moodLoading && !moodBoard && <p className="placeholder">لوحة الإلهام ستظهر هنا</p>}
+
+                {moodBoard && (
+                  <>
+                    <div className="board-actions">
+                      <button onClick={downloadBoard} disabled={downloading} className="download-btn">
+                        {downloading ? <><span className="spinner"></span> جاري الحفظ...</> : 'حفظ اللوحة كصورة'}
+                      </button>
+                      <span className="hint-inline">أو اضغطي على أي صورة لحفظها منفردة</span>
+                    </div>
+                    <div id="moodboard-canvas" className="board">
+                      <div className="board-header">
+                        <div className="board-corner tl"></div>
+                        <div className="board-corner tr"></div>
+                        <h1 className="board-title">{moodBoard.title}</h1>
+                        <div className="board-rule"></div>
+                        <p className="board-subtitle">{moodBoard.subtitle}</p>
+                      </div>
+                      <div className="board-collage">
+                        <div className="collage-hero" onClick={() => downloadImage(moodBoard.heroImage, 0)} title="اضغطي لحفظ الصورة">
+                          <img src={moodBoard.heroImage} alt="hero" crossOrigin="anonymous" />
+                          <span className="save-badge">حفظ</span>
+                        </div>
+                        <div className="collage-tiles">
+                          {moodImgs.map((img, i) => (
+                            <div className="collage-tile" key={i} onClick={() => downloadImage(img, i + 1)} title="اضغطي لحفظ الصورة">
+                              <img src={img} alt={`mood-${i}`} crossOrigin="anonymous" />
+                              <span className="save-badge">حفظ</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="board-inspiration">
+                        <div className="insp-divider">— Inspiration —</div>
+                        <p className="insp-text">{moodBoard.inspiration}</p>
+                      </div>
+                      <div className="board-details">
+                        <div className="detail-col">
+                          <div className="detail-label">FABRICS</div>
+                          <div className="detail-value">{(moodBoard.fabrics || []).join('  ·  ')}</div>
+                        </div>
+                        <div className="detail-col">
+                          <div className="detail-label">SILHOUETTE</div>
+                          <div className="detail-value">{moodBoard.silhouette}</div>
+                        </div>
+                        <div className="detail-col palette-col">
+                          <div className="detail-label">COLOR PALETTE</div>
+                          <div className="palette-row">
+                            {(moodBoard.palette || []).map((c, i) => (
+                              <div className="swatch-wrap" key={i}>
+                                <div className="swatch" style={{ background: c.hex }}></div>
+                                <span className="swatch-name">{c.name}</span>
+                                <span className="swatch-hex">{c.hex}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="board-footer">GH Couture AI</div>
                     </div>
                   </>
                 )}
               </div>
             )}
-            {user ? (
-              <div className="user-actions">
-                {user.plan !== 'admin' && (
-                  <button onClick={() => setShowPricing(true)} className="upgrade-btn">ترقية</button>
-                )}
-                <button onClick={handleLogout} className="logout-btn">خروج</button>
-              </div>
-            ) : (
-              <button onClick={() => setShowPricing(true)} className="upgrade-btn">اشتركي</button>
-            )}
-          </div>
-        </header>
 
-        {/* ===== التبويبات ===== */}
-        <nav className="tabs-container">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`tab ${activeTab === tab.id ? 'active' : ''}`}
-            >
-              <span className="tab-num">{tab.num}</span>
-              <span className="tab-name">{tab.name}</span>
-            </button>
-          ))}
-        </nav>
-
-        {/* ===== المود بورد ===== */}
-        {activeTab === 'moodboard' && (
-          <main className="mood-main">
-            <section className="panel">
-              <div className="panel-eyebrow">المرحلة الأولى — الإلهام</div>
-              <h2 className="panel-title">المود بورد</h2>
-              <p className="panel-hint">اكتبي وصف الكونسبت، وتُبنى لكِ لوحة إلهام احترافية كاملة: رسمة، صور، باليت ألوان، وخامات.</p>
-              <div className="field">
-                <label>وصف الكونسبت</label>
-                <textarea
-                  value={moodDescription}
-                  onChange={(e) => setMoodDescription(e.target.value)}
-                  placeholder="مثال: فستان سهرة مستوحى من أعماق البحر، ألوان زمردية وفيروزية، إحساس غامض وساحر..."
-                ></textarea>
-              </div>
-              <button onClick={handleMoodboard} disabled={moodLoading} className="cta">
-                {moodLoading ? <><span className="spinner"></span> جاري إنشاء اللوحة...</> : 'أنشئي المود بورد'}
-              </button>
-              {moodError && <div className="err">{moodError}</div>}
-            </section>
-
-            {moodLoading && (
-              <div className="loading-block">
-                <span className="spinner-lg"></span>
-                <p>يتم توليد الرسمة والصور والألوان...</p>
-              </div>
-            )}
-            {!moodLoading && !moodBoard && <p className="placeholder">لوحة الإلهام ستظهر هنا</p>}
-
-            {moodBoard && (
-              <>
-                <div className="board-actions">
-                  <button onClick={downloadBoard} disabled={downloading} className="download-btn">
-                    {downloading ? <><span className="spinner"></span> جاري الحفظ...</> : 'حفظ اللوحة كصورة'}
-                  </button>
-                  <span className="hint-inline">أو اضغطي على أي صورة لحفظها منفردة</span>
-                </div>
-
-                <div id="moodboard-canvas" className="board">
-                  <div className="board-header">
-                    <div className="board-corner tl"></div>
-                    <div className="board-corner tr"></div>
-                    <h1 className="board-title">{moodBoard.title}</h1>
-                    <div className="board-rule"></div>
-                    <p className="board-subtitle">{moodBoard.subtitle}</p>
+            {/* ===== استوديو AI ===== */}
+            {activeTab === 'studio' && (
+              <div className="tool">
+                <section className="card">
+                  <p className="card-hint">حوّلي الكونسبت إلى صورة قطعة احترافية. صفي التصميم، وارفعي صورة مرجعية اختيارياً.</p>
+                  <div className="field">
+                    <label>وصف التصميم</label>
+                    <textarea value={studioDesc} onChange={(e) => setStudioDesc(e.target.value)}
+                      placeholder="مثال: فستان طويل بقصّة حورية، حرير زمردي بطبقات شيفون متدرجة، تطريز لؤلؤي عند الصدر..."></textarea>
                   </div>
-
-                  <div className="board-collage">
-                    <div className="collage-hero" onClick={() => downloadImage(moodBoard.heroImage, 0)} title="اضغطي لحفظ الصورة">
-                      <img src={moodBoard.heroImage} alt="hero" crossOrigin="anonymous" />
-                      <span className="save-badge">حفظ</span>
-                    </div>
-                    <div className="collage-tiles">
-                      {moodImgs.map((img, i) => (
-                        <div className="collage-tile" key={i} onClick={() => downloadImage(img, i + 1)} title="اضغطي لحفظ الصورة">
-                          <img src={img} alt={`mood-${i}`} crossOrigin="anonymous" />
-                          <span className="save-badge">حفظ</span>
+                  <div className="field">
+                    <label>صورة مرجعية (اختياري)</label>
+                    <div className="upload-area">
+                      {studioPreview ? (
+                        <div className="img-preview">
+                          <img src={studioPreview} alt="preview" />
+                          <button onClick={() => { setStudioImage(null); setStudioPreview(''); }} className="remove-img">✕</button>
                         </div>
+                      ) : (
+                        <label className="upload-label">
+                          <input type="file" accept="image/*" onChange={makeUploader(setStudioImage, setStudioPreview)} style={{ display: 'none' }} />
+                          <span>اضغطي لرفع صورة مرجعية</span>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>نوع اللقطة</label>
+                    <div className="chips">
+                      {[{ id: 'catalog', n: 'معلّقة (كتالوج)' }, { id: 'onmodel', n: 'على موديل' }, { id: 'flatlay', n: 'مسطّحة' }, { id: 'detail', n: 'تفاصيل' }].map((s) => (
+                        <button key={s.id} onClick={() => setStudioShot(s.id)} className={`chip ${studioShot === s.id ? 'active' : ''}`}>{s.n}</button>
                       ))}
                     </div>
                   </div>
-
-                  <div className="board-inspiration">
-                    <div className="insp-divider">— Inspiration —</div>
-                    <p className="insp-text">{moodBoard.inspiration}</p>
-                  </div>
-
-                  <div className="board-details">
-                    <div className="detail-col">
-                      <div className="detail-label">FABRICS</div>
-                      <div className="detail-value">{(moodBoard.fabrics || []).join('  ·  ')}</div>
-                    </div>
-                    <div className="detail-col">
-                      <div className="detail-label">SILHOUETTE</div>
-                      <div className="detail-value">{moodBoard.silhouette}</div>
-                    </div>
-                    <div className="detail-col palette-col">
-                      <div className="detail-label">COLOR PALETTE</div>
-                      <div className="palette-row">
-                        {(moodBoard.palette || []).map((c, i) => (
-                          <div className="swatch-wrap" key={i}>
-                            <div className="swatch" style={{ background: c.hex }}></div>
-                            <span className="swatch-name">{c.name}</span>
-                            <span className="swatch-hex">{c.hex}</span>
-                          </div>
-                        ))}
-                      </div>
+                  <div className="field">
+                    <label>الخلفية</label>
+                    <div className="chips">
+                      {[{ id: 'cream', n: 'كريمي' }, { id: 'white', n: 'أبيض' }, { id: 'dark', n: 'داكن' }].map((b) => (
+                        <button key={b.id} onClick={() => setStudioBg(b.id)} className={`chip ${studioBg === b.id ? 'active' : ''}`}>{b.n}</button>
+                      ))}
                     </div>
                   </div>
-                  <div className="board-footer">GH Couture AI</div>
-                </div>
-              </>
-            )}
-          </main>
-        )}
-
-        {/* ===== استوديو AI ===== */}
-        {activeTab === 'studio' && (
-          <main className="mood-main">
-            <section className="panel">
-              <div className="panel-eyebrow">المرحلة الثانية — التصميم المرئي</div>
-              <h2 className="panel-title">استوديو AI</h2>
-              <p className="panel-hint">حوّلي الكونسبت إلى صورة قطعة احترافية. صفي التصميم، وارفعي صورة مرجعية اختيارياً.</p>
-
-              <div className="field">
-                <label>وصف التصميم</label>
-                <textarea
-                  value={studioDesc}
-                  onChange={(e) => setStudioDesc(e.target.value)}
-                  placeholder="مثال: فستان طويل بقصّة حورية، حرير زمردي بطبقات شيفون متدرجة، تطريز لؤلؤي عند الصدر..."
-                ></textarea>
-              </div>
-
-              <div className="field">
-                <label>صورة مرجعية (اختياري)</label>
-                <div className="upload-area">
-                  {studioPreview ? (
-                    <div className="img-preview">
-                      <img src={studioPreview} alt="preview" />
-                      <button onClick={() => { setStudioImage(null); setStudioPreview(''); }} className="remove-img">✕</button>
-                    </div>
-                  ) : (
-                    <label className="upload-label">
-                      <input type="file" accept="image/*" onChange={makeUploader(setStudioImage, setStudioPreview)} style={{ display: 'none' }} />
-                      <span>اضغطي لرفع صورة مرجعية</span>
-                    </label>
-                  )}
-                </div>
-              </div>
-
-              <div className="field">
-                <label>نوع اللقطة</label>
-                <div className="chips">
-                  {[
-                    { id: 'catalog', n: 'معلّقة (كتالوج)' },
-                    { id: 'onmodel', n: 'على موديل' },
-                    { id: 'flatlay', n: 'مسطّحة' },
-                    { id: 'detail', n: 'تفاصيل' },
-                  ].map((s) => (
-                    <button key={s.id} onClick={() => setStudioShot(s.id)} className={`chip ${studioShot === s.id ? 'active' : ''}`}>{s.n}</button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="field">
-                <label>الخلفية</label>
-                <div className="chips">
-                  {[
-                    { id: 'cream', n: 'كريمي' },
-                    { id: 'white', n: 'أبيض' },
-                    { id: 'dark', n: 'داكن' },
-                  ].map((b) => (
-                    <button key={b.id} onClick={() => setStudioBg(b.id)} className={`chip ${studioBg === b.id ? 'active' : ''}`}>{b.n}</button>
-                  ))}
-                </div>
-              </div>
-
-              <button onClick={handleStudio} disabled={studioLoading} className="cta">
-                {studioLoading ? <><span className="spinner"></span> جاري توليد الصورة...</> : 'ولّدي صورة القطعة'}
-              </button>
-              {studioError && <div className="err">{studioError}</div>}
-            </section>
-
-            {studioLoading && (
-              <div className="loading-block"><span className="spinner-lg"></span><p>يتم بناء البرومبت وتوليد الصورة...</p></div>
-            )}
-            {!studioLoading && !studioResult && <p className="placeholder">صورة القطعة ستظهر هنا</p>}
-
-            {studioResult && (
-              <div className="studio-result">
-                <div className="studio-img" onClick={() => downloadImage(studioResult.imageUrl, 0)} title="اضغطي لحفظ الصورة">
-                  <img src={studioResult.imageUrl} alt="design" crossOrigin="anonymous" />
-                  <span className="save-badge">حفظ</span>
-                </div>
-                <div className="studio-prompt">
-                  <div className="detail-label">PROMPT</div>
-                  <p>{studioResult.prompt}</p>
-                  <button onClick={() => copyText(studioResult.prompt)} className="mini-btn">نسخ البرومبت</button>
-                </div>
-              </div>
-            )}
-          </main>
-        )}
-
-        {/* ===== التيك باك ===== */}
-        {activeTab === 'techpack' && (
-          <main className="mood-main">
-            <section className="panel">
-              <div className="panel-eyebrow">المرحلة الثالثة — المواصفات التقنية</div>
-              <h2 className="panel-title">التيك باك</h2>
-              <p className="panel-hint">ارفعي صورة التصميم (سكتش، صورة AI، أو قطعة)، وأضيفي مواصفات القماش. تُبنى لكِ حزمة تقنية كاملة للمصنع.</p>
-
-              <div className="field">
-                <label>صورة التصميم</label>
-                <div className="upload-area">
-                  {tpPreview ? (
-                    <div className="img-preview">
-                      <img src={tpPreview} alt="preview" />
-                      <button onClick={() => { setTpImage(null); setTpPreview(''); }} className="remove-img">✕</button>
-                    </div>
-                  ) : (
-                    <label className="upload-label">
-                      <input type="file" accept="image/*" onChange={makeUploader(setTpImage, setTpPreview)} style={{ display: 'none' }} />
-                      <span>اضغطي لرفع صورة التصميم</span>
-                    </label>
-                  )}
-                </div>
-              </div>
-
-              <div className="field">
-                <label>اسم التصميم (اختياري)</label>
-                <input type="text" value={tpName} onChange={(e) => setTpName(e.target.value)} placeholder="مثال: فستان أوشن فايبز" />
-              </div>
-
-              <div className="field">
-                <label>مواصفات القماش</label>
-                <textarea
-                  value={tpFabric}
-                  onChange={(e) => setTpFabric(e.target.value)}
-                  placeholder="مثال: حرير شيفون 60 غرام، بطانة ساتان، تطريز يدوي بالخرز. إن تركتيها فارغة سنقترح خامات منطقية."
-                ></textarea>
-              </div>
-
-              <div className="two-col">
-                <div className="field">
-                  <label>الموسم (اختياري)</label>
-                  <input type="text" value={tpSeason} onChange={(e) => setTpSeason(e.target.value)} placeholder="SS26" />
-                </div>
-                <div className="field">
-                  <label>ملاحظات (اختياري)</label>
-                  <input type="text" value={tpNotes} onChange={(e) => setTpNotes(e.target.value)} placeholder="أي تفاصيل خاصة" />
-                </div>
-              </div>
-
-              <button onClick={handleTechpack} disabled={tpLoading} className="cta">
-                {tpLoading ? <><span className="spinner"></span> جاري تحليل التصميم وبناء التيك باك...</> : 'أنشئي التيك باك'}
-              </button>
-              {tpError && <div className="err">{tpError}</div>}
-            </section>
-
-            {tpLoading && (
-              <div className="loading-block"><span className="spinner-lg"></span><p>يتم تحليل التصميم واستخراج القياسات والمواد...</p></div>
-            )}
-            {!tpLoading && !techpack && <p className="placeholder">التيك باك سيظهر هنا</p>}
-
-            {techpack && (
-              <>
-                <div className="board-actions">
-                  <button onClick={downloadTechpack} disabled={tpDownloading} className="download-btn">
-                    {tpDownloading ? <><span className="spinner"></span> جاري الحفظ...</> : 'حفظ التيك باك كصورة'}
+                  <button onClick={handleStudio} disabled={studioLoading} className="cta">
+                    {studioLoading ? <><span className="spinner"></span> جاري توليد الصورة...</> : 'ولّدي صورة القطعة'}
                   </button>
-                </div>
-                <TechpackView tp={techpack} preview={tpPreview} />
-              </>
-            )}
-          </main>
-        )}
+                  {studioError && <div className="err">{studioError}</div>}
+                </section>
 
-        {/* ===== المحتوى التسويقي ===== */}
-        {activeTab === 'marketing' && (
-          <main className="split-main">
-            <section className="panel">
-              <div className="panel-eyebrow">المرحلة الرابعة — التسويق</div>
-              <h2 className="panel-title">المحتوى التسويقي</h2>
+                {studioLoading && <div className="loading-block"><span className="spinner-lg"></span><p>يتم بناء البرومبت وتوليد الصورة...</p></div>}
+                {!studioLoading && !studioResult && <p className="placeholder">صورة القطعة ستظهر هنا</p>}
 
-              <div className="field">
-                <label>المنصة</label>
-                <div className="chips">
-                  {platforms.map((p) => (
-                    <button key={p} onClick={() => setMkPlatform(p)} className={`chip ${mkPlatform === p ? 'active' : ''}`}>
-                      {p === 'story' ? 'قصة تسويقية' : p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="field">
-                <label>النبرة</label>
-                <div className="chips">
-                  {tones.map((t) => (
-                    <button key={t} onClick={() => setMkTone(t)} className={`chip ${mkTone === t ? 'active' : ''}`}>{t}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="field">
-                <label>وصف المنتج</label>
-                <textarea value={mkText} onChange={(e) => setMkText(e.target.value)} placeholder="صفي المنتج أو الكولكشن..."></textarea>
-              </div>
-              <div className="field">
-                <label>صورة (اختياري)</label>
-                <div className="upload-area">
-                  {mkPreview ? (
-                    <div className="img-preview">
-                      <img src={mkPreview} alt="preview" />
-                      <button onClick={() => { setMkImage(null); setMkPreview(''); }} className="remove-img">✕</button>
+                {studioResult && (
+                  <div className="studio-result">
+                    <div className="studio-img" onClick={() => downloadImage(studioResult.imageUrl, 0)} title="اضغطي لحفظ الصورة">
+                      <img src={studioResult.imageUrl} alt="design" crossOrigin="anonymous" />
+                      <span className="save-badge">حفظ</span>
                     </div>
-                  ) : (
-                    <label className="upload-label">
-                      <input type="file" accept="image/*" onChange={makeUploader(setMkImage, setMkPreview)} style={{ display: 'none' }} />
-                      <span>اضغطي لرفع صورة</span>
-                    </label>
-                  )}
-                </div>
-              </div>
-              <button onClick={handleMarketing} disabled={mkLoading} className="cta">
-                {mkLoading ? <><span className="spinner"></span> جاري التوليد...</> : 'أنشئي المحتوى'}
-              </button>
-            </section>
-            <section className="panel">
-              <div className="result-head">
-                <h2 className="panel-title sm">النتيجة</h2>
-                {mkResult && <button onClick={() => copyText(mkResult)} className="mini-btn">نسخ</button>}
-              </div>
-              <div className="result-area">
-                {mkResult ? <div className="result-content">{mkResult}</div> : <p className="placeholder">المحتوى سيظهر هنا</p>}
-              </div>
-            </section>
-          </main>
-        )}
-
-        {/* ===== الفيديو ===== */}
-        {activeTab === 'video' && (
-          <main className="split-main">
-            <section className="panel">
-              <div className="panel-eyebrow">المرحلة الخامسة — الفيديو</div>
-              <h2 className="panel-title">الفيديو</h2>
-
-              <div className="field">
-                <label>نوع الفيديو</label>
-                <div className="chips">
-                  {videoTypes.map((v) => (
-                    <button key={v} onClick={() => setVidType(v)} className={`chip ${vidType === v ? 'active' : ''}`}>{v}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="field">
-                <label>المود</label>
-                <div className="chips">
-                  {videoMoods.map((m) => (
-                    <button key={m} onClick={() => setVidMood(m)} className={`chip ${vidMood === m ? 'active' : ''}`}>{m}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="field">
-                <label>وصف الفكرة</label>
-                <textarea value={vidText} onChange={(e) => setVidText(e.target.value)} placeholder="صفي فكرة الفيديو أو القطعة..."></textarea>
-              </div>
-              <div className="field">
-                <label>صورة (اختياري)</label>
-                <div className="upload-area">
-                  {vidPreview ? (
-                    <div className="img-preview">
-                      <img src={vidPreview} alt="preview" />
-                      <button onClick={() => { setVidImage(null); setVidPreview(''); }} className="remove-img">✕</button>
+                    <div className="studio-prompt">
+                      <div className="detail-label">PROMPT</div>
+                      <p>{studioResult.prompt}</p>
+                      <button onClick={() => copyText(studioResult.prompt)} className="mini-btn">نسخ البرومبت</button>
                     </div>
-                  ) : (
-                    <label className="upload-label">
-                      <input type="file" accept="image/*" onChange={makeUploader(setVidImage, setVidPreview)} style={{ display: 'none' }} />
-                      <span>اضغطي لرفع صورة</span>
-                    </label>
-                  )}
-                </div>
-              </div>
-              <button onClick={handleVideo} disabled={vidLoading} className="cta">
-                {vidLoading ? <><span className="spinner"></span> جاري التوليد...</> : 'أنشئي برومبت الفيديو'}
-              </button>
-
-              <div className="platforms-box">
-                <div className="detail-label">منصات توليد الفيديو المقترحة</div>
-                {videoPlatforms.map((p, i) => (
-                  <div className="platform-row" key={i}>
-                    <span className="platform-name">{p.name}</span>
-                    <span className="platform-note">{p.note}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-            <section className="panel">
-              <div className="result-head">
-                <h2 className="panel-title sm">النتيجة</h2>
-                {vidResult && <button onClick={() => copyText(vidResult)} className="mini-btn">نسخ</button>}
-              </div>
-              <div className="result-area">
-                {vidResult ? <div className="result-content">{vidResult}</div> : <p className="placeholder">برومبت الفيديو سيظهر هنا</p>}
-              </div>
-            </section>
-          </main>
-        )}
-
-        {/* ===== نافذة الأسعار ===== */}
-        {showPricing && (
-          <div className="modal-overlay">
-            <div className="modal">
-              <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
-              <h2 className="modal-title">اختاري باقتك</h2>
-              <p className="modal-sub">اشتركي الآن وابدئي رحلة تصميم متكاملة</p>
-
-              <div className="admin-section">
-                {!showAdminInput ? (
-                  <button onClick={() => setShowAdminInput(true)} className="admin-link">دخول المالكة</button>
-                ) : (
-                  <div className="admin-input-group">
-                    <input type="password" value={adminCode} onChange={(e) => setAdminCode(e.target.value)} placeholder="كلمة السر" className="admin-input" />
-                    <button onClick={handleAdminLogin} className="admin-btn">دخول</button>
-                    <button onClick={() => { setShowAdminInput(false); setAdminCode(''); }} className="admin-cancel">إلغاء</button>
                   </div>
                 )}
               </div>
+            )}
 
-              <div className="pricing-grid">
-                <div className="pricing-card">
-                  <h3>Basic</h3>
-                  <div className="plan-price">$15<span>/شهر</span></div>
-                  <ul><li>200 عملية</li><li>كل الأدوات</li><li>دعم بالإيميل</li></ul>
-                  <button onClick={() => handleSubscribe('basic')} className="subscribe-btn">اشتركي</button>
+            {/* ===== التيك باك ===== */}
+            {activeTab === 'techpack' && (
+              <div className="tool">
+                <section className="card">
+                  <p className="card-hint">ارفعي صورة التصميم (سكتش، صورة AI، أو قطعة)، وأضيفي مواصفات القماش. تُبنى لكِ حزمة تقنية كاملة للمصنع.</p>
+                  <div className="field">
+                    <label>صورة التصميم</label>
+                    <div className="upload-area">
+                      {tpPreview ? (
+                        <div className="img-preview">
+                          <img src={tpPreview} alt="preview" />
+                          <button onClick={() => { setTpImage(null); setTpPreview(''); }} className="remove-img">✕</button>
+                        </div>
+                      ) : (
+                        <label className="upload-label">
+                          <input type="file" accept="image/*" onChange={makeUploader(setTpImage, setTpPreview)} style={{ display: 'none' }} />
+                          <span>اضغطي لرفع صورة التصميم</span>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>اسم التصميم (اختياري)</label>
+                    <input type="text" value={tpName} onChange={(e) => setTpName(e.target.value)} placeholder="مثال: فستان أوشن فايبز" />
+                  </div>
+                  <div className="field">
+                    <label>مواصفات القماش</label>
+                    <textarea value={tpFabric} onChange={(e) => setTpFabric(e.target.value)}
+                      placeholder="مثال: حرير شيفون 60 غرام، بطانة ساتان، تطريز يدوي بالخرز. إن تركتيها فارغة سنقترح خامات منطقية."></textarea>
+                  </div>
+                  <div className="two-col">
+                    <div className="field">
+                      <label>الموسم (اختياري)</label>
+                      <input type="text" value={tpSeason} onChange={(e) => setTpSeason(e.target.value)} placeholder="SS26" />
+                    </div>
+                    <div className="field">
+                      <label>ملاحظات (اختياري)</label>
+                      <input type="text" value={tpNotes} onChange={(e) => setTpNotes(e.target.value)} placeholder="أي تفاصيل خاصة" />
+                    </div>
+                  </div>
+                  <button onClick={handleTechpack} disabled={tpLoading} className="cta">
+                    {tpLoading ? <><span className="spinner"></span> جاري تحليل التصميم وبناء التيك باك...</> : 'أنشئي التيك باك'}
+                  </button>
+                  {tpError && <div className="err">{tpError}</div>}
+                </section>
+
+                {tpLoading && <div className="loading-block"><span className="spinner-lg"></span><p>يتم تحليل التصميم واستخراج القياسات والمواد...</p></div>}
+                {!tpLoading && !techpack && <p className="placeholder">التيك باك سيظهر هنا</p>}
+
+                {techpack && (
+                  <>
+                    <div className="board-actions">
+                      <button onClick={downloadTechpack} disabled={tpDownloading} className="download-btn">
+                        {tpDownloading ? <><span className="spinner"></span> جاري الحفظ...</> : 'حفظ التيك باك كصورة'}
+                      </button>
+                    </div>
+                    <TechpackView tp={techpack} preview={tpPreview} />
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ===== المحتوى التسويقي ===== */}
+            {activeTab === 'marketing' && (
+              <div className="tool split">
+                <section className="card">
+                  <div className="field">
+                    <label>المنصة</label>
+                    <div className="chips">
+                      {platforms.map((p) => (
+                        <button key={p} onClick={() => setMkPlatform(p)} className={`chip ${mkPlatform === p ? 'active' : ''}`}>
+                          {p === 'story' ? 'قصة تسويقية' : p}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>النبرة</label>
+                    <div className="chips">
+                      {tones.map((t) => (<button key={t} onClick={() => setMkTone(t)} className={`chip ${mkTone === t ? 'active' : ''}`}>{t}</button>))}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>وصف المنتج</label>
+                    <textarea value={mkText} onChange={(e) => setMkText(e.target.value)} placeholder="صفي المنتج أو الكولكشن..."></textarea>
+                  </div>
+                  <div className="field">
+                    <label>صورة (اختياري)</label>
+                    <div className="upload-area">
+                      {mkPreview ? (
+                        <div className="img-preview">
+                          <img src={mkPreview} alt="preview" />
+                          <button onClick={() => { setMkImage(null); setMkPreview(''); }} className="remove-img">✕</button>
+                        </div>
+                      ) : (
+                        <label className="upload-label">
+                          <input type="file" accept="image/*" onChange={makeUploader(setMkImage, setMkPreview)} style={{ display: 'none' }} />
+                          <span>اضغطي لرفع صورة</span>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={handleMarketing} disabled={mkLoading} className="cta">
+                    {mkLoading ? <><span className="spinner"></span> جاري التوليد...</> : 'أنشئي المحتوى'}
+                  </button>
+                </section>
+                <section className="card">
+                  <div className="result-head">
+                    <h2 className="card-title">النتيجة</h2>
+                    {mkResult && <button onClick={() => copyText(mkResult)} className="mini-btn">نسخ</button>}
+                  </div>
+                  <div className="result-area">
+                    {mkResult ? <div className="result-content">{mkResult}</div> : <p className="placeholder">المحتوى سيظهر هنا</p>}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {/* ===== الفيديو ===== */}
+            {activeTab === 'video' && (
+              <div className="tool split">
+                <section className="card">
+                  <div className="field">
+                    <label>نوع الفيديو</label>
+                    <div className="chips">
+                      {videoTypes.map((v) => (<button key={v} onClick={() => setVidType(v)} className={`chip ${vidType === v ? 'active' : ''}`}>{v}</button>))}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>المود</label>
+                    <div className="chips">
+                      {videoMoods.map((m) => (<button key={m} onClick={() => setVidMood(m)} className={`chip ${vidMood === m ? 'active' : ''}`}>{m}</button>))}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>وصف الفكرة</label>
+                    <textarea value={vidText} onChange={(e) => setVidText(e.target.value)} placeholder="صفي فكرة الفيديو أو القطعة..."></textarea>
+                  </div>
+                  <div className="field">
+                    <label>صورة (اختياري)</label>
+                    <div className="upload-area">
+                      {vidPreview ? (
+                        <div className="img-preview">
+                          <img src={vidPreview} alt="preview" />
+                          <button onClick={() => { setVidImage(null); setVidPreview(''); }} className="remove-img">✕</button>
+                        </div>
+                      ) : (
+                        <label className="upload-label">
+                          <input type="file" accept="image/*" onChange={makeUploader(setVidImage, setVidPreview)} style={{ display: 'none' }} />
+                          <span>اضغطي لرفع صورة</span>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={handleVideo} disabled={vidLoading} className="cta">
+                    {vidLoading ? <><span className="spinner"></span> جاري التوليد...</> : 'أنشئي برومبت الفيديو'}
+                  </button>
+                  <div className="platforms-box">
+                    <div className="detail-label">منصات توليد الفيديو المقترحة</div>
+                    {videoPlatforms.map((p, i) => (
+                      <div className="platform-row" key={i}>
+                        <span className="platform-name">{p.name}</span>
+                        <span className="platform-note">{p.note}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <section className="card">
+                  <div className="result-head">
+                    <h2 className="card-title">النتيجة</h2>
+                    {vidResult && <button onClick={() => copyText(vidResult)} className="mini-btn">نسخ</button>}
+                  </div>
+                  <div className="result-area">
+                    {vidResult ? <div className="result-content">{vidResult}</div> : <p className="placeholder">برومبت الفيديو سيظهر هنا</p>}
+                  </div>
+                </section>
+              </div>
+            )}
+
+          </div>
+
+          <footer className="footer">© 2026 GH Couture AI</footer>
+        </div>
+      </div>
+
+      {/* ===== نافذة الأسعار ===== */}
+      {showPricing && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
+            <h2 className="modal-title">اختاري باقتك</h2>
+            <p className="modal-sub">اشتركي الآن وابدئي رحلة تصميم متكاملة</p>
+            <div className="admin-section">
+              {!showAdminInput ? (
+                <button onClick={() => setShowAdminInput(true)} className="admin-link">دخول المالكة</button>
+              ) : (
+                <div className="admin-input-group">
+                  <input type="password" value={adminCode} onChange={(e) => setAdminCode(e.target.value)} placeholder="كلمة السر" className="admin-input" />
+                  <button onClick={handleAdminLogin} className="admin-btn">دخول</button>
+                  <button onClick={() => { setShowAdminInput(false); setAdminCode(''); }} className="admin-cancel">إلغاء</button>
                 </div>
-                <div className="pricing-card featured">
-                  <div className="popular-badge">الأكثر اختياراً</div>
-                  <h3>Pro</h3>
-                  <div className="plan-price">$35<span>/شهر</span></div>
-                  <ul><li>400 عملية</li><li>أولوية الدعم</li><li>ميزات حصرية</li></ul>
-                  <button onClick={() => handleSubscribe('pro')} className="subscribe-btn pro">اشتركي</button>
-                </div>
-                <div className="pricing-card">
-                  <h3>Enterprise</h3>
-                  <div className="plan-price">$70<span>/شهر</span></div>
-                  <ul><li>700 عملية</li><li>مديرة حساب</li><li>دعم 24/7</li></ul>
-                  <button onClick={() => handleSubscribe('enterprise')} className="subscribe-btn">اشتركي</button>
-                </div>
+              )}
+            </div>
+            <div className="pricing-grid">
+              <div className="pricing-card">
+                <h3>Basic</h3>
+                <div className="plan-price">$15<span>/شهر</span></div>
+                <ul><li>200 عملية</li><li>كل الأدوات</li><li>دعم بالإيميل</li></ul>
+                <button onClick={() => handleSubscribe('basic')} className="subscribe-btn">اشتركي</button>
+              </div>
+              <div className="pricing-card featured">
+                <div className="popular-badge">الأكثر اختياراً</div>
+                <h3>Pro</h3>
+                <div className="plan-price">$35<span>/شهر</span></div>
+                <ul><li>400 عملية</li><li>أولوية الدعم</li><li>ميزات حصرية</li></ul>
+                <button onClick={() => handleSubscribe('pro')} className="subscribe-btn pro">اشتركي</button>
+              </div>
+              <div className="pricing-card">
+                <h3>Enterprise</h3>
+                <div className="plan-price">$70<span>/شهر</span></div>
+                <ul><li>700 عملية</li><li>مديرة حساب</li><li>دعم 24/7</li></ul>
+                <button onClick={() => handleSubscribe('enterprise')} className="subscribe-btn">اشتركي</button>
               </div>
             </div>
           </div>
-        )}
-
-        <footer className="footer">© 2026 GH Couture AI</footer>
-      </div>
+        </div>
+      )}
 
       <StyleBlock />
     </>
   );
 }
-
 // ===== بناء برومبتات المحتوى والفيديو =====
 function buildMarketingPrompt(platform, tone, text, hasImage) {
   const imageContext = hasImage ? '\n\nصورة مرفقة — حللها بدقة واستخدميها كمرجع أساسي.' : '';
@@ -880,7 +869,7 @@ function buildVideoPrompt(videoType, mood, text, hasImage) {
 الترجمة العربية للبرومبت`;
 }
 
-// ===== عرض التيك باك =====
+// ===== عرض التيك باك (نفس هيكل Adstronaut، كل قسم بلوك مستقل) =====
 function TechpackView({ tp, preview }) {
   return (
     <div id="techpack-canvas" className="tp">
@@ -900,43 +889,30 @@ function TechpackView({ tp, preview }) {
         </div>
       </div>
 
-      {/* معلومات القطعة */}
+      {/* 01 — REFERENCE / معلومات القطعة */}
       {tp.garmentInfo && (
-        <TpSection title="GARMENT INFORMATION" subtitle="معلومات القطعة">
+        <TpSection n="01" title="GARMENT INFORMATION" subtitle="معلومات القطعة">
           <div className="tp-garment-info">
-            <div className="tp-gi-item">
-              <div className="tp-gi-label">Type</div>
-              <div className="tp-gi-value">{tp.garmentInfo.type}</div>
-            </div>
-            <div className="tp-gi-item">
-              <div className="tp-gi-label">Silhouette</div>
-              <div className="tp-gi-value">{tp.garmentInfo.silhouette}</div>
-            </div>
-            <div className="tp-gi-item">
-              <div className="tp-gi-label">Construction</div>
-              <div className="tp-gi-value">{tp.garmentInfo.construction}</div>
-            </div>
+            <div className="tp-gi-item"><div className="tp-gi-label">Type</div><div className="tp-gi-value">{tp.garmentInfo.type}</div></div>
+            <div className="tp-gi-item"><div className="tp-gi-label">Silhouette</div><div className="tp-gi-value">{tp.garmentInfo.silhouette}</div></div>
+            <div className="tp-gi-item"><div className="tp-gi-label">Construction</div><div className="tp-gi-value">{tp.garmentInfo.construction}</div></div>
           </div>
         </TpSection>
       )}
 
-      {/* الرسمة التقنية المسطّحة */}
+      {/* 02 — TECHNICAL FLAT SKETCH */}
       {tp.flatSketchImage && (
-        <TpSection title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية (أمامي وخلفي)">
-          <div className="tp-flat">
-            <img src={tp.flatSketchImage} alt="technical flat" crossOrigin="anonymous" />
-          </div>
+        <TpSection n="02" title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية (أمامي وخلفي)">
+          <div className="tp-flat"><img src={tp.flatSketchImage} alt="technical flat" crossOrigin="anonymous" /></div>
         </TpSection>
       )}
 
-      {/* القياسات */}
-      <TpSection title="MEASUREMENT SPECIFICATION" subtitle="جدول القياسات المتدرّج (سم)">
+      {/* 03 — MEASUREMENT SPECIFICATION */}
+      <TpSection n="03" title="MEASUREMENT SPECIFICATION" subtitle="جدول القياسات المتدرّج (سم)">
         <table className="tp-table">
           <thead>
             <tr>
-              <th>Ref</th>
-              <th className="ltr">Point of Measure</th>
-              <th>Tol.</th>
+              <th>Ref</th><th className="ltr">Point of Measure</th><th>Tol.</th>
               <th>XS</th><th>S</th><th className="hl">M</th><th>L</th><th>XL</th>
             </tr>
           </thead>
@@ -946,19 +922,15 @@ function TechpackView({ tp, preview }) {
                 <td className="ref-code">{m.code || String.fromCharCode(65 + i)}</td>
                 <td className="ltr left">{m.pom}</td>
                 <td>{m.tolerance}</td>
-                <td>{m.sizes?.XS}</td>
-                <td>{m.sizes?.S}</td>
-                <td className="hl">{m.sizes?.M}</td>
-                <td>{m.sizes?.L}</td>
-                <td>{m.sizes?.XL}</td>
+                <td>{m.sizes?.XS}</td><td>{m.sizes?.S}</td><td className="hl">{m.sizes?.M}</td><td>{m.sizes?.L}</td><td>{m.sizes?.XL}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </TpSection>
 
-      {/* الخامات */}
-      <TpSection title="MATERIALS" subtitle="الخامات">
+      {/* 04 — MATERIALS */}
+      <TpSection n="04" title="MATERIALS" subtitle="الخامات">
         {tp.swatchImages && tp.swatchImages.length > 0 && (
           <div className="tp-swatches">
             {tp.swatchImages.filter((s) => s.url).map((s, i) => (
@@ -980,127 +952,100 @@ function TechpackView({ tp, preview }) {
         </div>
       </TpSection>
 
-      {/* BOM */}
-      <TpSection title="BILL OF MATERIALS" subtitle="قائمة المواد">
+      {/* 05 — BILL OF MATERIALS */}
+      <TpSection n="05" title="BILL OF MATERIALS" subtitle="قائمة المواد">
         <table className="tp-table">
-          <thead>
-            <tr><th className="ltr">Item</th><th className="ltr">Description</th><th className="ltr">Placement</th><th>Qty</th><th>Unit</th></tr>
-          </thead>
+          <thead><tr><th>#</th><th className="ltr">Item</th><th className="ltr">Description</th><th className="ltr">Placement</th><th>Qty</th><th>Unit</th></tr></thead>
           <tbody>
             {(tp.bom || []).map((b, i) => (
               <tr key={i}>
+                <td className="ref-code">{i + 1}</td>
                 <td className="ltr left">{b.item}</td>
                 <td className="ltr left sm">{b.description}</td>
                 <td className="ltr left sm">{b.placement}</td>
-                <td>{b.qty}</td>
-                <td>{b.unit}</td>
+                <td>{b.qty}</td><td>{b.unit}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </TpSection>
 
-      {/* البناء */}
-      <TpSection title="CONSTRUCTION DETAILS" subtitle="تفاصيل البناء">
+      {/* 06 — CONSTRUCTION DETAILS */}
+      <TpSection n="06" title="CONSTRUCTION DETAILS" subtitle="تفاصيل البناء">
         <table className="tp-table">
           <thead><tr><th className="ltr">Section</th><th className="ltr">Detail</th><th className="ltr">Description</th></tr></thead>
           <tbody>
             {(tp.construction || []).map((c, i) => (
-              <tr key={i}>
-                <td className="ltr left">{c.section}</td>
-                <td className="ltr left">{c.detail}</td>
-                <td className="ltr left sm">{c.description}</td>
-              </tr>
+              <tr key={i}><td className="ltr left">{c.section}</td><td className="ltr left">{c.detail}</td><td className="ltr left sm">{c.description}</td></tr>
             ))}
           </tbody>
         </table>
       </TpSection>
 
-      {/* التفاصيل الإنشائية (Detailed Views) */}
+      {/* 07 — DETAILED VIEWS */}
       {tp.detailViews && tp.detailViews.length > 0 && (
-        <TpSection title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية">
+        <TpSection n="07" title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية">
           {tp.flatSketchImage && (
-            <div className="tp-detail-sketch">
-              <img src={tp.flatSketchImage} alt="detailed flat" crossOrigin="anonymous" />
-            </div>
+            <div className="tp-detail-sketch"><img src={tp.flatSketchImage} alt="detailed flat" crossOrigin="anonymous" /></div>
           )}
           <table className="tp-table">
             <thead><tr><th className="ltr">Area</th><th className="ltr">Detail</th><th className="ltr">Spec</th></tr></thead>
             <tbody>
               {tp.detailViews.map((d, i) => (
-                <tr key={i}>
-                  <td className="ltr left">{d.area}</td>
-                  <td className="ltr left sm">{d.detail}</td>
-                  <td className="ltr left sm">{d.spec}</td>
-                </tr>
+                <tr key={i}><td className="ltr left">{d.area}</td><td className="ltr left sm">{d.detail}</td><td className="ltr left sm">{d.spec}</td></tr>
               ))}
             </tbody>
           </table>
         </TpSection>
       )}
 
-      {/* مواضع الليبلات */}
+      {/* 08 — LABEL PLACEMENT */}
       {tp.labelPlacement && tp.labelPlacement.length > 0 && (
-        <TpSection title="LABEL PLACEMENT" subtitle="مواضع الليبلات">
+        <TpSection n="08" title="LABEL PLACEMENT" subtitle="مواضع الليبلات">
           <table className="tp-table">
             <thead><tr><th className="ltr">Label</th><th className="ltr">Location</th><th className="ltr">Size</th><th className="ltr">Method</th></tr></thead>
             <tbody>
               {tp.labelPlacement.map((l, i) => (
-                <tr key={i}>
-                  <td className="ltr left">{l.label}</td>
-                  <td className="ltr left sm">{l.location}</td>
-                  <td className="ltr left sm">{l.size}</td>
-                  <td className="ltr left sm">{l.method}</td>
-                </tr>
+                <tr key={i}><td className="ltr left">{l.label}</td><td className="ltr left sm">{l.location}</td><td className="ltr left sm">{l.size}</td><td className="ltr left sm">{l.method}</td></tr>
               ))}
             </tbody>
           </table>
         </TpSection>
       )}
 
-      {/* الألوان */}
-      <TpSection title="COLORWAY & PANTONE" subtitle="الألوان">
+      {/* 09 — COLORWAY & PANTONE */}
+      <TpSection n="09" title="COLORWAY & PANTONE" subtitle="الألوان">
         <div className="tp-colorway-layout">
           {tp.flatSketchImage && (
-            <div className="tp-colorway-sketch">
-              <img src={tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" />
-            </div>
+            <div className="tp-colorway-sketch"><img src={tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" /></div>
           )}
           <div className="tp-colors">
             {(tp.colorway || []).map((c, i) => (
               <div className="tp-color" key={i}>
                 <div className="tp-color-sw" style={{ background: c.hex }}></div>
-                <div>
-                  <div className="tp-color-part">{c.part}</div>
-                  <div className="tp-color-code">{c.pantone} · {c.hex}</div>
-                </div>
+                <div><div className="tp-color-part">{c.part}</div><div className="tp-color-code">{c.pantone} · {c.hex}</div></div>
               </div>
             ))}
           </div>
         </div>
       </TpSection>
 
-      {/* الأرتورك */}
+      {/* 10 — ARTWORK & PLACEMENT */}
       {tp.artwork && tp.artwork.length > 0 && (
-        <TpSection title="ARTWORK & PLACEMENT" subtitle="الليبلات والمواضع">
+        <TpSection n="10" title="ARTWORK & PLACEMENT" subtitle="الأرتورك والمواضع">
           <table className="tp-table">
             <thead><tr><th className="ltr">Element</th><th className="ltr">Placement</th><th className="ltr">Size</th><th className="ltr">Notes</th></tr></thead>
             <tbody>
               {tp.artwork.map((a, i) => (
-                <tr key={i}>
-                  <td className="ltr left">{a.name}</td>
-                  <td className="ltr left sm">{a.placement}</td>
-                  <td className="ltr left sm">{a.size}</td>
-                  <td className="ltr left sm">{a.notes}</td>
-                </tr>
+                <tr key={i}><td className="ltr left">{a.name}</td><td className="ltr left sm">{a.placement}</td><td className="ltr left sm">{a.size}</td><td className="ltr left sm">{a.notes}</td></tr>
               ))}
             </tbody>
           </table>
         </TpSection>
       )}
 
-      {/* الخياطة */}
-      <TpSection title="SEWING INSTRUCTIONS" subtitle="تعليمات الخياطة">
+      {/* 11 — SEWING INSTRUCTIONS */}
+      <TpSection n="11" title="SEWING INSTRUCTIONS" subtitle="تعليمات الخياطة">
         <ol className="tp-steps">
           {(tp.sewingSteps || []).map((s, i) => (<li key={i} className="ltr">{s}</li>))}
         </ol>
@@ -1111,10 +1056,11 @@ function TechpackView({ tp, preview }) {
   );
 }
 
-function TpSection({ title, subtitle, children }) {
+function TpSection({ n, title, subtitle, children }) {
   return (
     <div className="tp-section">
       <div className="tp-section-head">
+        {n && <span className="tp-section-n">{n}</span>}
         <span className="tp-section-title ltr">{title}</span>
         <span className="tp-section-sub">{subtitle}</span>
       </div>
@@ -1122,7 +1068,6 @@ function TpSection({ title, subtitle, children }) {
     </div>
   );
 }
-
 // ===== الأنماط =====
 function StyleBlock() {
   return (
@@ -1131,11 +1076,13 @@ function StyleBlock() {
         --cream: #f7f2e9;
         --cream-2: #efe7d6;
         --ivory: #fdfaf3;
+        --white: #ffffff;
         --ink: #2c2620;
         --ink-soft: #6b5f4f;
         --gold: #b08d57;
         --gold-deep: #96723f;
-        --line: #e3d8c4;
+        --line: #e6ddcc;
+        --sidebar-w: 264px;
       }
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body {
@@ -1145,123 +1092,135 @@ function StyleBlock() {
         min-height: 100vh;
         direction: rtl;
       }
-      .container { min-height: 100vh; }
 
-      /* الهيدر */
-      .header {
+      /* ===== التخطيط العام: سايدبار + منطقة رئيسية ===== */
+      .app { display: flex; min-height: 100vh; }
+
+      .sidebar {
+        width: var(--sidebar-w);
         background: var(--ivory);
-        border-bottom: 1px solid var(--line);
-        padding: 1.2rem 2.4rem;
-        display: flex; justify-content: space-between; align-items: center;
-        flex-wrap: wrap; gap: 1rem;
+        border-left: 1px solid var(--line);
+        display: flex; flex-direction: column;
+        position: fixed; top: 0; right: 0; bottom: 0;
+        z-index: 200;
       }
-      .logo-container { display: flex; align-items: center; gap: 1rem; }
-      .logo-icon {
-        width: 54px; height: 54px; border: 1.5px solid var(--gold);
-        border-radius: 4px; display: flex; align-items: center; justify-content: center;
-        color: var(--gold-deep); font-weight: 800; font-size: 1.2rem;
-        font-family: 'Cormorant Garamond', serif; letter-spacing: 1px;
+      .sb-brand {
+        display: flex; align-items: center; gap: 0.8rem;
+        padding: 1.5rem 1.4rem; border-bottom: 1px solid var(--line);
       }
-      .logo-text {
-        font-family: 'Cormorant Garamond', serif; font-size: 1.9rem; font-weight: 700;
-        color: var(--ink); letter-spacing: 1px; direction: ltr; text-align: right;
+      .sb-logo {
+        width: 46px; height: 46px; border: 1.5px solid var(--gold);
+        border-radius: 6px; display: flex; align-items: center; justify-content: center;
+        color: var(--gold-deep); font-weight: 800; font-size: 1.05rem;
+        font-family: 'Cormorant Garamond', serif; letter-spacing: 1px; flex-shrink: 0;
       }
-      .logo-sub { font-size: 0.82rem; color: var(--ink-soft); margin-top: 2px; }
-      .header-actions { display: flex; align-items: center; gap: 1rem; }
-      .user-actions { display: flex; gap: 0.5rem; }
-      .usage-info {
-        border: 1px solid var(--line); padding: 0.5rem 1rem; border-radius: 4px;
-        color: var(--ink-soft); font-size: 0.82rem; background: var(--cream);
-      }
-      .usage-bar { width: 110px; height: 4px; background: var(--cream-2); border-radius: 2px; margin-top: 5px; }
-      .usage-fill { height: 100%; background: var(--gold); border-radius: 2px; }
-      .upgrade-btn {
-        background: var(--ink); color: var(--ivory); border: none;
-        padding: 0.6rem 1.4rem; border-radius: 4px; font-weight: 700; cursor: pointer;
-        font-family: 'Tajawal'; font-size: 0.9rem; transition: background .2s;
-      }
-      .upgrade-btn:hover { background: var(--gold-deep); }
-      .logout-btn {
-        background: transparent; color: var(--ink-soft); border: 1px solid var(--line);
-        padding: 0.6rem 1rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-family: 'Tajawal';
-      }
+      .sb-title { font-family: 'Cormorant Garamond', serif; font-size: 1.35rem; font-weight: 700; color: var(--ink); letter-spacing: 0.5px; direction: ltr; text-align: right; line-height: 1.1; }
+      .sb-sub { font-size: 0.72rem; color: var(--ink-soft); margin-top: 2px; }
 
-      /* التبويبات */
-      .tabs-container {
-        display: flex; justify-content: center; gap: 0; padding: 0 1.5rem;
-        flex-wrap: wrap; background: var(--ivory); border-bottom: 1px solid var(--line);
+      .sb-nav { flex: 1; overflow-y: auto; padding: 1rem 0.8rem; }
+      .sb-group { margin-bottom: 1.4rem; }
+      .sb-group-label {
+        font-size: 0.68rem; letter-spacing: 2px; color: var(--gold-deep);
+        font-weight: 700; padding: 0 0.7rem; margin-bottom: 0.6rem; opacity: 0.85;
       }
-      .tab {
-        background: transparent; border: none; border-bottom: 2px solid transparent;
-        padding: 1.1rem 1.5rem; color: var(--ink-soft); cursor: pointer;
-        font-weight: 500; font-family: 'Tajawal'; font-size: 0.95rem;
-        display: flex; align-items: center; gap: 8px; transition: color .2s;
+      .sb-item {
+        width: 100%; display: flex; align-items: center; gap: 0.7rem;
+        padding: 0.7rem 0.7rem; border: none; background: transparent;
+        border-radius: 8px; cursor: pointer; text-align: right;
+        transition: background .18s; margin-bottom: 2px; font-family: 'Tajawal';
       }
-      .tab:hover { color: var(--ink); }
-      .tab.active { color: var(--ink); border-bottom-color: var(--gold); }
-      .tab-num { font-family: 'Cormorant Garamond', serif; font-size: 0.9rem; color: var(--gold); font-style: italic; }
-      .tab.active .tab-num { color: var(--gold-deep); }
-
-      /* التخطيطات */
-      .mood-main { max-width: 1040px; margin: 0 auto; padding: 2.5rem 1.5rem; display: flex; flex-direction: column; gap: 1.6rem; }
-      .split-main { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; padding: 2.5rem; max-width: 1400px; margin: 0 auto; }
-      @media (max-width: 900px) { .split-main { grid-template-columns: 1fr; padding: 1.5rem; } }
-
-      .panel { background: var(--ivory); border: 1px solid var(--line); border-radius: 8px; padding: 2.2rem; }
-      .panel-eyebrow {
-        font-family: 'Cormorant Garamond', serif; font-style: italic; color: var(--gold-deep);
-        letter-spacing: 1px; font-size: 1rem; margin-bottom: 0.4rem;
+      .sb-item:hover { background: var(--cream); }
+      .sb-item.active { background: var(--cream-2); }
+      .sb-item-num {
+        font-family: 'Cormorant Garamond', serif; font-size: 0.9rem; font-style: italic;
+        color: var(--gold); width: 22px; flex-shrink: 0; text-align: center;
       }
-      .panel-title { font-family: 'Cormorant Garamond', serif; font-size: 2.1rem; font-weight: 700; color: var(--ink); margin-bottom: 0.6rem; }
-      .panel-title.sm { font-size: 1.5rem; margin-bottom: 0; }
-      .panel-hint { color: var(--ink-soft); margin-bottom: 1.8rem; font-size: 0.95rem; line-height: 1.7; }
+      .sb-item.active .sb-item-num { color: var(--gold-deep); }
+      .sb-item-body { display: flex; flex-direction: column; gap: 1px; }
+      .sb-item-name { font-size: 0.95rem; font-weight: 700; color: var(--ink); }
+      .sb-item-desc { font-size: 0.72rem; color: var(--ink-soft); }
 
-      .field { margin-bottom: 1.4rem; }
+      .sb-foot { padding: 1rem 1.1rem; border-top: 1px solid var(--line); }
+      .sb-plan { font-size: 0.78rem; color: var(--ink-soft); margin-bottom: 0.4rem; }
+      .sb-plan.admin { color: var(--gold-deep); font-weight: 700; }
+      .sb-usage-bar { width: 100%; height: 4px; background: var(--cream-2); border-radius: 2px; margin-bottom: 0.7rem; }
+      .sb-usage-fill { height: 100%; background: var(--gold); border-radius: 2px; }
+      .sb-user-actions { display: flex; gap: 0.5rem; }
+      .sb-btn { flex: 1; padding: 0.6rem; border-radius: 6px; cursor: pointer; font-family: 'Tajawal'; font-weight: 700; font-size: 0.85rem; border: none; }
+      .sb-btn.primary { background: var(--ink); color: var(--ivory); }
+      .sb-btn.primary:hover { background: var(--gold-deep); }
+      .sb-btn.ghost { background: transparent; color: var(--ink-soft); border: 1px solid var(--line); }
+      .sb-btn.full { width: 100%; }
+
+      .sb-overlay { display: none; }
+
+      /* ===== المنطقة الرئيسية ===== */
+      .main-area {
+        flex: 1; margin-right: var(--sidebar-w);
+        display: flex; flex-direction: column; min-height: 100vh; min-width: 0;
+      }
+      .topbar {
+        background: var(--white); border-bottom: 1px solid var(--line);
+        padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem;
+        position: sticky; top: 0; z-index: 100;
+      }
+      .menu-btn {
+        display: none; background: transparent; border: 1px solid var(--line);
+        border-radius: 6px; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; color: var(--ink);
+      }
+      .topbar-title { flex: 1; }
+      .topbar-eyebrow { font-family: 'Cormorant Garamond', serif; font-style: italic; color: var(--gold-deep); font-size: 0.85rem; }
+      .topbar-h1 { font-family: 'Cormorant Garamond', serif; font-size: 1.7rem; font-weight: 700; color: var(--ink); line-height: 1.1; }
+      .topbar-actions { display: flex; align-items: center; gap: 1rem; }
+      .topbar-usage { display: flex; flex-direction: column; align-items: flex-end; font-size: 0.78rem; color: var(--ink-soft); gap: 3px; }
+      .topbar-usage-bar { width: 90px; height: 4px; background: var(--cream-2); border-radius: 2px; }
+      .topbar-usage-bar div { height: 100%; background: var(--gold); border-radius: 2px; }
+      .topbar-cta { background: var(--ink); color: var(--ivory); border: none; padding: 0.6rem 1.4rem; border-radius: 6px; font-weight: 700; cursor: pointer; font-family: 'Tajawal'; }
+      .topbar-cta:hover { background: var(--gold-deep); }
+
+      .content { flex: 1; padding: 2rem; max-width: 1200px; width: 100%; margin: 0 auto; }
+      .tool { display: flex; flex-direction: column; gap: 1.4rem; }
+      .tool.split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; }
+      @media (max-width: 950px) { .tool.split { grid-template-columns: 1fr; } }
+
+      .card { background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 1.8rem; }
+      .card-hint { color: var(--ink-soft); margin-bottom: 1.5rem; font-size: 0.92rem; line-height: 1.7; }
+      .card-title { font-family: 'Cormorant Garamond', serif; font-size: 1.4rem; font-weight: 700; color: var(--ink); }
+
+      .field { margin-bottom: 1.3rem; }
       .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
       @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
-      .field label { display: block; margin-bottom: 0.5rem; color: var(--ink); font-weight: 500; font-size: 0.92rem; }
+      .field label { display: block; margin-bottom: 0.5rem; color: var(--ink); font-weight: 500; font-size: 0.9rem; }
       .field textarea, .field input {
-        width: 100%; padding: 0.9rem 1rem; border: 1px solid var(--line); border-radius: 6px;
+        width: 100%; padding: 0.9rem 1rem; border: 1px solid var(--line); border-radius: 8px;
         background: var(--cream); font-size: 1rem; font-family: 'Tajawal'; color: var(--ink);
       }
       .field textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
       .field textarea:focus, .field input:focus { outline: none; border-color: var(--gold); }
 
-      .upload-area { border: 1.5px dashed var(--line); border-radius: 8px; padding: 1.8rem; text-align: center; background: var(--cream); }
+      .upload-area { border: 1.5px dashed var(--line); border-radius: 10px; padding: 1.8rem; text-align: center; background: var(--cream); }
       .upload-label { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--gold-deep); font-size: 0.92rem; }
       .img-preview { position: relative; display: inline-block; }
-      .img-preview img { max-width: 100%; max-height: 240px; border-radius: 6px; }
+      .img-preview img { max-width: 100%; max-height: 240px; border-radius: 8px; }
       .remove-img { position: absolute; top: -10px; left: -10px; width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: #fff; border: none; cursor: pointer; }
 
       .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-      .chip {
-        padding: 0.55rem 1.1rem; border: 1px solid var(--line); border-radius: 4px;
-        background: var(--cream); color: var(--ink-soft); cursor: pointer; font-weight: 500;
-        font-family: 'Tajawal'; font-size: 0.88rem; transition: all .2s;
-      }
+      .chip { padding: 0.55rem 1.1rem; border: 1px solid var(--line); border-radius: 6px; background: var(--cream); color: var(--ink-soft); cursor: pointer; font-weight: 500; font-family: 'Tajawal'; font-size: 0.88rem; transition: all .2s; }
       .chip:hover { border-color: var(--gold); color: var(--ink); }
       .chip.active { background: var(--ink); color: var(--ivory); border-color: var(--ink); }
 
-      .cta {
-        width: 100%; padding: 1.1rem; background: var(--ink); color: var(--ivory);
-        border: none; border-radius: 6px; font-size: 1.05rem; font-weight: 700; cursor: pointer;
-        display: flex; align-items: center; justify-content: center; gap: 0.6rem;
-        font-family: 'Tajawal'; transition: background .2s;
-      }
+      .cta { width: 100%; padding: 1.05rem; background: var(--ink); color: var(--ivory); border: none; border-radius: 8px; font-size: 1.03rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-family: 'Tajawal'; transition: background .2s; }
       .cta:hover:not(:disabled) { background: var(--gold-deep); }
       .cta:disabled { opacity: 0.65; cursor: default; }
 
-      .mini-btn {
-        padding: 0.5rem 1rem; background: var(--ink); color: var(--ivory); border: none;
-        border-radius: 4px; cursor: pointer; font-weight: 600; font-family: 'Tajawal'; font-size: 0.85rem;
-      }
+      .mini-btn { padding: 0.5rem 1rem; background: var(--ink); color: var(--ivory); border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-family: 'Tajawal'; font-size: 0.85rem; }
       .mini-btn:hover { background: var(--gold-deep); }
 
       .spinner { width: 20px; height: 20px; border: 2.5px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; }
       .spinner-lg { width: 46px; height: 46px; border: 3px solid var(--line); border-top-color: var(--gold); border-radius: 50%; animation: spin 1s linear infinite; }
       @keyframes spin { to { transform: rotate(360deg); } }
 
-      .err { margin-top: 1rem; padding: 0.9rem 1rem; background: #fdf0ed; color: #b04a35; border-radius: 6px; border: 1px solid #f0d5cd; font-size: 0.9rem; }
+      .err { margin-top: 1rem; padding: 0.9rem 1rem; background: #fdf0ed; color: #b04a35; border-radius: 8px; border: 1px solid #f0d5cd; font-size: 0.9rem; }
       .loading-block { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 3.5rem; color: var(--gold-deep); }
       .placeholder { color: var(--ink-soft); text-align: center; padding: 3rem; font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 1.2rem; opacity: 0.7; }
 
@@ -1270,21 +1229,13 @@ function StyleBlock() {
       .result-content { white-space: pre-wrap; line-height: 1.95; color: var(--ink); font-size: 0.95rem; }
 
       .board-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; justify-content: center; }
-      .download-btn {
-        padding: 0.85rem 1.8rem; background: var(--ink); color: var(--ivory); border: none;
-        border-radius: 6px; font-weight: 700; font-size: 0.95rem; cursor: pointer;
-        display: flex; align-items: center; gap: 0.5rem; font-family: 'Tajawal';
-      }
+      .download-btn { padding: 0.85rem 1.8rem; background: var(--ink); color: var(--ivory); border: none; border-radius: 8px; font-weight: 700; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; font-family: 'Tajawal'; }
       .download-btn:hover:not(:disabled) { background: var(--gold-deep); }
       .download-btn:disabled { opacity: 0.65; }
       .hint-inline { color: var(--ink-soft); font-size: 0.85rem; }
 
-      /* المود بورد — لوحة */
-      .board {
-        background: #f6f1ea;
-        background-image: radial-gradient(circle at 20% 10%, rgba(255,255,255,0.6), transparent 40%);
-        border-radius: 4px; padding: 3.5rem 3rem; box-shadow: 0 20px 60px rgba(0,0,0,0.12); border: 1px solid var(--line);
-      }
+      /* المود بورد */
+      .board { background: #f6f1ea; background-image: radial-gradient(circle at 20% 10%, rgba(255,255,255,0.6), transparent 40%); border-radius: 8px; padding: 3.5rem 3rem; box-shadow: 0 20px 60px rgba(0,0,0,0.1); border: 1px solid var(--line); }
       .board-header { text-align: center; position: relative; margin-bottom: 2.5rem; padding: 0 1rem; }
       .board-corner { position: absolute; width: 26px; height: 26px; border: 1.5px solid var(--gold); }
       .board-corner.tl { top: -12px; right: -6px; border-left: none; border-bottom: none; }
@@ -1293,10 +1244,10 @@ function StyleBlock() {
       .board-rule { width: 90px; height: 1px; background: var(--gold); margin: 0.9rem auto; }
       .board-subtitle { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 1.25rem; color: var(--ink-soft); direction: ltr; }
       .board-collage { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; margin-bottom: 2.5rem; }
-      .collage-hero { position: relative; border-radius: 3px; overflow: hidden; cursor: pointer; box-shadow: 0 10px 30px rgba(0,0,0,0.16); min-height: 460px; }
+      .collage-hero { position: relative; border-radius: 4px; overflow: hidden; cursor: pointer; box-shadow: 0 10px 30px rgba(0,0,0,0.16); min-height: 460px; }
       .collage-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
       .collage-tiles { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 14px; }
-      .collage-tile { position: relative; border-radius: 3px; overflow: hidden; cursor: pointer; box-shadow: 0 8px 22px rgba(0,0,0,0.1); min-height: 145px; }
+      .collage-tile { position: relative; border-radius: 4px; overflow: hidden; cursor: pointer; box-shadow: 0 8px 22px rgba(0,0,0,0.1); min-height: 145px; }
       .collage-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
       .save-badge { position: absolute; top: 8px; left: 8px; padding: 3px 8px; background: rgba(44,38,32,0.7); color: #fff; border-radius: 3px; font-size: 11px; opacity: 0; transition: opacity 0.2s; }
       .collage-hero:hover .save-badge, .collage-tile:hover .save-badge { opacity: 1; }
@@ -1308,7 +1259,7 @@ function StyleBlock() {
       .detail-value { color: var(--ink); direction: ltr; font-size: 0.92rem; line-height: 1.6; font-family: 'Cormorant Garamond', serif; }
       .palette-row { display: flex; flex-wrap: wrap; gap: 0.7rem; }
       .swatch-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; width: 58px; }
-      .swatch { width: 48px; height: 48px; border-radius: 3px; box-shadow: 0 3px 10px rgba(0,0,0,0.16); border: 1px solid rgba(0,0,0,0.05); }
+      .swatch { width: 48px; height: 48px; border-radius: 4px; box-shadow: 0 3px 10px rgba(0,0,0,0.16); border: 1px solid rgba(0,0,0,0.05); }
       .swatch-name { font-size: 0.62rem; color: var(--ink); direction: ltr; text-align: center; font-family: 'Cormorant Garamond', serif; }
       .swatch-hex { font-size: 0.58rem; color: var(--ink-soft); direction: ltr; }
       .board-footer { text-align: center; margin-top: 2.5rem; color: var(--gold); font-family: 'Cormorant Garamond', serif; letter-spacing: 3px; font-size: 1rem; }
@@ -1321,25 +1272,25 @@ function StyleBlock() {
       }
 
       /* استوديو */
-      .studio-result { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; }
+      .studio-result { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; }
       @media (max-width: 800px) { .studio-result { grid-template-columns: 1fr; } }
-      .studio-img { position: relative; border-radius: 8px; overflow: hidden; cursor: pointer; box-shadow: 0 14px 40px rgba(0,0,0,0.14); border: 1px solid var(--line); }
+      .studio-img { position: relative; border-radius: 10px; overflow: hidden; cursor: pointer; box-shadow: 0 14px 40px rgba(0,0,0,0.12); border: 1px solid var(--line); }
       .studio-img img { width: 100%; display: block; }
-      .studio-prompt { background: var(--ivory); border: 1px solid var(--line); border-radius: 8px; padding: 1.5rem; }
+      .studio-prompt { background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 1.5rem; }
       .studio-prompt p { direction: ltr; text-align: left; color: var(--ink); line-height: 1.7; font-size: 0.9rem; margin: 0.6rem 0 1rem; }
 
       /* منصات الفيديو */
-      .platforms-box { margin-top: 1.6rem; padding: 1.4rem; background: var(--cream); border: 1px solid var(--line); border-radius: 8px; }
+      .platforms-box { margin-top: 1.5rem; padding: 1.4rem; background: var(--cream); border: 1px solid var(--line); border-radius: 8px; }
       .platform-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 0; border-bottom: 1px solid var(--line); }
       .platform-row:last-child { border-bottom: none; }
       .platform-name { font-weight: 700; color: var(--ink); direction: ltr; }
       .platform-note { color: var(--ink-soft); font-size: 0.85rem; text-align: left; }
 
-      /* التيك باك */
-      .tp { background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 2.6rem; box-shadow: 0 20px 60px rgba(0,0,0,0.1); }
+      /* ===== التيك باك ===== */
+      .tp { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 2.6rem; box-shadow: 0 20px 60px rgba(0,0,0,0.08); }
       .tp-head { display: flex; justify-content: space-between; gap: 2rem; border-bottom: 2px solid var(--ink); padding-bottom: 1.4rem; margin-bottom: 2rem; flex-wrap: wrap; }
       .tp-head-left { display: flex; gap: 1rem; align-items: flex-start; }
-      .tp-thumb { width: 88px; height: 88px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); }
+      .tp-thumb { width: 88px; height: 88px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
       .tp-thumb.ph { background: var(--cream-2); }
       .tp-code { font-family: 'Cormorant Garamond', serif; color: var(--gold-deep); font-weight: 700; letter-spacing: 1px; direction: ltr; }
       .tp-name { font-size: 1.15rem; font-weight: 700; color: var(--ink); direction: ltr; text-align: right; }
@@ -1349,10 +1300,11 @@ function StyleBlock() {
       .tp-brand { font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; color: var(--ink); letter-spacing: 1px; direction: ltr; }
       .tp-desc { color: var(--ink-soft); font-size: 0.85rem; margin-top: 4px; line-height: 1.6; }
 
-      .tp-section { margin-bottom: 2rem; }
-      .tp-section-head { display: flex; align-items: baseline; gap: 0.8rem; margin-bottom: 0.9rem; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+      .tp-section { margin-bottom: 2.2rem; }
+      .tp-section-head { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.9rem; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+      .tp-section-n { font-family: 'Cormorant Garamond', serif; font-style: italic; color: var(--gold); font-size: 1rem; }
       .tp-section-title { font-family: 'Cormorant Garamond', serif; font-size: 1.25rem; font-weight: 700; letter-spacing: 2px; color: var(--ink); }
-      .tp-section-sub { color: var(--gold-deep); font-size: 0.85rem; }
+      .tp-section-sub { color: var(--gold-deep); font-size: 0.85rem; margin-right: auto; }
 
       .tp-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
       .tp-table th { background: var(--cream); color: var(--ink); padding: 0.55rem 0.6rem; text-align: center; font-weight: 700; border: 1px solid var(--line); }
@@ -1363,21 +1315,21 @@ function StyleBlock() {
       .tp-table .hl { background: #f3ead6; font-weight: 700; }
       .ref-code { font-weight: 700; color: var(--gold-deep); background: var(--cream); font-family: 'Cormorant Garamond', serif; }
 
-      .tp-flat { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; }
+      .tp-flat { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+      .tp-flat img { width: 100%; display: block; }
       .tp-garment-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
       @media (max-width: 700px) { .tp-garment-info { grid-template-columns: 1fr; } }
       .tp-gi-item { border-right: 2px solid var(--gold); padding-right: 0.9rem; }
       .tp-gi-label { font-family: 'Cormorant Garamond', serif; letter-spacing: 1px; color: var(--gold-deep); font-size: 0.85rem; margin-bottom: 0.3rem; direction: ltr; text-align: right; }
       .tp-gi-value { color: var(--ink); font-size: 0.9rem; line-height: 1.5; direction: ltr; text-align: right; }
-      .tp-flat img { width: 100%; display: block; }
       .tp-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin-bottom: 1.2rem; }
       @media (max-width: 700px) { .tp-swatches { grid-template-columns: repeat(2, 1fr); } }
-      .tp-swatch-card { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--cream); }
+      .tp-swatch-card { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--cream); }
       .tp-swatch-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
       .tp-swatch-name { padding: 0.5rem; font-size: 0.78rem; color: var(--ink); text-align: center; }
       .tp-materials { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
       @media (max-width: 700px) { .tp-materials { grid-template-columns: 1fr; } }
-      .tp-mat { border: 1px solid var(--line); border-radius: 4px; padding: 0.9rem; background: var(--cream); }
+      .tp-mat { border: 1px solid var(--line); border-radius: 6px; padding: 0.9rem; background: var(--cream); }
       .tp-mat-name { font-weight: 700; color: var(--ink); }
       .tp-mat-type { color: var(--gold-deep); font-size: 0.82rem; margin: 2px 0; }
       .tp-mat-notes { color: var(--ink-soft); font-size: 0.8rem; line-height: 1.5; }
@@ -1385,23 +1337,23 @@ function StyleBlock() {
       .tp-colors { display: flex; flex-wrap: wrap; gap: 1.2rem; }
       .tp-colorway-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1.5rem; align-items: center; }
       @media (max-width: 700px) { .tp-colorway-layout { grid-template-columns: 1fr; } }
-      .tp-colorway-sketch { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; }
+      .tp-colorway-sketch { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
       .tp-colorway-sketch img { width: 100%; display: block; }
-      .tp-detail-sketch { border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #fff; margin-bottom: 1.2rem; }
+      .tp-detail-sketch { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; margin-bottom: 1.2rem; }
       .tp-detail-sketch img { width: 100%; display: block; }
       .tp-color { display: flex; gap: 0.6rem; align-items: center; }
-      .tp-color-sw { width: 42px; height: 42px; border-radius: 4px; border: 1px solid var(--line); }
+      .tp-color-sw { width: 42px; height: 42px; border-radius: 6px; border: 1px solid var(--line); }
       .tp-color-part { font-weight: 600; color: var(--ink); font-size: 0.85rem; }
       .tp-color-code { color: var(--ink-soft); font-size: 0.76rem; direction: ltr; text-align: right; }
 
       .tp-steps { padding-right: 0; list-style: none; counter-reset: step; }
-      .tp-steps li { counter-increment: step; padding: 0.5rem 0 0.5rem 0; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 0.85rem; direction: ltr; text-align: left; position: relative; padding-left: 2rem; }
+      .tp-steps li { counter-increment: step; padding: 0.5rem 0; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 0.85rem; direction: ltr; text-align: left; position: relative; padding-left: 2rem; }
       .tp-steps li:before { content: counter(step); position: absolute; left: 0; color: var(--gold-deep); font-family: 'Cormorant Garamond', serif; font-weight: 700; }
       .tp-foot { text-align: center; margin-top: 2rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--gold); font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; }
 
       /* النافذة */
       .modal-overlay { position: fixed; inset: 0; background: rgba(44,38,32,0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
-      .modal { background: var(--ivory); border-radius: 10px; padding: 2.5rem; max-width: 900px; width: 100%; max-height: 92vh; overflow-y: auto; position: relative; }
+      .modal { background: var(--ivory); border-radius: 12px; padding: 2.5rem; max-width: 900px; width: 100%; max-height: 92vh; overflow-y: auto; position: relative; }
       .close-modal { position: absolute; top: 1rem; left: 1rem; background: var(--cream); border: 1px solid var(--line); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 1rem; color: var(--ink); }
       .modal-title { text-align: center; font-family: 'Cormorant Garamond', serif; font-size: 2.2rem; color: var(--ink); margin-bottom: 0.4rem; }
       .modal-sub { text-align: center; color: var(--ink-soft); margin-bottom: 1.4rem; }
@@ -1413,7 +1365,7 @@ function StyleBlock() {
       .admin-cancel { padding: 0.5rem 1.2rem; background: var(--cream-2); color: var(--ink-soft); border: none; border-radius: 6px; cursor: pointer; font-family: 'Tajawal'; }
       .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.3rem; }
       @media (max-width: 800px) { .pricing-grid { grid-template-columns: 1fr; } }
-      .pricing-card { background: var(--ivory); border-radius: 8px; padding: 2rem; text-align: center; border: 1px solid var(--line); position: relative; }
+      .pricing-card { background: var(--ivory); border-radius: 10px; padding: 2rem; text-align: center; border: 1px solid var(--line); position: relative; }
       .pricing-card.featured { border-color: var(--gold); box-shadow: 0 12px 40px rgba(176,141,87,0.18); }
       .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gold-deep); color: var(--ivory); padding: 0.35rem 1.1rem; border-radius: 4px; font-size: 0.78rem; font-weight: 700; }
       .pricing-card h3 { font-family: 'Cormorant Garamond', serif; font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--ink); }
@@ -1425,7 +1377,18 @@ function StyleBlock() {
       .subscribe-btn:hover { background: var(--gold-deep); }
       .subscribe-btn.pro { background: var(--gold-deep); }
 
-      .footer { text-align: center; padding: 2.5rem; color: var(--ink-soft); font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; border-top: 1px solid var(--line); margin-top: 2rem; }
+      .footer { text-align: center; padding: 2rem; color: var(--ink-soft); font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; border-top: 1px solid var(--line); }
+
+      /* ===== موبايل: السايدبار ينزلق ===== */
+      @media (max-width: 900px) {
+        .sidebar { transform: translateX(100%); transition: transform .25s ease; box-shadow: -8px 0 40px rgba(0,0,0,0.15); }
+        .sidebar.open { transform: translateX(0); }
+        .main-area { margin-right: 0; }
+        .menu-btn { display: block; }
+        .sb-overlay { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 150; }
+        .content { padding: 1.2rem; }
+        .tp { padding: 1.4rem; }
+      }
     `}</style>
   );
 }
