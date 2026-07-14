@@ -900,10 +900,18 @@ function TechpackView({ tp, preview }) {
         </TpSection>
       )}
 
-      {/* 02 — TECHNICAL FLAT SKETCH */}
-      {tp.flatSketchImage && (
+      {/* 02 — TECHNICAL FLAT SKETCH (أمامي + خلفي مع أسهم القياس) */}
+      {(tp.flatSketchFront || tp.flatSketchImage || tp.flatSketchBack) && (
         <TpSection n="02" title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية (أمامي وخلفي)">
-          <div className="tp-flat"><img src={tp.flatSketchImage} alt="technical flat" crossOrigin="anonymous" /></div>
+          <div className="tp-flat-note"><span className="tp-flat-note-b">Garment: BLACK</span> · <span className="tp-flat-note-r">Measurement lines &amp; reference letters: RED</span></div>
+          <div className="tp-flat-grid">
+            <FlatWithArrows img={tp.flatSketchFront || tp.flatSketchImage} label="FRONT"
+              measurements={(tp.measurements || []).filter((m) => (m.view || 'front') === 'front')} />
+            {tp.flatSketchBack && (
+              <FlatWithArrows img={tp.flatSketchBack} label="BACK"
+                measurements={(tp.measurements || []).filter((m) => m.view === 'back')} />
+            )}
+          </div>
         </TpSection>
       )}
 
@@ -944,16 +952,58 @@ function TechpackView({ tp, preview }) {
         <div className="tp-materials">
           {(tp.materials || []).map((m, i) => (
             <div className="tp-mat" key={i}>
-              <div className="tp-mat-name">{m.name}</div>
-              <div className="tp-mat-type">{m.type}</div>
-              <div className="tp-mat-notes">{m.notes}</div>
+              <div className="tp-mat-head">
+                <span className="tp-mat-name">{m.name}</span>
+                {m.type && <span className="tp-mat-type">{m.type}</span>}
+              </div>
+              {(m.composition || m.gsm || m.pantone) && (
+                <div className="tp-mat-specs">
+                  {m.composition && <span className="tp-mat-spec"><b>Comp:</b> {m.composition}</span>}
+                  {m.gsm && <span className="tp-mat-spec"><b>Weight:</b> {m.gsm}</span>}
+                  {m.pantone && <span className="tp-mat-spec"><b>Pantone:</b> {m.pantone}</span>}
+                </div>
+              )}
+              {m.placement && <div className="tp-mat-place"><b>Placement:</b> {m.placement}</div>}
+              {m.notes && <div className="tp-mat-notes">{m.notes}</div>}
             </div>
           ))}
         </div>
       </TpSection>
 
-      {/* 05 — BILL OF MATERIALS */}
-      <TpSection n="05" title="BILL OF MATERIALS" subtitle="قائمة المواد">
+      {/* 05 — MATERIALS CALLOUT (رسمة بأرقام تشير للخامات) */}
+      {(tp.flatSketchFront || tp.flatSketchImage) && (tp.materials || []).length > 0 && (
+        <TpSection n="05" title="MATERIALS CALLOUT" subtitle="خريطة الخامات على الرسمة">
+          <div className="tp-callout-layout">
+            <div className="tp-callout-sketch">
+              <div className="tp-flat-inner">
+                <img src={tp.flatSketchFront || tp.flatSketchImage} alt="materials callout" crossOrigin="anonymous" className="tp-flat-img" />
+                <svg className="tp-flat-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  {(tp.materials || []).slice(0, 8).map((m, i) => {
+                    const pos = [
+                      { x: 50, y: 30 }, { x: 62, y: 55 }, { x: 50, y: 18 }, { x: 38, y: 45 },
+                      { x: 66, y: 78 }, { x: 34, y: 68 }, { x: 50, y: 88 }, { x: 58, y: 40 },
+                    ][i] || { x: 50, y: 50 };
+                    return (
+                      <g key={i}>
+                        <circle cx={pos.x} cy={pos.y} r="2.6" fill="#7a1420" stroke="#fff" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+                        <text x={pos.x} y={pos.y + 0.9} fontSize="3" fontWeight="700" fill="#fff" textAnchor="middle" fontFamily="Arial">{i + 1}</text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            </div>
+            <ol className="tp-callout-list">
+              {(tp.materials || []).slice(0, 8).map((m, i) => (
+                <li key={i}><span className="tp-callout-num">{i + 1}</span><span>{m.name}{m.placement ? ' — ' + m.placement : ''}</span></li>
+              ))}
+            </ol>
+          </div>
+        </TpSection>
+      )}
+
+      {/* 06 — BILL OF MATERIALS */}
+      <TpSection n="06" title="BILL OF MATERIALS" subtitle="قائمة المواد">
         <table className="tp-table">
           <thead><tr><th>#</th><th className="ltr">Item</th><th className="ltr">Description</th><th className="ltr">Placement</th><th>Qty</th><th>Unit</th></tr></thead>
           <tbody>
@@ -971,7 +1021,7 @@ function TechpackView({ tp, preview }) {
       </TpSection>
 
       {/* 06 — CONSTRUCTION DETAILS */}
-      <TpSection n="06" title="CONSTRUCTION DETAILS" subtitle="تفاصيل البناء">
+      <TpSection n="07" title="CONSTRUCTION DETAILS" subtitle="تفاصيل البناء">
         <table className="tp-table">
           <thead><tr><th className="ltr">Section</th><th className="ltr">Detail</th><th className="ltr">Description</th></tr></thead>
           <tbody>
@@ -982,26 +1032,29 @@ function TechpackView({ tp, preview }) {
         </table>
       </TpSection>
 
-      {/* 07 — DETAILED VIEWS */}
+      {/* 07 — DETAILED VIEWS (صور تكبير للأجزاء) */}
       {tp.detailViews && tp.detailViews.length > 0 && (
-        <TpSection n="07" title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية">
-          {tp.flatSketchImage && (
-            <div className="tp-detail-sketch"><img src={tp.flatSketchImage} alt="detailed flat" crossOrigin="anonymous" /></div>
-          )}
-          <table className="tp-table">
-            <thead><tr><th className="ltr">Area</th><th className="ltr">Detail</th><th className="ltr">Spec</th></tr></thead>
-            <tbody>
-              {tp.detailViews.map((d, i) => (
-                <tr key={i}><td className="ltr left">{d.area}</td><td className="ltr left sm">{d.detail}</td><td className="ltr left sm">{d.spec}</td></tr>
-              ))}
-            </tbody>
-          </table>
+        <TpSection n="08" title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية (تكبير الأجزاء)">
+          <div className="tp-detail-grid">
+            {tp.detailViews.map((d, i) => (
+              <div className="tp-detail-card" key={i}>
+                {d.image
+                  ? <img src={d.image} alt={d.area} crossOrigin="anonymous" />
+                  : <div className="tp-detail-ph"></div>}
+                <div className="tp-detail-body">
+                  <div className="tp-detail-area">{d.area}</div>
+                  <div className="tp-detail-detail">{d.detail}</div>
+                  {d.spec && <div className="tp-detail-spec">{d.spec}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
         </TpSection>
       )}
 
       {/* 08 — LABEL PLACEMENT */}
       {tp.labelPlacement && tp.labelPlacement.length > 0 && (
-        <TpSection n="08" title="LABEL PLACEMENT" subtitle="مواضع الليبلات">
+        <TpSection n="09" title="LABEL PLACEMENT" subtitle="مواضع الليبلات">
           <table className="tp-table">
             <thead><tr><th className="ltr">Label</th><th className="ltr">Location</th><th className="ltr">Size</th><th className="ltr">Method</th></tr></thead>
             <tbody>
@@ -1014,10 +1067,10 @@ function TechpackView({ tp, preview }) {
       )}
 
       {/* 09 — COLORWAY & PANTONE */}
-      <TpSection n="09" title="COLORWAY & PANTONE" subtitle="الألوان">
+      <TpSection n="10" title="COLORWAY & PANTONE" subtitle="الألوان">
         <div className="tp-colorway-layout">
-          {tp.flatSketchImage && (
-            <div className="tp-colorway-sketch"><img src={tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" /></div>
+          {(tp.flatSketchFront || tp.flatSketchImage) && (
+            <div className="tp-colorway-sketch"><img src={tp.flatSketchFront || tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" /></div>
           )}
           <div className="tp-colors">
             {(tp.colorway || []).map((c, i) => (
@@ -1032,7 +1085,7 @@ function TechpackView({ tp, preview }) {
 
       {/* 10 — ARTWORK & PLACEMENT */}
       {tp.artwork && tp.artwork.length > 0 && (
-        <TpSection n="10" title="ARTWORK & PLACEMENT" subtitle="الأرتورك والمواضع">
+        <TpSection n="11" title="ARTWORK & PLACEMENT" subtitle="الأرتورك والمواضع">
           <table className="tp-table">
             <thead><tr><th className="ltr">Element</th><th className="ltr">Placement</th><th className="ltr">Size</th><th className="ltr">Notes</th></tr></thead>
             <tbody>
@@ -1045,10 +1098,30 @@ function TechpackView({ tp, preview }) {
       )}
 
       {/* 11 — SEWING INSTRUCTIONS */}
-      <TpSection n="11" title="SEWING INSTRUCTIONS" subtitle="تعليمات الخياطة">
+      <TpSection n="12" title="SEWING INSTRUCTIONS" subtitle="تعليمات الخياطة">
         <ol className="tp-steps">
           {(tp.sewingSteps || []).map((s, i) => (<li key={i} className="ltr">{s}</li>))}
         </ol>
+      </TpSection>
+
+      {/* 13 — FIT LOG & REVISION HISTORY */}
+      <TpSection n="13" title="FIT LOG & REVISION HISTORY" subtitle="سجل القياس والمراجعات">
+        <table className="tp-table">
+          <thead><tr><th>#</th><th className="ltr">Version</th><th className="ltr">Date</th><th className="ltr">Change / Fit Comment</th><th className="ltr">By</th></tr></thead>
+          <tbody>
+            {(tp.fitLog && tp.fitLog.length > 0 ? tp.fitLog : [
+              { version: 'v0', date: (tp.generatedAt || '').slice(0, 10), change: 'Initial sample tech pack generated', by: tp.brandName },
+            ]).map((f, i) => (
+              <tr key={i}>
+                <td className="ref-code">{i + 1}</td>
+                <td className="ltr left">{f.version}</td>
+                <td className="ltr left sm">{f.date}</td>
+                <td className="ltr left sm">{f.change}</td>
+                <td className="ltr left sm">{f.by}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </TpSection>
 
       <div className="tp-foot">{tp.brandName} · Technical Package</div>
@@ -1065,6 +1138,86 @@ function TpSection({ n, title, subtitle, children }) {
         <span className="tp-section-sub">{subtitle}</span>
       </div>
       {children}
+    </div>
+  );
+}
+
+// ===== الرسمة مع أسهم القياس (طبقة SVG فوق الصورة) =====
+// خريطة المرساة -> إحداثيات نسبية (%) على الرسمة، ونوع السهم (أفقي/عمودي)
+const ANCHOR_MAP = {
+  frontNeck:   { x: 50, y: 15, side: 'right', orient: 'v' },
+  backNeck:    { x: 50, y: 13, side: 'right', orient: 'v' },
+  bust:        { x: 50, y: 24, side: 'both',  orient: 'h' },
+  topFront:    { x: 50, y: 20, side: 'both',  orient: 'h' },
+  topBack:     { x: 50, y: 18, side: 'both',  orient: 'h' },
+  bpToBp:      { x: 50, y: 27, side: 'mid',   orient: 'h' },
+  cupHeight:   { x: 38, y: 22, side: 'left',  orient: 'v' },
+  waist:       { x: 50, y: 40, side: 'both',  orient: 'h' },
+  highHip:     { x: 50, y: 47, side: 'both',  orient: 'h' },
+  lowHip:      { x: 50, y: 52, side: 'both',  orient: 'h' },
+  thigh:       { x: 50, y: 60, side: 'both',  orient: 'h' },
+  knee:        { x: 50, y: 68, side: 'both',  orient: 'h' },
+  flareBreak:  { x: 62, y: 66, side: 'right', orient: 'v' },
+  hemFront:    { x: 50, y: 95, side: 'both',  orient: 'h' },
+  hemBack:     { x: 50, y: 95, side: 'both',  orient: 'h' },
+  train:       { x: 82, y: 88, side: 'right', orient: 'v' },
+  zipper:      { x: 50, y: 42, side: 'right', orient: 'v' },
+  cfLength:    { x: 50, y: 55, side: 'mid',   orient: 'v' },
+  cbLength:    { x: 50, y: 55, side: 'mid',   orient: 'v' },
+  sideLength:  { x: 30, y: 55, side: 'left',  orient: 'v' },
+  bodiceSide:  { x: 30, y: 34, side: 'left',  orient: 'v' },
+  overlay:     { x: 68, y: 58, side: 'right', orient: 'v' },
+  embellishment: { x: 50, y: 30, side: 'right', orient: 'v' },
+  boning:      { x: 32, y: 30, side: 'left',  orient: 'v' },
+  shoulderBust:{ x: 42, y: 18, side: 'left',  orient: 'v' },
+  sleeve:      { x: 78, y: 35, side: 'right', orient: 'v' },
+  inseam:      { x: 50, y: 70, side: 'mid',   orient: 'v' },
+  outseam:     { x: 28, y: 60, side: 'left',  orient: 'v' },
+  rise:        { x: 50, y: 42, side: 'right', orient: 'v' },
+  other:       { x: 74, y: 50, side: 'right', orient: 'v' },
+};
+
+function FlatWithArrows({ img, label, measurements }) {
+  // نضع حرف مرجعي عند كل نقطة قياس لها مرساة معروفة، بترتيب حول الرسمة
+  const marks = [];
+  let ri = 0;
+  (measurements || []).forEach((m) => {
+    const a = ANCHOR_MAP[m.anchor] || null;
+    if (!a) return;
+    // إزاحة بسيطة لمنع التراكب عند تكرار نفس المرساة
+    const dup = marks.filter((k) => k.anchor === m.anchor).length;
+    marks.push({
+      code: m.code || String.fromCharCode(65 + ri),
+      anchor: m.anchor,
+      x: a.x, y: Math.min(97, a.y + dup * 3),
+      side: a.side, orient: a.orient,
+    });
+    ri++;
+  });
+
+  return (
+    <div className="tp-flat-wrap">
+      <div className="tp-flat-inner">
+        {img
+          ? <img src={img} alt={label} crossOrigin="anonymous" className="tp-flat-img" />
+          : <div className="tp-flat-ph"></div>}
+        <svg className="tp-flat-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {marks.map((k, i) => {
+            const labelX = k.side === 'left' ? Math.max(4, k.x - 30) : Math.min(96, k.x + 30);
+            const anchorX = k.side === 'left' ? k.x - 14 : k.x + 14;
+            return (
+              <g key={i}>
+                <line x1={anchorX} y1={k.y} x2={labelX} y2={k.y}
+                  stroke="#7a1420" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
+                <circle cx={labelX} cy={k.y} r="2.4" fill="#fff" stroke="#7a1420" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+                <text x={labelX} y={k.y + 0.9} fontSize="3" fontWeight="700" fill="#7a1420"
+                  textAnchor="middle" fontFamily="Arial">{k.code}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="tp-flat-label">{label}</div>
     </div>
   );
 }
@@ -1315,8 +1468,17 @@ function StyleBlock() {
       .tp-table .hl { background: #f3ead6; font-weight: 700; }
       .ref-code { font-weight: 700; color: var(--gold-deep); background: var(--cream); font-family: 'Cormorant Garamond', serif; }
 
-      .tp-flat { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
-      .tp-flat img { width: 100%; display: block; }
+      .tp-flat-note { text-align: center; font-size: 0.8rem; margin-bottom: 0.9rem; direction: ltr; }
+      .tp-flat-note-b { color: var(--ink); font-weight: 700; }
+      .tp-flat-note-r { color: #7a1420; font-weight: 700; }
+      .tp-flat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      @media (max-width: 700px) { .tp-flat-grid { grid-template-columns: 1fr; } }
+      .tp-flat-wrap { border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 0.6rem; }
+      .tp-flat-inner { position: relative; width: 100%; }
+      .tp-flat-img { width: 100%; display: block; }
+      .tp-flat-ph { width: 100%; padding-top: 130%; background: var(--cream-2); }
+      .tp-flat-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+      .tp-flat-label { text-align: center; font-size: 0.8rem; font-weight: 700; letter-spacing: 1px; color: var(--ink); margin-top: 0.4rem; }
       .tp-garment-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
       @media (max-width: 700px) { .tp-garment-info { grid-template-columns: 1fr; } }
       .tp-gi-item { border-right: 2px solid var(--gold); padding-right: 0.9rem; }
@@ -1329,18 +1491,39 @@ function StyleBlock() {
       .tp-swatch-name { padding: 0.5rem; font-size: 0.78rem; color: var(--ink); text-align: center; }
       .tp-materials { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
       @media (max-width: 700px) { .tp-materials { grid-template-columns: 1fr; } }
-      .tp-mat { border: 1px solid var(--line); border-radius: 6px; padding: 0.9rem; background: var(--cream); }
-      .tp-mat-name { font-weight: 700; color: var(--ink); }
-      .tp-mat-type { color: var(--gold-deep); font-size: 0.82rem; margin: 2px 0; }
-      .tp-mat-notes { color: var(--ink-soft); font-size: 0.8rem; line-height: 1.5; }
+      .tp-mat { border: 1px solid var(--line); border-radius: 6px; padding: 1rem; background: var(--cream); }
+      .tp-mat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-bottom: 0.4rem; }
+      .tp-mat-name { font-weight: 700; color: var(--ink); direction: ltr; }
+      .tp-mat-type { color: var(--gold-deep); font-size: 0.78rem; direction: ltr; }
+      .tp-mat-specs { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; margin-bottom: 0.4rem; }
+      .tp-mat-spec { font-size: 0.74rem; color: var(--ink); direction: ltr; }
+      .tp-mat-spec b { color: var(--gold-deep); font-weight: 700; }
+      .tp-mat-place { font-size: 0.76rem; color: var(--ink-soft); direction: ltr; margin-bottom: 0.3rem; }
+      .tp-mat-place b { color: var(--ink); }
+      .tp-mat-notes { color: var(--ink-soft); font-size: 0.78rem; line-height: 1.5; direction: ltr; }
 
       .tp-colors { display: flex; flex-wrap: wrap; gap: 1.2rem; }
       .tp-colorway-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1.5rem; align-items: center; }
       @media (max-width: 700px) { .tp-colorway-layout { grid-template-columns: 1fr; } }
       .tp-colorway-sketch { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
       .tp-colorway-sketch img { width: 100%; display: block; }
-      .tp-detail-sketch { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; margin-bottom: 1.2rem; }
-      .tp-detail-sketch img { width: 100%; display: block; }
+      .tp-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; }
+      @media (max-width: 800px) { .tp-detail-grid { grid-template-columns: repeat(2, 1fr); } }
+      @media (max-width: 500px) { .tp-detail-grid { grid-template-columns: 1fr; } }
+      .tp-detail-card { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+      .tp-detail-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+      .tp-detail-ph { width: 100%; aspect-ratio: 1; background: var(--cream-2); }
+      .tp-detail-body { padding: 0.7rem; }
+      .tp-detail-area { font-weight: 700; color: var(--ink); font-size: 0.85rem; direction: ltr; }
+      .tp-detail-detail { color: var(--ink-soft); font-size: 0.76rem; line-height: 1.5; margin-top: 2px; direction: ltr; }
+      .tp-detail-spec { color: var(--gold-deep); font-size: 0.74rem; margin-top: 3px; direction: ltr; }
+
+      .tp-callout-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: center; }
+      @media (max-width: 700px) { .tp-callout-layout { grid-template-columns: 1fr; } }
+      .tp-callout-sketch { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; padding: 0.6rem; }
+      .tp-callout-list { list-style: none; padding: 0; }
+      .tp-callout-list li { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--line); direction: ltr; text-align: left; font-size: 0.82rem; color: var(--ink); }
+      .tp-callout-num { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; background: #7a1420; color: #fff; font-size: 0.72rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
       .tp-color { display: flex; gap: 0.6rem; align-items: center; }
       .tp-color-sw { width: 42px; height: 42px; border-radius: 6px; border: 1px solid var(--line); }
       .tp-color-part { font-weight: 600; color: var(--ink); font-size: 0.85rem; }
