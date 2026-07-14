@@ -227,26 +227,31 @@ ${INDUSTRY_RULES}
   "description": "وصف دقيق للقطعة (بالعربية، سطرين)",
   "silhouette": "وصف السيلويت بالإنجليزية",
   "garmentInfo": { "type": "النوع", "silhouette": "السيلويت", "construction": "البناء", "neckline": "نوع الرقبة" },
-  "flatSketchPrompt": "برومبت إنجليزي دقيق لتحويل الصورة إلى رسمة فلات تقنية عبر image-to-image. صِفي القطعة الفعلية بدقة داخله. استخدمي هذه الصياغة مع تعديل الوصف: 'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing). Remove the model and body completely, show only the [garment description] as a flat lay garment. Thin uniform black outlines on pure white background, front view, no shading, no color, no fill, keep the exact same silhouette, neckline, seams and construction details as the original garment. Technical apparel production drawing, minimal, precise, vector style. No text, no arrows, no measurements, no watermark.'",
+  "flatSketchPromptFront": "برومبت إنجليزي دقيق للرسمة الأمامية عبر image-to-image. صِفي القطعة الفعلية بدقة. استخدمي: 'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing), FRONT view. Remove the model and body completely, show only the [garment description] as a flat lay garment. Thin uniform black outlines on pure white background, no shading, no color, no fill, keep the exact same silhouette, neckline, seams and construction details. Technical apparel production drawing, minimal, precise, vector style. No text, no arrows, no measurements, no watermark.'",
+  "flatSketchPromptBack": "نفس البرومبت لكن BACK view: 'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing), BACK view of the same garment. Show the back closure (zipper), back neckline and back seams. Remove the model and body completely, flat lay, thin uniform black outlines on pure white background, no shading, no color. Keep the exact same silhouette. Technical apparel production drawing, minimal, precise. No text, no arrows, no measurements, no watermark.'",
   "measurements": [
-    { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "tolerance": "±X.X", "sizes": { "XS":0,"S":0,"M":0,"L":0,"XL":0 } }
+    { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "view": "front|back", "anchor": "bust|topFront|topBack|waist|highHip|lowHip|thigh|knee|flareBreak|hemFront|hemBack|train|frontNeck|backNeck|zipper|cupHeight|bpToBp|sideLength|cfLength|cbLength|shoulderBust|sleeve|inseam|outseam|rise|other", "orient": "h|v", "tolerance": "±X.X", "sizes": { "XS":0,"S":0,"M":0,"L":0,"XL":0 } }
   ],
-  "materials": [ { "name": "الخامة", "type": "النوع", "notes": "ملاحظات مع GSM تقديري" } ],
-  "bom": [ { "item": "المادة", "description": "وصف", "placement": "المكان", "qty": "الكمية", "unit": "الوحدة" } ],
+  "materials": [ { "name": "اسم الخامة بالإنجليزية", "type": "النوع", "composition": "التركيب مثل 100% Silk", "gsm": "الوزن التقديري مثل 180-220 gsm", "pantone": "كود Pantone إن أمكن", "placement": "مكان الاستخدام بالتفصيل", "notes": "وصف احترافي كامل للملمس والاستخدام (جملتان)" } ],
+  "bom": [ { "item": "المادة بالإنجليزية", "description": "وصف تقني كامل مع GSM/القياس", "placement": "مكان الاستخدام", "qty": "الكمية", "unit": "الوحدة" } ],
   "construction": [ { "section": "القسم", "detail": "التفصيل", "description": "الوصف" } ],
-  "detailViews": [ { "area": "المنطقة", "detail": "التفصيل الإنشائي", "spec": "المواصفة/القياس" } ],
-  "labelPlacement": [ { "label": "اسم الليبل", "location": "المكان", "size": "القياس", "method": "الطريقة" } ],
+  "detailViews": [ { "area": "المنطقة بالإنجليزية مثل Neckline / Bust Embroidery / CB Zipper / Hem", "detail": "وصف التفصيل الإنشائي", "spec": "مواصفة/قياس", "zoomPrompt": "برومبت إنجليزي لصورة تكبير (close-up macro) لهذا الجزء من القطعة الفعلية، بنفس اللون والتصميم. extreme close-up detail, technical documentation photography" } ],
+  "labelPlacement": [ { "label": "اسم الليبل بالإنجليزية", "location": "المكان الدقيق", "size": "القياس", "method": "الطريقة مثل Woven/Printed/Heat-seal" } ],
   "colorway": [ { "part": "الجزء", "pantone": "كود Pantone", "hex": "#XXXXXX" } ],
   "artwork": [ { "name": "العنصر", "placement": "المكان", "size": "القياس", "notes": "ملاحظات" } ],
-  "sewingSteps": [ "خطوة 1", "... (8 خطوات على الأقل)" ],
+  "sewingSteps": [ "خطوة 1", "... (10 خطوات على الأقل)" ],
+  "fitLog": [ { "version": "v0", "date": "التاريخ", "change": "وصف التغيير أو ملاحظة الفِت بالإنجليزية", "by": "GH Couture AI" } ],
   "materialSwatches": [ { "name": "الخامة", "swatchPrompt": "برومبت إنجليزي لصورة ماكرو قريبة للخامة. اذكري اللون الدقيق صراحةً في البداية مثل 'emerald green silk chiffon'. fabric swatch macro photography, soft even studio lighting" } ]
 }
 
 مهم جداً:
-- 27 نقطة قياس على الأقل، متدرّجة منطقياً.
-- flatSketchPrompt ضروري جداً — صِفي القطعة الفعلية بدقة داخله ليطلع الفلات مطابقاً.
-- لا تضيفي أي خامة لم تذكرها المصممة صراحةً إن حدّدت خامات.
+- 27 نقطة قياس على الأقل، متدرّجة منطقياً. كل نقطة لها view (front أو back)، anchor صحيح من القائمة، و orient (h أفقي أو v عمودي) — هذه لوضع الأسهم على الرسمة.
+- flatSketchPromptFront و flatSketchPromptBack ضروريان — صِفي القطعة الفعلية بدقة داخلهما.
+- المواد (materials): وصف احترافي كامل لكل خامة مع composition و gsm و pantone و placement — لا اختصار. الهدف مستوى تيك باك مصنع حقيقي.
+- BOM: قائمة كاملة تشمل كل الإكسسوارات (السحاب، الخيط بلونه، hook-and-eye، الحشوات/الدعامات، الكريستال، الليبلات، أشرطة التثبيت، التغليف) — 12 بند على الأقل.
 - materialSwatches: عنصر واحد لكل خامة رئيسية (بحد أقصى 4).
+- detailViews: 4-6 مناطق مع zoomPrompt لكل واحدة.
+- لا تضيفي أي خامة لم تذكرها المصممة صراحةً إن حدّدت خامات.
 - كل الأقسام ممتلئة بمحتوى حقيقي مبني على الصورة.`;
 
     const payload = {
@@ -284,34 +289,46 @@ ${INDUSTRY_RULES}
     if (replicateToken) {
       const jobs = [];
 
-      // ===== الرسمة الفلات عبر Kontext =====
-      const defaultFlatPrompt =
-        'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing). ' +
+      // ===== الرسمة الفلات (أمامي + خلفي) عبر Kontext =====
+      const defaultFront =
+        'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing), FRONT view. ' +
         'Remove the model and body completely, show only the garment as a flat lay. ' +
-        'Thin uniform black outlines on pure white background, front view, no shading, no color, no fill, ' +
-        'keep the exact same silhouette, neckline, seams and construction details as the original garment. ' +
+        'Thin uniform black outlines on pure white background, no shading, no color, no fill, ' +
+        'keep the exact same silhouette, neckline, seams and construction details. ' +
         'Technical apparel production drawing, minimal, precise, vector style. No text, no arrows, no measurements, no watermark.';
-      const flatPrompt = (techpack.flatSketchPrompt && techpack.flatSketchPrompt.length > 40)
-        ? techpack.flatSketchPrompt : defaultFlatPrompt;
-      jobs.push(
-        (async () => {
-          try {
-            const imgUrl = await uploadToReplicate(imgBuffer, mediaType, replicateToken);
-            if (imgUrl) {
-              techpack.flatSketchImage = await safeFlatKontext(imgUrl, flatPrompt, replicateToken);
-            }
-          } catch (e) {
-            techpack.flatSketchImage = null;
-          }
-        })()
-      );
+      const defaultBack =
+        'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing), BACK view of the same garment. ' +
+        'Show the back closure (zipper), back neckline and back seams. Remove the model and body completely, flat lay. ' +
+        'Thin uniform black outlines on pure white background, no shading, no color. Keep the exact same silhouette. ' +
+        'Technical apparel production drawing, minimal, precise. No text, no arrows, no measurements, no watermark.';
+      const frontPrompt = (techpack.flatSketchPromptFront && techpack.flatSketchPromptFront.length > 40)
+        ? techpack.flatSketchPromptFront : defaultFront;
+      const backPrompt = (techpack.flatSketchPromptBack && techpack.flatSketchPromptBack.length > 40)
+        ? techpack.flatSketchPromptBack : defaultBack;
 
-      // ===== صور الخامات عبر FLUX =====
+      // نرفع الصورة مرة واحدة، ثم نولّد الأمامي والخلفي
+      let uploadedUrl = null;
+      try { uploadedUrl = await uploadToReplicate(imgBuffer, mediaType, replicateToken); } catch (e) { uploadedUrl = null; }
+
+      if (uploadedUrl) {
+        jobs.push(
+          safeFlatKontext(uploadedUrl, frontPrompt, replicateToken)
+            .then((u) => { techpack.flatSketchFront = u; if (u) techpack.flatSketchImage = u; })
+        );
+        jobs.push(
+          new Promise((r) => setTimeout(r, 1500))
+            .then(() => safeFlatKontext(uploadedUrl, backPrompt, replicateToken))
+            .then((u) => { techpack.flatSketchBack = u; })
+        );
+      }
+
+      // ===== صور الخامات + صور التكبير (Detailed Views) عبر FLUX =====
       const STYLE = 'professional fashion technical documentation, high quality, clean, 8k';
       const NO_TEXT = 'no text, no letters, no words, no watermark';
       const paletteHint = Array.isArray(techpack.colorway) && techpack.colorway.length
         ? 'garment color palette: ' + techpack.colorway.map((c) => (c.part||'')+' '+(c.hex||'')).join(', ') + '. '
         : '';
+
       const swatches = Array.isArray(techpack.materialSwatches) ? techpack.materialSwatches.slice(0,4) : [];
       const swatchResults = new Array(swatches.length);
       swatches.forEach((sw, i) => {
@@ -320,6 +337,18 @@ ${INDUSTRY_RULES}
             new Promise((r) => setTimeout(r, i * 1000))
               .then(() => safeGenerate(`${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken))
               .then((url) => { swatchResults[i] = { name: sw.name || '', url }; })
+          );
+        }
+      });
+
+      // صور تكبير الأجزاء (Detailed Views)
+      const details = Array.isArray(techpack.detailViews) ? techpack.detailViews.slice(0,6) : [];
+      details.forEach((dv, i) => {
+        if (dv && dv.zoomPrompt) {
+          jobs.push(
+            new Promise((r) => setTimeout(r, (i + 4) * 900))
+              .then(() => safeGenerate(`${dv.zoomPrompt}. ${paletteHint}Use the exact garment color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken))
+              .then((url) => { techpack.detailViews[i].image = url; })
           );
         }
       });
