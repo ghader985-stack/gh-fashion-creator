@@ -69,15 +69,15 @@ async function generateFlatKontext(imageUrl, prompt, token, attempt = 0) {
   const bodyText = await createRes.text();
   let prediction;
   try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Kontext رد غير متوقع'); }
-  if (createRes.status === 429 && attempt < 5) {
-    await new Promise((r) => setTimeout(r, 12000));
+  if (createRes.status === 429 && attempt < 3) {
+    await new Promise((r) => setTimeout(r, 6000));
     return generateFlatKontext(imageUrl, prompt, token, attempt + 1);
   }
   if (!createRes.ok || prediction.error) {
     throw new Error('Kontext (' + createRes.status + '): ' + (prediction.detail || prediction.error || ''));
   }
   let result = prediction, tries = 0;
-  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 90) {
+  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 55) {
     await new Promise((r) => setTimeout(r, 1500));
     const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
       headers: { Authorization: 'Bearer ' + token },
@@ -96,6 +96,14 @@ async function safeFlatKontext(imageUrl, prompt, token) {
   try { return await generateFlatKontext(imageUrl, prompt, token); } catch (e) { return null; }
 }
 
+// يلفّ أي وعد بمهلة قصوى — لو تجاوزها يرجّع null بدل ما يعلّق للأبد
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 // ============================================================================
 // ============ توليد صور الخامات عبر FLUX 1.1 Pro (كما هو) =================
 // ============================================================================
@@ -110,14 +118,14 @@ async function generateImage(prompt, aspectRatio, token, attempt = 0) {
   const bodyText = await createRes.text();
   let prediction;
   try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('رد غير متوقع من Replicate'); }
-  if (createRes.status === 429 && attempt < 5) {
-    await new Promise((r) => setTimeout(r, 12000));
+  if (createRes.status === 429 && attempt < 3) {
+    await new Promise((r) => setTimeout(r, 6000));
     return generateImage(prompt, aspectRatio, token, attempt + 1);
   }
   if (!createRes.ok) throw new Error('Replicate (' + createRes.status + ')');
   if (prediction.error) throw new Error('Replicate: ' + prediction.error);
   let result = prediction, tries = 0;
-  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 60) {
+  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 45) {
     await new Promise((r) => setTimeout(r, 1500));
     const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
       headers: { Authorization: 'Bearer ' + token },
@@ -256,7 +264,7 @@ ${INDUSTRY_RULES}
 
     const payload = {
       model: MODEL,
-      max_tokens: 128000,
+      max_tokens: 16000,
       messages: [{
         role: 'user',
         content: [
@@ -266,11 +274,21 @@ ${INDUSTRY_RULES}
       }],
     };
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify(payload),
-    });
+    const claudeController = new AbortController();
+    const claudeTimer = setTimeout(() => claudeController.abort(), 75000);
+    let response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify(payload),
+        signal: claudeController.signal,
+      });
+    } catch (e) {
+      clearTimeout(claudeTimer);
+      return res.status(500).json({ error: 'انتهت مهلة تحليل التصميم، حاولي مرة ثانية' });
+    }
+    clearTimeout(claudeTimer);
 
     if (!response.ok) {
       const errText = await response.text();
@@ -312,12 +330,11 @@ ${INDUSTRY_RULES}
 
       if (uploadedUrl) {
         jobs.push(
-          safeFlatKontext(uploadedUrl, frontPrompt, replicateToken)
+          withTimeout(safeFlatKontext(uploadedUrl, frontPrompt, replicateToken), 130000)
             .then((u) => { techpack.flatSketchFront = u; if (u) techpack.flatSketchImage = u; })
         );
         jobs.push(
-          new Promise((r) => setTimeout(r, 1500))
-            .then(() => safeFlatKontext(uploadedUrl, backPrompt, replicateToken))
+          withTimeout(safeFlatKontext(uploadedUrl, backPrompt, replicateToken), 130000)
             .then((u) => { techpack.flatSketchBack = u; })
         );
       }
@@ -334,26 +351,34 @@ ${INDUSTRY_RULES}
       swatches.forEach((sw, i) => {
         if (sw && sw.swatchPrompt) {
           jobs.push(
-            new Promise((r) => setTimeout(r, i * 1000))
-              .then(() => safeGenerate(`${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken))
-              .then((url) => { swatchResults[i] = { name: sw.name || '', url }; })
+            withTimeout(
+              new Promise((r) => setTimeout(r, i * 800))
+                .then(() => safeGenerate(`${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken)),
+              110000
+            ).then((url) => { swatchResults[i] = { name: sw.name || '', url }; })
           );
         }
       });
 
-      // صور تكبير الأجزاء (Detailed Views)
-      const details = Array.isArray(techpack.detailViews) ? techpack.detailViews.slice(0,6) : [];
+      // صور تكبير الأجزاء (Detailed Views) — 3 كحد أقصى لتقليل التكلفة والوقت
+      const details = Array.isArray(techpack.detailViews) ? techpack.detailViews.slice(0,3) : [];
       details.forEach((dv, i) => {
         if (dv && dv.zoomPrompt) {
           jobs.push(
-            new Promise((r) => setTimeout(r, (i + 4) * 900))
-              .then(() => safeGenerate(`${dv.zoomPrompt}. ${paletteHint}Use the exact garment color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken))
-              .then((url) => { techpack.detailViews[i].image = url; })
+            withTimeout(
+              new Promise((r) => setTimeout(r, (i + 4) * 700))
+                .then(() => safeGenerate(`${dv.zoomPrompt}. ${paletteHint}Use the exact garment color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken)),
+              110000
+            ).then((url) => { if (url) techpack.detailViews[i].image = url; })
           );
         }
       });
 
-      await Promise.all(jobs);
+      // ضمان عدم الانقطاع: مهلة قصوى إجمالية 200 ثانية (هامش آمن تحت سقف Vercel 300).
+      // كل مهمة ملفوفة بمهلتها الخاصة، وأي فشل يرجّع null بدل تعليق أو خطأ.
+      const BUDGET_MS = 200000;
+      const budget = new Promise((resolve) => setTimeout(resolve, BUDGET_MS));
+      await Promise.race([Promise.allSettled(jobs), budget]);
       techpack.swatchImages = swatchResults.filter((s) => s && s.url);
     }
 
