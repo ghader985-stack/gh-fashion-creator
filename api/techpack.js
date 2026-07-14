@@ -1,6 +1,12 @@
 // api/techpack.js
-// يستقبل صورة تصميم (سكتش يدوي، صورة AI، أو صورة قطعة) + مواصفات القماش من المصممة
-// يحلّلها عبر Claude Vision ويرجّع تيك باك كامل منظّم (JSON) جاهز للعرض
+// يستقبل صورة تصميم + مواصفات من المصممة، يحلّلها عبر Claude Vision،
+// ويرجّع تيك باك كامل منظّم (JSON).
+//
+// الرسمة التقنية: تُبنى عبر FLUX Kontext (image-to-image) — يحوّل صورة التصميم
+// إلى رسمة فلات مسطّحة نظيفة (بدون موديل، خطوط سوداء رفيعة، خلفية بيضاء)،
+// مع الحفاظ على شكل القطعة الفعلي. ثم تُركّب أسهم القياس فوقها كطبقة SVG
+// متجهة في الواجهة (index.js) — بأحرف مرجعية مربوطة بجدول القياسات.
+// هذه هي نفس طريقة المنصات الاحترافية (image-to-flat + arrow overlay).
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -11,72 +17,20 @@ export const config = {
 };
 
 const MODEL = 'claude-sonnet-5';
+
+// FLUX 1.1 Pro لصور الخامات (كما هو)
 const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
-const REPLICATE_URL =
-  'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
-// موديل Qwen Image Edit Plus — يحوّل صورة القطعة الفعلية إلى رسمة تقنية مطابقة
-const QWEN_MODEL = 'qwen/qwen-image-edit-plus';
-const QWEN_URL =
-  'https://api.replicate.com/v1/models/' + QWEN_MODEL + '/predictions';
+const REPLICATE_FLUX_URL = 'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
 
-// يحوّل صورة القطعة المرفوعة (base64 data URI) إلى رسمة تقنية مسطّحة أمامي/خلفي
-// عبر Qwen Image Edit — النتيجة مطابقة للتصميم لأنها مبنية على الصورة الفعلية
-async function generateFlatSketch(imageDataUri, instruction, token, attempt = 0) {
-  const createRes = await fetch(QWEN_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + token,
-      'Content-Type': 'application/json',
-      Prefer: 'wait',
-    },
-    body: JSON.stringify({
-      input: {
-        image: [imageDataUri],
-        prompt: instruction,
-        output_format: 'jpg',
-        output_quality: 85,
-      },
-    }),
-  });
-  const bodyText = await createRes.text();
-  let prediction;
-  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Qwen رد غير متوقع: ' + bodyText.slice(0, 120)); }
-  if (createRes.status === 429 && attempt < 5) {
-    await new Promise((r) => setTimeout(r, 12000));
-    return generateFlatSketch(imageDataUri, instruction, token, attempt + 1);
-  }
-  if (!createRes.ok || prediction.error) {
-    throw new Error('Qwen فشل (' + createRes.status + '): ' + (prediction.detail || prediction.error || bodyText.slice(0, 120)));
-  }
-  let result = prediction;
-  let tries = 0;
-  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 60) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
-      headers: { Authorization: 'Bearer ' + token },
-    });
-    result = await pollRes.json();
-    tries++;
-  }
-  if (result.status !== 'succeeded') throw new Error('Qwen لم يكتمل');
-  let output = result.output;
-  output = Array.isArray(output) ? output[0] : output;
-  if (typeof output !== 'string') return null;
-  // رابط https مباشر: نقبله (يظهر ودائم بما يكفي للعرض والتصدير)
-  if (output.startsWith('http')) return output;
-  // data URI: يظهر في المتصفح، لكن نقبله فقط إن كان أصغر من 3.5MB
-  // حتى لا ينتفخ حجم رد Vercel (الحد ~4.5MB)
-  if (output.startsWith('data:') && output.length < 3500000) return output;
-  return null;
-}
+// FLUX Kontext Pro لتحويل صورة التصميم إلى رسمة فلات نظيفة (image-to-image)
+const KONTEXT_MODEL = 'black-forest-labs/flux-kontext-pro';
+const REPLICATE_KONTEXT_URL = 'https://api.replicate.com/v1/models/' + KONTEXT_MODEL + '/predictions';
 
-async function safeFlatSketch(imageDataUri, instruction, token) {
-  try { return await generateFlatSketch(imageDataUri, instruction, token); } catch (e) { return null; }
-}
-
-// يرفع الصورة إلى Replicate ويرجّع رابط https عام (بدل base64 المحدود بـ1MB)
+// ============================================================================
+// ============ رفع صورة التصميم إلى Replicate للحصول على رابط عام ==========
+// ============================================================================
 async function uploadToReplicate(buffer, mediaType, token) {
-  const ext = mediaType.split('/')[1] || 'jpg';
+  const ext = (mediaType.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
   const boundary = '----ghBoundary' + Date.now();
   const pre = Buffer.from(
     '--' + boundary + '\r\n' +
@@ -85,181 +39,152 @@ async function uploadToReplicate(buffer, mediaType, token) {
   );
   const post = Buffer.from('\r\n--' + boundary + '--\r\n');
   const body = Buffer.concat([pre, buffer, post]);
-
   const res = await fetch('https://api.replicate.com/v1/files', {
     method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + token,
-      'Content-Type': 'multipart/form-data; boundary=' + boundary,
-    },
-    body: body,
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'multipart/form-data; boundary=' + boundary },
+    body,
   });
   if (!res.ok) throw new Error('فشل رفع الصورة (' + res.status + ')');
   const data = await res.json();
-  // الرابط العام للملف المرفوع
-  return data.urls && data.urls.get ? data.urls.get : null;
+  return (data.urls && data.urls.get) || null;
 }
 
-// توليد صورة واحدة عبر Replicate FLUX (مع إعادة محاولة عند الازدحام 429)
-async function generateImage(prompt, aspectRatio, token, attempt = 0) {
-  const createRes = await fetch(REPLICATE_URL, {
+// ============================================================================
+// ============ توليد الرسمة الفلات عبر Kontext (image-to-image) ============
+// ============================================================================
+async function generateFlatKontext(imageUrl, prompt, token, attempt = 0) {
+  const createRes = await fetch(REPLICATE_KONTEXT_URL, {
     method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + token,
-      'Content-Type': 'application/json',
-      Prefer: 'wait',
-    },
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
     body: JSON.stringify({
       input: {
-        prompt: prompt,
-        aspect_ratio: aspectRatio,
+        prompt,
+        input_image: imageUrl,
         output_format: 'jpg',
-        output_quality: 95,
+        aspect_ratio: 'match_input_image',
         safety_tolerance: 2,
       },
     }),
   });
-
   const bodyText = await createRes.text();
   let prediction;
-  try {
-    prediction = JSON.parse(bodyText);
-  } catch (e) {
-    throw new Error('رد غير متوقع من Replicate');
+  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Kontext رد غير متوقع'); }
+  if (createRes.status === 429 && attempt < 5) {
+    await new Promise((r) => setTimeout(r, 12000));
+    return generateFlatKontext(imageUrl, prompt, token, attempt + 1);
   }
+  if (!createRes.ok || prediction.error) {
+    throw new Error('Kontext (' + createRes.status + '): ' + (prediction.detail || prediction.error || ''));
+  }
+  let result = prediction, tries = 0;
+  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 90) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    result = await pollRes.json();
+    tries++;
+  }
+  if (result.status !== 'succeeded') throw new Error('Kontext لم يكتمل');
+  let output = result.output;
+  output = Array.isArray(output) ? output[0] : output;
+  if (typeof output === 'string' && output.startsWith('http')) return output;
+  return null;
+}
 
+async function safeFlatKontext(imageUrl, prompt, token) {
+  try { return await generateFlatKontext(imageUrl, prompt, token); } catch (e) { return null; }
+}
+
+// ============================================================================
+// ============ توليد صور الخامات عبر FLUX 1.1 Pro (كما هو) =================
+// ============================================================================
+async function generateImage(prompt, aspectRatio, token, attempt = 0) {
+  const createRes = await fetch(REPLICATE_FLUX_URL, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
+    body: JSON.stringify({
+      input: { prompt, aspect_ratio: aspectRatio, output_format: 'jpg', output_quality: 95, safety_tolerance: 2 },
+    }),
+  });
+  const bodyText = await createRes.text();
+  let prediction;
+  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('رد غير متوقع من Replicate'); }
   if (createRes.status === 429 && attempt < 5) {
     await new Promise((r) => setTimeout(r, 12000));
     return generateImage(prompt, aspectRatio, token, attempt + 1);
   }
-  if (!createRes.ok) {
-    throw new Error('Replicate (' + createRes.status + ')');
-  }
-  if (prediction.error) {
-    throw new Error('Replicate: ' + prediction.error);
-  }
-
-  let result = prediction;
-  let tries = 0;
-  while (
-    result.status !== 'succeeded' &&
-    result.status !== 'failed' &&
-    result.status !== 'canceled' &&
-    tries < 60
-  ) {
+  if (!createRes.ok) throw new Error('Replicate (' + createRes.status + ')');
+  if (prediction.error) throw new Error('Replicate: ' + prediction.error);
+  let result = prediction, tries = 0;
+  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 60) {
     await new Promise((r) => setTimeout(r, 1500));
-    const pollRes = await fetch(
-      'https://api.replicate.com/v1/predictions/' + result.id,
-      { headers: { Authorization: 'Bearer ' + token } }
-    );
+    const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
     result = await pollRes.json();
     tries++;
   }
-  if (result.status !== 'succeeded') {
-    throw new Error('فشل توليد الصورة');
-  }
+  if (result.status !== 'succeeded') throw new Error('فشل توليد الصورة');
   let output = result.output;
   output = Array.isArray(output) ? output[0] : output;
-  // نقبل فقط روابط https المباشرة (تظهر في المتصفح)
-  if (typeof output === 'string' && output.startsWith('http')) {
-    return output;
-  }
+  if (typeof output === 'string' && output.startsWith('http')) return output;
   return null;
 }
 
-// توليد صورة مع تجاهل الفشل (لا نُسقط التيك باك كله لو فشلت صورة توضيحية)
 async function safeGenerate(prompt, aspect, token) {
-  try {
-    return await generateImage(prompt, aspect, token);
-  } catch (e) {
-    return null;
-  }
+  try { return await generateImage(prompt, aspect, token); } catch (e) { return null; }
 }
 
-// قواعد صناعية ثابتة يمشي عليها التحليل — مش قوالب جامدة، بل مرجع معايير
-// النموذج يستخرج خصائص القطعة من الصورة ويطبّق عليها هذه القواعد بشكل تكيّفي
+// ============================================================================
 const INDUSTRY_RULES = `
-معايير صناعية مرجعية لبناء التيك باك (طبّقها بذكاء حسب القطعة الفعلية في الصورة، لا تخترع أرقاماً عشوائية):
+معايير صناعية مرجعية لبناء التيك باك (طبّقها بذكاء حسب القطعة الفعلية، لا تخترع أرقاماً عشوائية):
 
-# نقاط القياس (POM) — تُختار حسب نوع القطعة وخصائصها:
-- الفساتين: طول الكتف، عرض الصدر (Bust)، عرض الخصر (Waist)، عرض الورك (Hip)، طول التنورة (Skirt Length)، الطول الكلي (Total Length HPS to hem)، فتحة الرقبة، عرض الكتف، محيط الإبط (Armhole)، طول الكم إن وُجد، عرض فتحة الكم.
-- الجاكيت/البليزر: عرض الصدر، عرض الخصر، عرض الذيل (Hem)، عرض الكتف (Across Shoulder)، طول الظهر (Center Back Length)، طول الكم، عرض الريفير (Lapel)، فتحة الرقبة.
-- البناطيل: محيط الخصر، محيط الورك، عرض الفخذ (Thigh), طول الساق الداخلي (Inseam)، طول الساق الخارجي (Outseam)، عرض أسفل الساق (Leg Opening), عمق المقعدة (Rise).
-- التنانير: محيط الخصر، محيط الورك، الطول الكلي، عرض الذيل.
-- التوب/البلوزة: عرض الصدر، عرض الخصر، الطول، عرض الكتف، طول الكم، فتحة الرقبة.
+# نقاط القياس (POM) — الحد الأدنى 27 نقطة لقطعة كاملة، اختَر المناسب لنوع القطعة:
+للفساتين الطويلة/السهرة: Center Front Length, Center Back Length, Side Seam Length, Bust Width, Top Edge Width Front, Top Edge Width Back, Waist Width, Waist Position, High Hip Width, Low Hip Width, Thigh Width, Knee Width, Flare Break Height, Hem Sweep Front, Hem Sweep Back, Train Length, Front Neckline Drop, Back Neckline Drop, Bodice Side Height, Cup Height, Bust Point to Bust Point, CB Zipper Length, Embellishment Depth, Overlay Start Height, Boning Length, Lining Length CF, Shoulder to Bust.
+لأنواع أخرى (بنطال/جاكيت/توب): استبدل بالنقاط المناسبة (Inseam, Outseam, Rise, Sleeve Length, Across Shoulder, Armhole...).
 
-# قواعد التدرّج (Grading) بين المقاسات (XS S M L XL) — قيم قياسية:
-- الفروقات الأفقية (صدر/خصر/ورك): تقريباً 4 سم بين كل مقاس (قابلة للتعديل حسب القطعة).
-- الأطوال: تقريباً 1-1.5 سم بين كل مقاس.
-- عرض الكتف: تقريباً 1 سم بين كل مقاس.
-
-# التفاوتات (Tolerance) القياسية:
-- القياسات الأفقية الكبيرة (صدر/خصر/ورك): ±1.0 سم
-- الأطوال: ±1.0 سم
-- التفاصيل الصغيرة (فتحات، جيوب): ±0.3 إلى ±0.5 سم
-
-# قائمة المواد (BOM) — العناصر الأساسية حسب القطعة:
-القماش الرئيسي، البطانة، الخيوط، السحابات/الأزرار، الحشوات إن لزم، الليبل، ليبل العناية، أي إكسسوارات خاصة بالتصميم.
-
-# تعليمات الخياطة: تسلسل منطقي حسب بناء القطعة الفعلي.
+# التدرّج (XS S M L XL): الأبعاد الأفقية ~1.2-1.5 سم بين المقاسات، الأطوال ~1 سم، التفاصيل الصغيرة ~0.3 سم.
+# التفاوتات: أفقي كبير ±0.6, أطوال ±1.0 إلى ±1.5, تفاصيل ±0.3 إلى ±0.5.
+# BOM: القماش الرئيسي، البطانة، الخيوط، السحابات/الأزرار، الحشوات، الليبلات، الإكسسوارات الخاصة.
+# تعليمات الخياطة: تسلسل منطقي حسب بناء القطعة (8 خطوات على الأقل).
 `;
 
 function extractText(content) {
   if (!Array.isArray(content)) return '';
-  const textBlock = content.find((b) => b.type === 'text');
-  return textBlock ? textBlock.text : '';
+  const t = content.find((b) => b.type === 'text');
+  return t ? t.text : '';
 }
 
-// يكتشف نوع الصورة الحقيقي من أول بايتات الملف (magic bytes)
-// بدل الاعتماد على الامتداد الذي يرسله المتصفح، لأنه قد يكون غير مطابق
 function detectImageType(buffer) {
   if (!buffer || buffer.length < 12) return 'image/jpeg';
-  // JPEG: FF D8 FF
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
-  // PNG: 89 50 4E 47
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png';
-  // GIF: 47 49 46
-  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'image/gif';
-  // WEBP: RIFF....WEBP
-  if (
-    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
-    buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
-  ) return 'image/webp';
-  // افتراضي آمن
+  if (buffer[0]===0xff && buffer[1]===0xd8 && buffer[2]===0xff) return 'image/jpeg';
+  if (buffer[0]===0x89 && buffer[1]===0x50 && buffer[2]===0x4e && buffer[3]===0x47) return 'image/png';
+  if (buffer[0]===0x47 && buffer[1]===0x49 && buffer[2]===0x46) return 'image/gif';
+  if (buffer[0]===0x52 && buffer[1]===0x49 && buffer[2]===0x46 && buffer[3]===0x46 &&
+      buffer[8]===0x57 && buffer[9]===0x45 && buffer[10]===0x42 && buffer[11]===0x50) return 'image/webp';
   return 'image/jpeg';
 }
 
 function safeJsonParse(raw) {
   let s = (raw || '').trim();
-  // إزالة أسوار الماركداون إن وُجدت
   s = s.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  // التقاط من أول قوس فتح لآخر قوس إغلاق
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) {
-    s = s.slice(start, end + 1);
-  }
+  const start = s.indexOf('{'), end = s.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) s = s.slice(start, end + 1);
   return JSON.parse(s);
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'مفتاح Claude غير مضبوط على الخادم' });
-  }
+  if (!apiKey) return res.status(500).json({ error: 'مفتاح Claude غير مضبوط على الخادم' });
   const replicateToken = process.env.REPLICATE_API_TOKEN;
 
   try {
     const form = formidable({ maxFileSize: 12 * 1024 * 1024 });
     const [fields, files] = await new Promise((resolve, reject) => {
-      form.parse(req, (err, flds, fls) => {
-        if (err) reject(err);
-        else resolve([flds, fls]);
-      });
+      form.parse(req, (err, flds, fls) => (err ? reject(err) : resolve([flds, fls])));
     });
 
     const getField = (f) => (Array.isArray(f) ? f[0] : f) || '';
@@ -269,114 +194,76 @@ export default async function handler(req, res) {
     const season = getField(fields.season);
     const extraNotes = getField(fields.notes);
 
-    const imageFile = files.image
-      ? Array.isArray(files.image)
-        ? files.image[0]
-        : files.image
-      : null;
-
-    if (!imageFile) {
-      return res.status(400).json({ error: 'لم تُرفع صورة التصميم' });
-    }
+    const imageFile = files.image ? (Array.isArray(files.image) ? files.image[0] : files.image) : null;
+    if (!imageFile) return res.status(400).json({ error: 'لم تُرفع صورة التصميم' });
 
     const imgBuffer = fs.readFileSync(imageFile.filepath);
     const base64 = imgBuffer.toString('base64');
-    // نكتشف النوع الحقيقي من محتوى الملف بدل الامتداد الذي يرسله المتصفح
     const mediaType = detectImageType(imgBuffer);
 
     const instruction = `أنتِ مصمِّمة تقنية (Technical Designer) خبيرة في إعداد التيك باك الاحترافي للمصانع.
 
-لديكِ صورة تصميم قطعة أزياء (قد تكون سكتش يدوي، أو صورة مولّدة بالذكاء الاصطناعي، أو صورة قطعة حقيقية). حلّلي الصورة بدقة عالية جداً، واستخرجي منها كل الخصائص الفعلية للقطعة (نوعها، القصّة، وجود الأكمام وطولها، الطول العام، فتحة الرقبة، الياقة، الجيوب، السحابات، التفاصيل الزخرفية).
+لديكِ صورة تصميم قطعة أزياء. حلّليها بدقة عالية جداً واستخرجي كل خصائص القطعة الفعلية (نوعها، القصّة، السيلويت، الرقبة، الأكمام، الطول، التفاصيل الزخرفية، السحابات).
 
-ثم ابني تيك باك كامل احترافي مبني على القطعة الفعلية في الصورة، مطبّقةً المعايير الصناعية المرجعية التالية بشكل تكيّفي (لا تخترعي أرقاماً عشوائية — استخدمي المعايير القياسية واضبطيها حسب خصائص القطعة الظاهرة):
+ثم ابني تيك باك كامل احترافي مبني على القطعة الفعلية، مطبّقةً المعايير التالية بشكل تكيّفي (لا أرقام عشوائية):
 
 ${INDUSTRY_RULES}
 
 معلومات إضافية من المصممة:
-- اسم القطعة/التصميم: ${garmentName || 'استنتجيه من الصورة'}
-- مواصفات القماش التي حددتها المصممة: ${fabricInfo || 'اقترحي خامات منطقية حسب التصميم، ووضّحي أنها اقتراح'}
+- اسم القطعة: ${garmentName || 'استنتجيه من الصورة'}
+- مواصفات القماش: ${fabricInfo || 'اقترحي خامات منطقية حسب التصميم، ووضّحي أنها اقتراح'}
 - الموسم: ${season || 'غير محدد'}
 - ملاحظات: ${extraNotes || 'لا يوجد'}
 
-أرجعي النتيجة بصيغة JSON فقط (بدون أي نص قبله أو بعده، بدون أسوار ماركداون)، بهذا الشكل تماماً:
+أرجعي النتيجة JSON فقط (بدون أي نص أو أسوار ماركداون)، بهذا الشكل:
 
 {
-  "styleCode": "كود ستايل احترافي مثل STY-XXXXX",
-  "garmentName": "اسم القطعة بالإنجليزية",
-  "garmentNameAr": "اسم القطعة بالعربية",
+  "styleCode": "STY-XXXXX",
+  "garmentName": "الاسم بالإنجليزية",
+  "garmentNameAr": "الاسم بالعربية",
   "category": "الفئة بالإنجليزية",
   "season": "الموسم",
-  "description": "وصف دقيق للقطعة كما ظهرت في الصورة (بالعربية، سطرين)",
-  "silhouette": "وصف السيلويت والقصّة بالإنجليزية",
-  "garmentInfo": { "type": "نوع القطعة بالإنجليزية", "silhouette": "وصف السيلويت", "construction": "وصف البناء العام" },
-  "sampleSize": "المقاس الأساسي مثل M",
+  "sampleSize": "M",
+  "description": "وصف دقيق للقطعة (بالعربية، سطرين)",
+  "silhouette": "وصف السيلويت بالإنجليزية",
+  "garmentInfo": { "type": "النوع", "silhouette": "السيلويت", "construction": "البناء", "neckline": "نوع الرقبة" },
+  "flatSketchPrompt": "برومبت إنجليزي دقيق لتحويل الصورة إلى رسمة فلات تقنية عبر image-to-image. صِفي القطعة الفعلية بدقة داخله. استخدمي هذه الصياغة مع تعديل الوصف: 'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing). Remove the model and body completely, show only the [garment description] as a flat lay garment. Thin uniform black outlines on pure white background, front view, no shading, no color, no fill, keep the exact same silhouette, neckline, seams and construction details as the original garment. Technical apparel production drawing, minimal, precise, vector style. No text, no arrows, no measurements, no watermark.'",
   "measurements": [
-    { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "tolerance": "±X.X", "sizes": { "XS": 0, "S": 0, "M": 0, "L": 0, "XL": 0 } }
+    { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "tolerance": "±X.X", "sizes": { "XS":0,"S":0,"M":0,"L":0,"XL":0 } }
   ],
-  "bom": [
-    { "item": "اسم المادة بالإنجليزية", "description": "وصف", "placement": "مكان الاستخدام", "qty": "الكمية", "unit": "الوحدة" }
-  ],
-  "materials": [
-    { "name": "اسم الخامة", "type": "نوعها", "notes": "ملاحظات (وزن GSM تقديري إن أمكن، مع الإشارة أنه تقديري)" }
-  ],
-  "construction": [
-    { "section": "القسم بالإنجليزية", "detail": "نوع التفصيل", "description": "الوصف بالإنجليزية" }
-  ],
-  "sewingSteps": [
-    "خطوة الخياطة 1 بالإنجليزية",
-    "خطوة الخياطة 2 بالإنجليزية"
-  ],
-  "colorway": [
-    { "part": "الجزء", "pantone": "كود Pantone تقديري", "hex": "#XXXXXX" }
-  ],
-  "artwork": [
-    { "name": "اسم العنصر مثل Main Label", "placement": "مكانه", "size": "قياسه التقديري", "notes": "ملاحظات" }
-  ],
-  "detailViews": [
-    { "area": "المنطقة بالإنجليزية مثل Neckline / Cuff / Pocket", "detail": "وصف التفصيل الإنشائي بالإنجليزية", "spec": "مواصفة تقنية أو قياس تقديري" }
-  ],
-  "labelPlacement": [
-    { "label": "اسم الليبل بالإنجليزية مثل Main Brand Label", "location": "المكان الدقيق على القطعة", "size": "القياس التقديري", "method": "طريقة التثبيت مثل Woven / Printed / Heat-seal" }
-  ],
-  "flatSketchPrompt": "برومبت إنجليزي مفصّل لتوليد رسمة تقنية عبر Recraft vector. صف القطعة الفعلية بدقة، واطلب أسهم قياس بأحرف مرجعية. استخدم هذه الصياغة مع تعديل وصف القطعة: 'Technical fashion flat sketch of a [garment description], FRONT view and BACK view side by side. Thin clean black vector outlines on plain white background, flat design, no color, no shading. Add measurement dimension lines with double-headed arrows at bust, waist, hip, length and hem, each arrow labeled with a small circled reference letter A B C D E F. Apparel production CAD technical drawing, precise minimal uniform stroke weight.'",
-  "materialSwatches": [
-    { "name": "اسم الخامة", "swatchPrompt": "برومبت إنجليزي لصورة قريبة جداً (close-up macro) لعينة القماش/الخامة. مهم جداً: اذكري اللون الدقيق للخامة كما هو في التصميم الفعلي صراحةً في بداية البرومبت (مثلاً 'emerald green silk chiffon fabric swatch'). لا تتركي اللون للصدفة. fabric swatch macro photography, soft even studio lighting" }
-  ]
+  "materials": [ { "name": "الخامة", "type": "النوع", "notes": "ملاحظات مع GSM تقديري" } ],
+  "bom": [ { "item": "المادة", "description": "وصف", "placement": "المكان", "qty": "الكمية", "unit": "الوحدة" } ],
+  "construction": [ { "section": "القسم", "detail": "التفصيل", "description": "الوصف" } ],
+  "detailViews": [ { "area": "المنطقة", "detail": "التفصيل الإنشائي", "spec": "المواصفة/القياس" } ],
+  "labelPlacement": [ { "label": "اسم الليبل", "location": "المكان", "size": "القياس", "method": "الطريقة" } ],
+  "colorway": [ { "part": "الجزء", "pantone": "كود Pantone", "hex": "#XXXXXX" } ],
+  "artwork": [ { "name": "العنصر", "placement": "المكان", "size": "القياس", "notes": "ملاحظات" } ],
+  "sewingSteps": [ "خطوة 1", "... (8 خطوات على الأقل)" ],
+  "materialSwatches": [ { "name": "الخامة", "swatchPrompt": "برومبت إنجليزي لصورة ماكرو قريبة للخامة. اذكري اللون الدقيق صراحةً في البداية مثل 'emerald green silk chiffon'. fabric swatch macro photography, soft even studio lighting" } ]
 }
 
 مهم جداً:
-- القياسات لازم تكون منطقية ومتدرّجة بشكل صحيح بين المقاسات.
-- كل الأقسام مطلوبة وممتلئة بمحتوى حقيقي مبني على الصورة.
-- مهم جداً: لا تضيفي أي خامة لم تذكرها المصممة صراحةً في مواصفات القماش. اعتمدي فقط على ما ذكرته. إن كان التصميم يحتاج خامة إنشائية أساسية غير مذكورة (مثل خيط)، أضيفيها فقط إن كانت ضرورية جداً وبدون مبالغة.
-- استخدمي أكواد Pantone و Hex منطقية للألوان الظاهرة في التصميم فعلاً.
-- flatSketchPrompt و materialSwatches ضروريان لتوليد الرسومات التوضيحية — اكتبيهما بدقة تصف القطعة والخامات الفعلية.
-- materialSwatches: عنصر واحد لكل خامة رئيسية (بحد أقصى 4 خامات).
-- كل نقطة قياس لها رمز حرفي متسلسل (A, B, C, D...) في حقل code — هذه الرموز تُطابق الأسهم على الرسمة التقنية مع صفوف جدول القياسات (معيار صناعي).`;
+- 27 نقطة قياس على الأقل، متدرّجة منطقياً.
+- flatSketchPrompt ضروري جداً — صِفي القطعة الفعلية بدقة داخله ليطلع الفلات مطابقاً.
+- لا تضيفي أي خامة لم تذكرها المصممة صراحةً إن حدّدت خامات.
+- materialSwatches: عنصر واحد لكل خامة رئيسية (بحد أقصى 4).
+- كل الأقسام ممتلئة بمحتوى حقيقي مبني على الصورة.`;
 
     const payload = {
       model: MODEL,
       max_tokens: 128000,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType, data: base64 },
-            },
-            { type: 'text', text: instruction },
-          ],
-        },
-      ],
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: instruction },
+        ],
+      }],
     };
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify(payload),
     });
 
@@ -387,35 +274,31 @@ ${INDUSTRY_RULES}
 
     const data = await response.json();
     const raw = extractText(data.content);
-
     let techpack;
-    try {
-      techpack = safeJsonParse(raw);
-    } catch (e) {
-      return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
-    }
+    try { techpack = safeJsonParse(raw); }
+    catch (e) { return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' }); }
 
     techpack.brandName = brandName;
     techpack.generatedAt = new Date().toISOString();
 
-    // توليد الرسومات التوضيحية عبر Replicate (رسمة تقنية + صور خامات)
-    // نولّدها بالتوازي مع تجاهل الفشل حتى لا يسقط التيك باك كله
     if (replicateToken) {
-      const STYLE = 'professional fashion technical documentation, high quality, clean, 8k';
-      const NO_TEXT = 'no text, no letters, no words, no watermark';
-
       const jobs = [];
 
-      // الرسمة التقنية المسطّحة عبر Qwen: تحويل صورة القطعة الفعلية إلى رسمة مطابقة
-      const flatInstruction =
-        'Convert this garment into a clean professional technical flat sketch (fashion CAD flat drawing). Show the garment FRONT view and BACK view side by side, on a plain white background. Use thin clean black outlines only, no model, no body, keep the exact same garment shape, silhouette, seams, neckline, and construction details as the original. Flat technical apparel drawing style, no shading, no arrows, no measurements, no text.';
-      // نرفع الصورة لـ Replicate أولاً للحصول على رابط (base64 محدود بـ1MB وصورة التصميم أكبر)
+      // ===== الرسمة الفلات عبر Kontext =====
+      const defaultFlatPrompt =
+        'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing). ' +
+        'Remove the model and body completely, show only the garment as a flat lay. ' +
+        'Thin uniform black outlines on pure white background, front view, no shading, no color, no fill, ' +
+        'keep the exact same silhouette, neckline, seams and construction details as the original garment. ' +
+        'Technical apparel production drawing, minimal, precise, vector style. No text, no arrows, no measurements, no watermark.';
+      const flatPrompt = (techpack.flatSketchPrompt && techpack.flatSketchPrompt.length > 40)
+        ? techpack.flatSketchPrompt : defaultFlatPrompt;
       jobs.push(
         (async () => {
           try {
             const imgUrl = await uploadToReplicate(imgBuffer, mediaType, replicateToken);
             if (imgUrl) {
-              techpack.flatSketchImage = await safeFlatSketch(imgUrl, flatInstruction, replicateToken);
+              techpack.flatSketchImage = await safeFlatKontext(imgUrl, flatPrompt, replicateToken);
             }
           } catch (e) {
             techpack.flatSketchImage = null;
@@ -423,30 +306,20 @@ ${INDUSTRY_RULES}
         })()
       );
 
-      // صور الخامات (بحد أقصى 4)
-      // نبني تلميح لون من ألوان التصميم لمنع انحراف اللون في الخامات
+      // ===== صور الخامات عبر FLUX =====
+      const STYLE = 'professional fashion technical documentation, high quality, clean, 8k';
+      const NO_TEXT = 'no text, no letters, no words, no watermark';
       const paletteHint = Array.isArray(techpack.colorway) && techpack.colorway.length
-        ? 'garment color palette: ' + techpack.colorway.map((c) => (c.part || '') + ' ' + (c.hex || '')).join(', ') + '. '
+        ? 'garment color palette: ' + techpack.colorway.map((c) => (c.part||'')+' '+(c.hex||'')).join(', ') + '. '
         : '';
-      const swatches = Array.isArray(techpack.materialSwatches)
-        ? techpack.materialSwatches.slice(0, 4)
-        : [];
-      techpack.swatchImages = [];
+      const swatches = Array.isArray(techpack.materialSwatches) ? techpack.materialSwatches.slice(0,4) : [];
       const swatchResults = new Array(swatches.length);
       swatches.forEach((sw, i) => {
         if (sw && sw.swatchPrompt) {
           jobs.push(
             new Promise((r) => setTimeout(r, i * 1000))
-              .then(() =>
-                safeGenerate(
-                  `${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`,
-                  '1:1',
-                  replicateToken
-                )
-              )
-              .then((url) => {
-                swatchResults[i] = { name: sw.name || '', url };
-              })
+              .then(() => safeGenerate(`${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken))
+              .then((url) => { swatchResults[i] = { name: sw.name || '', url }; })
           );
         }
       });
