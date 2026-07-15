@@ -275,7 +275,7 @@ ${INDUSTRY_RULES}
     };
 
     const claudeController = new AbortController();
-    const claudeTimer = setTimeout(() => claudeController.abort(), 75000);
+    const claudeTimer = setTimeout(() => claudeController.abort(), 100000);
     let response;
     try {
       response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -307,35 +307,27 @@ ${INDUSTRY_RULES}
     if (replicateToken) {
       const jobs = [];
 
-      // ===== الرسمة الفلات (أمامي + خلفي) عبر Kontext =====
+      // ===== الرسمة الفلات (أمامي + خلفي في صورة واحدة) عبر Kontext =====
+      // استدعاء واحد يُخرج الأمامي والخلفي جنب بعض — نحصل على العرضين معاً
+      // دون استدعاءين، فلا تأخير ولا حذف لأي جزء.
       const defaultFront =
-        'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing), FRONT view. ' +
-        'Remove the model and body completely, show only the garment as a flat lay. ' +
+        'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing) showing BOTH the FRONT view and the BACK view side by side on the same sheet. ' +
+        'Front view on the left, back view on the right (showing the back closure/zipper, back neckline and back seams). ' +
+        'Remove the model and body completely, show only the garment as flat lay drawings. ' +
         'Thin uniform black outlines on pure white background, no shading, no color, no fill, ' +
         'keep the exact same silhouette, neckline, seams and construction details. ' +
         'Technical apparel production drawing, minimal, precise, vector style. No text, no arrows, no measurements, no watermark.';
-      const defaultBack =
-        'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing), BACK view of the same garment. ' +
-        'Show the back closure (zipper), back neckline and back seams. Remove the model and body completely, flat lay. ' +
-        'Thin uniform black outlines on pure white background, no shading, no color. Keep the exact same silhouette. ' +
-        'Technical apparel production drawing, minimal, precise. No text, no arrows, no measurements, no watermark.';
       const frontPrompt = (techpack.flatSketchPromptFront && techpack.flatSketchPromptFront.length > 40)
         ? techpack.flatSketchPromptFront : defaultFront;
-      const backPrompt = (techpack.flatSketchPromptBack && techpack.flatSketchPromptBack.length > 40)
-        ? techpack.flatSketchPromptBack : defaultBack;
 
-      // نرفع الصورة مرة واحدة، ثم نولّد الأمامي والخلفي
+      // نرفع الصورة مرة واحدة ثم نولّد الرسمة (أمامي+خلفي) باستدعاء واحد
       let uploadedUrl = null;
-      try { uploadedUrl = await uploadToReplicate(imgBuffer, mediaType, replicateToken); } catch (e) { uploadedUrl = null; }
+      try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 20000); } catch (e) { uploadedUrl = null; }
 
       if (uploadedUrl) {
         jobs.push(
-          withTimeout(safeFlatKontext(uploadedUrl, frontPrompt, replicateToken), 130000)
+          withTimeout(safeFlatKontext(uploadedUrl, frontPrompt, replicateToken), 140000)
             .then((u) => { techpack.flatSketchFront = u; if (u) techpack.flatSketchImage = u; })
-        );
-        jobs.push(
-          withTimeout(safeFlatKontext(uploadedUrl, backPrompt, replicateToken), 130000)
-            .then((u) => { techpack.flatSketchBack = u; })
         );
       }
 
@@ -354,13 +346,13 @@ ${INDUSTRY_RULES}
             withTimeout(
               new Promise((r) => setTimeout(r, i * 800))
                 .then(() => safeGenerate(`${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken)),
-              110000
+              95000
             ).then((url) => { swatchResults[i] = { name: sw.name || '', url }; })
           );
         }
       });
 
-      // صور تكبير الأجزاء (Detailed Views) — 3 كحد أقصى لتقليل التكلفة والوقت
+      // صور تكبير الأجزاء (Detailed Views) — تعمل بالتوازي مع الرسمة (FLUX سريع)
       const details = Array.isArray(techpack.detailViews) ? techpack.detailViews.slice(0,3) : [];
       details.forEach((dv, i) => {
         if (dv && dv.zoomPrompt) {
@@ -368,17 +360,16 @@ ${INDUSTRY_RULES}
             withTimeout(
               new Promise((r) => setTimeout(r, (i + 4) * 700))
                 .then(() => safeGenerate(`${dv.zoomPrompt}. ${paletteHint}Use the exact garment color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken)),
-              110000
+              90000
             ).then((url) => { if (url) techpack.detailViews[i].image = url; })
           );
         }
       });
 
-      // ضمان عدم الانقطاع: مهلة قصوى إجمالية 200 ثانية (هامش آمن تحت سقف Vercel 300).
-      // كل مهمة ملفوفة بمهلتها الخاصة، وأي فشل يرجّع null بدل تعليق أو خطأ.
-      const BUDGET_MS = 200000;
-      const budget = new Promise((resolve) => setTimeout(resolve, BUDGET_MS));
-      await Promise.race([Promise.allSettled(jobs), budget]);
+      // ننتظر كل مهام الصور حتى تكتمل فعلياً (بدون Promise.race الذي يترك
+      // مهام تعمل في الخلفية وتستهلك رصيداً بعد إرجاع الرد). كل مهمة ملفوفة
+      // بمهلتها الخاصة، فلا شيء يعلّق، ولا يُصرف رصيد على شيء لن يرجع في الرد.
+      await Promise.allSettled(jobs);
       techpack.swatchImages = swatchResults.filter((s) => s && s.url);
     }
 
