@@ -264,7 +264,8 @@ ${INDUSTRY_RULES}
 
     const payload = {
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: 10000,
+      stream: true,
       messages: [{
         role: 'user',
         content: [
@@ -274,9 +275,11 @@ ${INDUSTRY_RULES}
       }],
     };
 
-    const claudeController = new AbortController();
-    const claudeTimer = setTimeout(() => claudeController.abort(), 100000);
+    // نستخدم streaming: يبقي الاتصال حيّاً أثناء التحليل الطويل (لا انقطاع socket)،
+    // ونجمّع النص أثناء وصوله. مهلة أمان إجمالية 180 ثانية.
     let response;
+    const claudeController = new AbortController();
+    const claudeTimer = setTimeout(() => claudeController.abort(), 180000);
     try {
       response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -288,15 +291,44 @@ ${INDUSTRY_RULES}
       clearTimeout(claudeTimer);
       return res.status(500).json({ error: 'انتهت مهلة تحليل التصميم، حاولي مرة ثانية' });
     }
-    clearTimeout(claudeTimer);
 
     if (!response.ok) {
+      clearTimeout(claudeTimer);
       const errText = await response.text();
       return res.status(500).json({ error: 'فشل تحليل التصميم: ' + errText.slice(0, 200) });
     }
 
-    const data = await response.json();
-    const raw = extractText(data.content);
+    // قراءة تدفّق الأحداث (SSE) وتجميع نص الرد
+    let raw = '';
+    try {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t.startsWith('data:')) continue;
+          const payloadStr = t.slice(5).trim();
+          if (!payloadStr || payloadStr === '[DONE]') continue;
+          try {
+            const evt = JSON.parse(payloadStr);
+            if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
+              raw += evt.delta.text;
+            }
+          } catch (e) { /* تجاهل أسطر غير مكتملة */ }
+        }
+      }
+    } catch (e) {
+      clearTimeout(claudeTimer);
+      return res.status(500).json({ error: 'انقطع تحليل التصميم أثناء الاستلام، حاولي مرة ثانية' });
+    }
+    clearTimeout(claudeTimer);
+
     let techpack;
     try { techpack = safeJsonParse(raw); }
     catch (e) { return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' }); }
@@ -304,6 +336,10 @@ ${INDUSTRY_RULES}
     techpack.brandName = brandName;
     techpack.generatedAt = new Date().toISOString();
 
+    // توليد الصور محاط بحماية كاملة: أي خطأ هنا لا يُسقط التيك باك (500)،
+    // بل يرجّع التيك باك بالنصوص والجداول + ما اكتمل من صور. التحليل نجح =
+    // النتيجة تصل دائماً، فلا يضيع رصيد Claude المدفوع.
+    try {
     if (replicateToken) {
       const jobs = [];
 
@@ -372,9 +408,15 @@ ${INDUSTRY_RULES}
       await Promise.allSettled(jobs);
       techpack.swatchImages = swatchResults.filter((s) => s && s.url);
     }
+    } catch (imgErr) {
+      // خطأ في مرحلة الصور لا يُسقط التيك باك — نرجّعه بما توفّر.
+      console.error('IMAGE_PHASE_ERROR:', imgErr && imgErr.message, imgErr && imgErr.stack);
+      if (!Array.isArray(techpack.swatchImages)) techpack.swatchImages = [];
+    }
 
     return res.status(200).json(techpack);
   } catch (error) {
+    console.error('HANDLER_ERROR:', error && error.message, error && error.stack);
     return res.status(500).json({ error: 'خطأ في الخادم: ' + (error.message || 'غير معروف') });
   }
 }
