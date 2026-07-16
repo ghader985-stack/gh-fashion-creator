@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, createContext, useContext } from 'react';
 import Head from 'next/head';
 
 export default function Home() {
@@ -797,6 +797,8 @@ export default function Home() {
   );
 }
 // ===== بناء برومبتات المحتوى والفيديو =====
+const TpMetaContext = createContext({});
+
 function buildMarketingPrompt(platform, tone, text, hasImage) {
   const imageContext = hasImage ? '\n\nصورة مرفقة — حللها بدقة واستخدميها كمرجع أساسي.' : '';
   const textContext = text ? `\n\nوصف المنتج: ${text}` : '';
@@ -871,19 +873,31 @@ function buildVideoPrompt(videoType, mood, text, hasImage) {
 
 // ===== عرض التيك باك (نفس هيكل Adstronaut، كل قسم بلوك مستقل) =====
 function TechpackView({ tp, preview }) {
+  const meta = {
+    styleCode: tp.styleCode,
+    garmentName: tp.garmentName,
+    season: tp.season,
+    sampleSize: tp.sampleSize,
+    category: tp.category,
+    brandName: tp.brandName,
+    version: 'v0',
+    date: (tp.generatedAt || '').slice(0, 10),
+    preview,
+  };
   return (
+    <TpMetaContext.Provider value={meta}>
     <div id="techpack-canvas" className="tp">
-      {/* رأس */}
-      <div className="tp-head">
-        <div className="tp-head-left">
-          {preview ? <img src={preview} alt="design" className="tp-thumb" crossOrigin="anonymous" /> : <div className="tp-thumb ph"></div>}
+      {/* غلاف */}
+      <div className="tp-cover">
+        <div className="tp-cover-left">
+          {preview ? <img src={preview} alt="design" className="tp-cover-thumb" crossOrigin="anonymous" /> : <div className="tp-cover-thumb ph"></div>}
           <div>
             <div className="tp-code">{tp.styleCode}</div>
             <div className="tp-name">{tp.garmentName} <span className="tp-name-ar">/ {tp.garmentNameAr}</span></div>
             <div className="tp-meta">Season: {tp.season} · Category: {tp.category} · Sample: {tp.sampleSize}</div>
           </div>
         </div>
-        <div className="tp-head-right">
+        <div className="tp-cover-right">
           <div className="tp-brand">{tp.brandName}</div>
           <div className="tp-desc">{tp.description}</div>
         </div>
@@ -1126,18 +1140,39 @@ function TechpackView({ tp, preview }) {
 
       <div className="tp-foot">{tp.brandName} · Technical Package</div>
     </div>
+    </TpMetaContext.Provider>
   );
 }
 
 function TpSection({ n, title, subtitle, children }) {
+  const meta = useContext(TpMetaContext);
   return (
-    <div className="tp-section">
-      <div className="tp-section-head">
-        {n && <span className="tp-section-n">{n}</span>}
-        <span className="tp-section-title ltr">{title}</span>
-        <span className="tp-section-sub">{subtitle}</span>
+    <div className="tp-page">
+      <div className="tp-page-head">
+        <div className="tp-page-head-left">
+          {meta.preview ? <img src={meta.preview} alt="" className="tp-page-thumb" crossOrigin="anonymous" /> : <div className="tp-page-thumb ph"></div>}
+          <div className="tp-page-id">
+            <div className="tp-page-code">{meta.styleCode}</div>
+            <div className="tp-page-name">{meta.garmentName}</div>
+            <div className="tp-page-sub">Season: {meta.season} · Sample: {meta.sampleSize}</div>
+            <div className="tp-page-sub">Category: {meta.category}</div>
+          </div>
+        </div>
+        <div className="tp-page-head-center">
+          <div className="tp-page-title ltr">{title}</div>
+          <div className="tp-page-title-ar">{subtitle}</div>
+        </div>
+        <div className="tp-page-head-right">
+          <div className="tp-page-ver">{meta.version || 'v0'}</div>
+          <div className="tp-page-num">{n ? 'Page ' + n : ''}</div>
+          <div className="tp-page-date">{(meta.date || '')}</div>
+          <div className="tp-page-brand">{meta.brandName}</div>
+        </div>
       </div>
-      {children}
+      <div className="tp-page-rule"></div>
+      <div className="tp-page-body">
+        {children}
+      </div>
     </div>
   );
 }
@@ -1440,9 +1475,35 @@ function StyleBlock() {
       .platform-note { color: var(--ink-soft); font-size: 0.85rem; text-align: left; }
 
       /* ===== التيك باك ===== */
-      .tp { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 2.6rem; box-shadow: 0 20px 60px rgba(0,0,0,0.08); }
-      .tp-head { display: flex; justify-content: space-between; gap: 2rem; border-bottom: 2px solid var(--ink); padding-bottom: 1.4rem; margin-bottom: 2rem; flex-wrap: wrap; }
-      .tp-head-left { display: flex; gap: 1rem; align-items: flex-start; }
+      .tp { background: #e8e8ea; border-radius: 8px; padding: 1.4rem; box-shadow: 0 20px 60px rgba(0,0,0,0.08); }
+
+      /* غلاف */
+      .tp-cover { background: #fff; border-radius: 6px; padding: 2rem 2.2rem; display: flex; justify-content: space-between; gap: 2rem; border-bottom: 3px solid var(--ink); margin-bottom: 1.4rem; flex-wrap: wrap; box-shadow: 0 4px 16px rgba(0,0,0,0.05); }
+      .tp-cover-left { display: flex; gap: 1rem; align-items: flex-start; }
+      .tp-cover-thumb { width: 92px; height: 92px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+      .tp-cover-thumb.ph { background: var(--cream-2); }
+      .tp-cover-right { text-align: left; max-width: 340px; }
+
+      /* صفحة مستقلة لكل قسم — بنفس تنسيق النموذج */
+      .tp-page { background: #fff; border-radius: 6px; padding: 1.8rem 2rem; margin-bottom: 1.2rem; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+      .tp-page-head { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 1rem; align-items: start; }
+      .tp-page-head-left { display: flex; gap: 0.7rem; align-items: flex-start; }
+      .tp-page-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); flex-shrink: 0; }
+      .tp-page-thumb.ph { background: var(--cream-2); }
+      .tp-page-code { font-family: 'Cormorant Garamond', serif; font-weight: 700; font-size: 0.82rem; letter-spacing: 0.5px; color: var(--ink); direction: ltr; text-align: left; }
+      .tp-page-name { font-size: 0.72rem; font-weight: 700; color: var(--ink); direction: ltr; text-align: left; line-height: 1.2; margin-top: 1px; }
+      .tp-page-sub { font-size: 0.62rem; color: var(--ink-soft); direction: ltr; text-align: left; }
+      .tp-page-head-center { text-align: center; }
+      .tp-page-title { font-family: 'Cormorant Garamond', serif; font-size: 1.15rem; font-weight: 700; letter-spacing: 2px; color: var(--ink); }
+      .tp-page-title-ar { font-size: 0.7rem; color: var(--gold-deep); margin-top: 2px; }
+      .tp-page-head-right { text-align: right; }
+      .tp-page-ver { font-size: 0.7rem; font-weight: 700; color: var(--ink); }
+      .tp-page-num { font-size: 0.68rem; color: var(--ink-soft); }
+      .tp-page-date { font-size: 0.62rem; color: var(--ink-soft); }
+      .tp-page-brand { font-size: 0.62rem; color: var(--gold-deep); font-family: 'Cormorant Garamond', serif; }
+      .tp-page-rule { height: 2px; background: var(--ink); margin: 0.7rem 0 1.4rem; }
+      .tp-page-body { min-height: 40px; }
+      @media (max-width: 700px) { .tp-page-head { grid-template-columns: 1fr; gap: 0.4rem; } .tp-page-head-center, .tp-page-head-right { text-align: right; } }
       .tp-thumb { width: 88px; height: 88px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
       .tp-thumb.ph { background: var(--cream-2); }
       .tp-code { font-family: 'Cormorant Garamond', serif; color: var(--gold-deep); font-weight: 700; letter-spacing: 1px; direction: ltr; }
