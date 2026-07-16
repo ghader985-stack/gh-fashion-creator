@@ -387,7 +387,6 @@ ${INDUSTRY_RULES}
     let techpack;
     try { techpack = safeJsonParse(raw); }
     catch (e) {
-      console.error('JSON_PARSE_FAIL:', 'rawLen=' + (raw ? raw.length : 0), 'tail=' + (raw ? raw.slice(-200) : ''));
       return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
     }
 
@@ -399,11 +398,15 @@ ${INDUSTRY_RULES}
     // النتيجة تصل دائماً، فلا يضيع رصيد Claude المدفوع.
     try {
     if (replicateToken) {
-      const jobs = [];
 
-      // ===== الرسمة الفلات (أمامي + خلفي في صورة واحدة) عبر Kontext =====
-      // استدعاء واحد يُخرج الأمامي والخلفي جنب بعض — نحصل على العرضين معاً
-      // دون استدعاءين، فلا تأخير ولا حذف لأي جزء.
+      const STYLE = 'professional fashion technical documentation, high quality, clean, 8k';
+      const NO_TEXT = 'no text, no letters, no words, no watermark';
+      const paletteHint = Array.isArray(techpack.colorway) && techpack.colorway.length
+        ? 'garment color palette: ' + techpack.colorway.map((c) => (c.part||'')+' '+(c.hex||'')).join(', ') + '. '
+        : '';
+      const gap = () => new Promise((r) => setTimeout(r, 1200)); // فاصل بين الطلبات لتفادي 429
+
+      // ===== 1) الرسمة الفلات (أمامي + خلفي) عبر Kontext =====
       const defaultFront =
         'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing) showing BOTH the FRONT view and the BACK view side by side on the same sheet. ' +
         'Front view on the left, back view on the right (showing the back closure/zipper, back neckline and back seams). ' +
@@ -414,67 +417,50 @@ ${INDUSTRY_RULES}
       const frontPrompt = (techpack.flatSketchPromptFront && techpack.flatSketchPromptFront.length > 40)
         ? techpack.flatSketchPromptFront : defaultFront;
 
-      // نرفع الصورة مرة واحدة ثم نولّد الرسمة (أمامي+خلفي) باستدعاء واحد
       let uploadedUrl = null;
       try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 20000); } catch (e) { uploadedUrl = null; }
 
       if (uploadedUrl) {
-        jobs.push(
-          withTimeout(safeFlatKontext(uploadedUrl, frontPrompt, replicateToken), 140000)
-            .then((u) => { techpack.flatSketchFront = u; if (u) techpack.flatSketchImage = u; })
-        );
+        const u = await withTimeout(safeFlatKontext(uploadedUrl, frontPrompt, replicateToken), 110000);
+        if (u) { techpack.flatSketchFront = u; techpack.flatSketchImage = u; }
       }
 
-      // ===== صور الخامات + صور التكبير (Detailed Views) عبر FLUX =====
-      const STYLE = 'professional fashion technical documentation, high quality, clean, 8k';
-      const NO_TEXT = 'no text, no letters, no words, no watermark';
-      const paletteHint = Array.isArray(techpack.colorway) && techpack.colorway.length
-        ? 'garment color palette: ' + techpack.colorway.map((c) => (c.part||'')+' '+(c.hex||'')).join(', ') + '. '
-        : '';
-
+      // ===== 2) صور الخامات — واحدة تلو الأخرى (تفادي 429) =====
       const swatches = Array.isArray(techpack.materialSwatches) ? techpack.materialSwatches.slice(0,4) : [];
-      const swatchResults = new Array(swatches.length);
-      swatches.forEach((sw, i) => {
+      const swatchResults = [];
+      for (const sw of swatches) {
         if (sw && sw.swatchPrompt) {
-          jobs.push(
-            withTimeout(
-              new Promise((r) => setTimeout(r, i * 800))
-                .then(() => safeGenerate(`${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken)),
-              95000
-            ).then((url) => { swatchResults[i] = { name: sw.name || '', url }; })
+          await gap();
+          const url = await withTimeout(
+            safeGenerate(`${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken),
+            70000
           );
+          if (url) swatchResults.push({ name: sw.name || '', url });
         }
-      });
+      }
+      techpack.swatchImages = swatchResults;
 
-      // صور تكبير الأجزاء (Detailed Views) — تعمل بالتوازي مع الرسمة (FLUX سريع)
-      const details = Array.isArray(techpack.detailViews) ? techpack.detailViews.slice(0,3) : [];
-      details.forEach((dv, i) => {
+      // ===== 3) صور تكبير الأجزاء — واحدة تلو الأخرى =====
+      const details = Array.isArray(techpack.detailViews) ? techpack.detailViews.slice(0,2) : [];
+      for (let i = 0; i < details.length; i++) {
+        const dv = details[i];
         if (dv && dv.zoomPrompt) {
-          jobs.push(
-            withTimeout(
-              new Promise((r) => setTimeout(r, (i + 4) * 700))
-                .then(() => safeGenerate(`${dv.zoomPrompt}. ${paletteHint}Use the exact garment color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken)),
-              90000
-            ).then((url) => { if (url) techpack.detailViews[i].image = url; })
+          await gap();
+          const url = await withTimeout(
+            safeGenerate(`${dv.zoomPrompt}. ${paletteHint}Use the exact garment color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken),
+            70000
           );
+          if (url) techpack.detailViews[i].image = url;
         }
-      });
-
-      // ننتظر كل مهام الصور حتى تكتمل فعلياً (بدون Promise.race الذي يترك
-      // مهام تعمل في الخلفية وتستهلك رصيداً بعد إرجاع الرد). كل مهمة ملفوفة
-      // بمهلتها الخاصة، فلا شيء يعلّق، ولا يُصرف رصيد على شيء لن يرجع في الرد.
-      await Promise.allSettled(jobs);
-      techpack.swatchImages = swatchResults.filter((s) => s && s.url);
+      }
     }
     } catch (imgErr) {
       // خطأ في مرحلة الصور لا يُسقط التيك باك — نرجّعه بما توفّر.
-      console.error('IMAGE_PHASE_ERROR:', imgErr && imgErr.message, imgErr && imgErr.stack);
       if (!Array.isArray(techpack.swatchImages)) techpack.swatchImages = [];
     }
 
     return res.status(200).json(techpack);
   } catch (error) {
-    console.error('HANDLER_ERROR:', error && error.message, error && error.stack);
     return res.status(500).json({ error: 'خطأ في الخادم: ' + (error.message || 'غير معروف') });
   }
 }
