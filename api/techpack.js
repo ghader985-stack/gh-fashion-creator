@@ -177,9 +177,64 @@ function detectImageType(buffer) {
 function safeJsonParse(raw) {
   let s = (raw || '').trim();
   s = s.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  const start = s.indexOf('{'), end = s.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) s = s.slice(start, end + 1);
-  return JSON.parse(s);
+  const start = s.indexOf('{');
+  if (start === -1) throw new Error('no json object found');
+  s = s.slice(start);
+  const end = s.lastIndexOf('}');
+  let candidate = end > 0 ? s.slice(0, end + 1) : s;
+  // محاولة أولى: تحويل مباشر
+  try { return JSON.parse(candidate); } catch (e) {}
+  // محاولة ثانية: إصلاح JSON مقطوع بإغلاق الأقواس المفتوحة
+  try { return JSON.parse(repairJson(s)); } catch (e) {}
+  // محاولة ثالثة: من البداية حتى آخر '}' مع الإصلاح
+  return JSON.parse(repairJson(candidate));
+}
+
+// يغلق الأقواس/الأقواس المربعة المفتوحة في JSON مقطوع، ويزيل قيمة معلّقة
+function repairJson(text) {
+  let s = text.trim();
+  // إذا انتهى داخل سلسلة نصية غير مغلقة، نقصّها عند آخر '"'
+  let inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+  }
+  if (inStr) {
+    const lastQuote = s.lastIndexOf('"');
+    if (lastQuote > 0) s = s.slice(0, lastQuote + 1);
+  }
+  // إزالة نهايات معلّقة: فاصلة زائدة، أو مفتاح بلا قيمة، أو قيمة جزئية
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/,\s*$/, '');
+    s = s.replace(/"[^"]*"\s*:\s*$/, '');          // "key":
+    s = s.replace(/"[^"]*"\s*:\s*[-\d.]+$/, '');    // "key":123 (رقم قد يكون مقطوعاً)
+    s = s.replace(/,\s*$/, '');
+  } while (s !== prev);
+  // إعادة حساب الأقواس المفتوحة بعد التنظيف، ثم إغلاقها
+  const stack = [];
+  inStr = false; esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '{' || c === '[') stack.push(c);
+    else if (c === '}' || c === ']') stack.pop();
+  }
+  for (let i = stack.length - 1; i >= 0; i--) {
+    s += stack[i] === '{' ? '}' : ']';
+  }
+  return s;
 }
 
 export default async function handler(req, res) {
@@ -264,7 +319,7 @@ ${INDUSTRY_RULES}
 
     const payload = {
       model: MODEL,
-      max_tokens: 10000,
+      max_tokens: 20000,
       stream: true,
       messages: [{
         role: 'user',
@@ -331,7 +386,10 @@ ${INDUSTRY_RULES}
 
     let techpack;
     try { techpack = safeJsonParse(raw); }
-    catch (e) { return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' }); }
+    catch (e) {
+      console.error('JSON_PARSE_FAIL:', 'rawLen=' + (raw ? raw.length : 0), 'tail=' + (raw ? raw.slice(-200) : ''));
+      return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
+    }
 
     techpack.brandName = brandName;
     techpack.generatedAt = new Date().toISOString();
