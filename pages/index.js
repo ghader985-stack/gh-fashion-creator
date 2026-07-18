@@ -265,21 +265,21 @@ export default function Home() {
       const d = await r.json();
       if (d.error) { setTpError(d.error); setTpLoading(false); setTpStage(''); return; }
 
-      // ===== الطور 2: الصور (4 صور — صفحة لكل استدعاء) =====
+      // ===== الطور 2: الصور (5 صفحات + صورة لكل خامة) =====
       // طلب مستقل بسقف زمني مستقل، فلا يزاحم التحليلَ على الوقت.
-      setTpStage('جارٍ توليد صور التيك باك…');
+      setTpStage('جارٍ توليد صور التيك باك… (قد يستغرق حتى 4 دقائق)');
       let images = {};
       try {
         const fd2 = new FormData();
         fd2.append('image', tpImage);
         fd2.append('meta', JSON.stringify({
-          materialsPagePrompt: d.materialsPagePrompt || '',
-          detailsPagePrompt: d.detailsPagePrompt || '',
+          specSheetLabels: d.specSheetLabels || {},
+          calloutMap: d.calloutMap || [],
+          sewingDetailLabels: d.sewingDetailLabels || [],
           colorway: d.colorway || [],
-          materials: (d.materials || []).map((m) => ({ name: m.name, pantone: m.pantone })),
           detailAreas: (d.detailViews || []).map((x) => x.area),
-          measurePoints: (d.measurements || []).slice(0, 14).map((x) => ({
-            code: x.code, pom: x.pom, view: x.view || 'front',
+          materials: (d.materials || []).map((m) => ({
+            name: m.name, pantone: m.pantone, photoPrompt: m.photoPrompt,
           })),
         }));
         const r2 = await fetch('/api/techpack-images', { method: 'POST', body: fd2 });
@@ -621,7 +621,7 @@ export default function Home() {
                   <div className="field">
                     <label>مواصفات القماش</label>
                     <textarea value={tpFabric} onChange={(e) => setTpFabric(e.target.value)}
-                      placeholder="مثال: حرير شيفون 60 غرام، بطانة ساتان، تطريز يدوي بالخرز. إن تركتيها فارغة سنقترح خامات منطقية."></textarea>
+                      placeholder="مثال: حرير شيفون 60 غرام، بطانة ساتان، تطريز يدوي بالخرز. إن تركتيها فارغة فسنقترح خامات منطقية."></textarea>
                   </div>
                   <div className="two-col">
                     <div className="field">
@@ -900,389 +900,304 @@ function buildVideoPrompt(videoType, mood, text, hasImage) {
 الترجمة العربية للبرومبت`;
 }
 
-// ===== عرض التيك باك (نفس هيكل Adstronaut، كل قسم بلوك مستقل) =====
+// ============================================================================
+// ===== عرض التيك باك — هيكل Adstronaut الحرفي: 15 صفحة بهيدر موحّد =====
+// ============================================================================
+const GRADE_SIZES = ['2', '4', '6', '8', '10', '12'];
+const GRADE_SPLIT = 15; // أول 15 نقطة في صفحة التدرّج الأولى والباقي في (CONTINUED)
+
 function TechpackView({ tp, preview }) {
   const meta = {
     styleCode: tp.styleCode,
     garmentName: tp.garmentName,
     season: tp.season,
-    sampleSize: tp.sampleSize,
+    sampleSize: tp.sampleSize || '6',
+    sizeRange: tp.sizeRange || '2 - 12',
     category: tp.category,
+    fabricSummary: tp.fabricSummary || '',
     brandName: tp.brandName,
     version: 'v0',
     date: (tp.generatedAt || '').slice(0, 10),
     preview,
   };
+
+  const materials = tp.materials || [];
+  const matPhotos = tp.materialPhotos || [];
+  const measurements = tp.measurements || [];
+  const grade1 = measurements.slice(0, GRADE_SPLIT);
+  const grade2 = measurements.slice(GRADE_SPLIT);
+  const mat1 = materials.slice(0, 8);
+  const mat2 = materials.slice(8);
+  const colorway = tp.colorway || [];
+  const detailViews = tp.detailViews || [];
+  const artwork = tp.artwork || [];
+  const construction = tp.construction || [];
+  const sewingSteps = tp.sewingSteps || [];
+  const fitLog = (tp.fitLog && tp.fitLog.length > 0) ? tp.fitLog : [
+    { version: 'v0', date: (tp.generatedAt || '').slice(0, 10), change: 'Initial sample tech pack generated', by: tp.brandName },
+  ];
+
+  const gradeTable = (rows, cont) => (
+    <>
+      <table className="tp-table tp-grade">
+        <thead>
+          <tr>
+            <th className="ltr left-h">POINT OF MEASURE</th>
+            <th className="ltr">TOLERANCE</th>
+            {GRADE_SIZES.map((s) => (
+              <th key={s} className={s === meta.sampleSize ? 'hl' : ''}>{s}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((m, i) => (
+            <tr key={i}>
+              <td className="left ltr sm">{m.pom}</td>
+              <td className="ltr">{m.tolerance}</td>
+              {GRADE_SIZES.map((s) => (
+                <td key={s} className={s === meta.sampleSize ? 'hl' : ''}>{m.sizes ? m.sizes[s] : ''}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="tp-grade-note">Sample Size: {meta.sampleSize} (highlighted) · cm{cont ? ' · Continued on next page' : ''}</div>
+    </>
+  );
+
+  const matCards = (list, offset) => (
+    <div className="tp-matcards">
+      {list.map((m, i) => (
+        <div className="tp-matcard" key={i}>
+          {matPhotos[offset + i]
+            ? <img src={matPhotos[offset + i]} alt={m.name} crossOrigin="anonymous" />
+            : <div className="tp-matcard-ph"></div>}
+          <div className="tp-matcard-body">
+            <div className="tp-matcard-name">{m.name}</div>
+            <div className="tp-matcard-place">{m.placement}</div>
+            <div className="tp-matcard-desc">{m.description}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const pageImage = (src, alt, ratio) => (
+    <div className="tp-img-frame">
+      {src
+        ? <img src={src} alt={alt} crossOrigin="anonymous" />
+        : <div className="tp-img-ph" style={ratio ? { aspectRatio: ratio } : undefined}></div>}
+    </div>
+  );
+
+  // بناء الصفحات بترتيب النموذج الحرفي
+  const pages = [];
+
+  pages.push(['REFERENCE IMAGES', (
+    <div className="tp-ref-frame">
+      {preview
+        ? <img src={preview} alt="design reference" crossOrigin="anonymous" />
+        : <div className="tp-img-ph" style={{ aspectRatio: '3/4' }}></div>}
+    </div>
+  )]);
+
+  pages.push(['SAMPLE MEASUREMENTS', pageImage(tp.specSheetImage, 'garment spec sheet', '3/2')]);
+
+  pages.push(['SIZE GRADING CHART', gradeTable(grade1, grade2.length > 0)]);
+  if (grade2.length > 0) pages.push(['SIZE GRADING CHART (CONTINUED)', gradeTable(grade2, false)]);
+
+  pages.push(['MATERIALS', matCards(mat1, 0)]);
+  if (mat2.length > 0) pages.push(['MATERIALS (CONTINUED)', matCards(mat2, 8)]);
+
+  pages.push(['MATERIALS CALLOUT', pageImage(tp.calloutImage, 'materials callout', '3/2')]);
+
+  pages.push(['BILL OF MATERIALS', (
+    <table className="tp-table tp-bom">
+      <thead>
+        <tr>
+          <th>#</th><th className="ltr left-h">ITEM NAME</th><th className="ltr left-h">DESCRIPTION</th>
+          <th className="ltr left-h">PLACEMENT</th><th className="ltr">QTY</th><th className="ltr">UNIT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {materials.map((m, i) => (
+          <tr key={i}>
+            <td className="ref-code">{i + 1}</td>
+            <td className="left ltr"><b>{m.name}</b></td>
+            <td className="left ltr sm">{m.description}</td>
+            <td className="left ltr sm">{m.placement}</td>
+            <td className="ltr">{m.qty}</td>
+            <td className="ltr">{m.unit}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )]);
+
+  pages.push(['SEWING DETAILS', pageImage(tp.sewingDetailImage, 'sewing details', '3/2')]);
+
+  pages.push(['COLORWAYS & PANTONE', (
+    <div className="tp-colorways">
+      <div>{pageImage(tp.coloredMockupImage, 'colored mockup', '3/2')}</div>
+      <div>
+        <div className="tp-pantone-title">Pantone Color Palette</div>
+        {colorway.map((c, i) => (
+          <div className="tp-pantone-row" key={i}>
+            <div className="tp-pantone-sw" style={{ background: c.hex }}></div>
+            <div>
+              <div className="tp-pantone-part">{c.part}</div>
+              <div className="tp-pantone-code">{c.pantone} · {c.hex}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )]);
+
+  pages.push(['DETAILED VIEWS', (
+    <>
+      {pageImage(tp.detailsPageImage, 'detailed views', '4/3')}
+      {detailViews.length > 0 && (
+        <table className="tp-table" style={{ marginTop: '1rem' }}>
+          <thead><tr><th className="ltr left-h">AREA</th><th className="ltr left-h">DETAIL</th><th className="ltr left-h">SPEC</th></tr></thead>
+          <tbody>
+            {detailViews.map((d, i) => (
+              <tr key={i}>
+                <td className="left ltr"><b>{d.area}</b></td>
+                <td className="left ltr sm">{d.detail}</td>
+                <td className="left ltr sm">{d.spec}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
+  )]);
+
+  if (artwork.length > 0) {
+    pages.push(['ARTWORK DETAILS', (
+      <table className="tp-table">
+        <thead><tr><th className="ltr left-h">ELEMENT</th><th className="ltr left-h">PLACEMENT</th><th className="ltr left-h">SIZE</th><th className="ltr left-h">NOTES</th></tr></thead>
+        <tbody>
+          {artwork.map((a, i) => (
+            <tr key={i}>
+              <td className="left ltr"><b>{a.name}</b></td>
+              <td className="left ltr sm">{a.placement}</td>
+              <td className="left ltr sm">{a.size}</td>
+              <td className="left ltr sm">{a.notes}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )]);
+  }
+
+  pages.push(['CONSTRUCTION GUIDE', (
+    <>
+      <div className="tp-gi-head">Garment Information</div>
+      <div className="tp-gi">
+        <div><b>Type:</b> {tp.garmentInfo?.type}</div>
+        <div><b>Silhouette:</b> {tp.garmentInfo?.silhouette}</div>
+        <div><b>Construction:</b> {tp.garmentInfo?.construction}</div>
+      </div>
+      <div className="tp-gi-head">Construction &amp; Trim Details</div>
+      <table className="tp-table">
+        <thead><tr><th>#</th><th className="ltr left-h">SECTION</th><th className="ltr left-h">DETAIL TYPE</th><th className="ltr left-h">DESCRIPTION</th></tr></thead>
+        <tbody>
+          {construction.map((c, i) => (
+            <tr key={i}>
+              <td className="ref-code">{i + 1}</td>
+              <td className="left ltr"><b>{c.section}</b></td>
+              <td className="left ltr sm">{c.detailType || c.detail}</td>
+              <td className="left ltr sm">{c.description}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  )]);
+
+  pages.push(['SEWING INSTRUCTIONS', (
+    <>
+      <div className="tp-gi-head">Sewing Instructions</div>
+      <ol className="tp-steps">
+        {sewingSteps.map((s, i) => (<li key={i} dir="ltr">{s}</li>))}
+      </ol>
+    </>
+  )]);
+
+  pages.push(['FIT LOG & REVISION HISTORY', (
+    <table className="tp-table">
+      <thead><tr><th>#</th><th className="ltr left-h">VERSION</th><th className="ltr left-h">DATE</th><th className="ltr left-h">CHANGE / FIT COMMENT</th><th className="ltr left-h">BY</th></tr></thead>
+      <tbody>
+        {fitLog.map((f, i) => (
+          <tr key={i}>
+            <td className="ref-code">{i + 1}</td>
+            <td className="left ltr">{f.version}</td>
+            <td className="left ltr sm">{f.date}</td>
+            <td className="left ltr sm">{f.change}</td>
+            <td className="left ltr sm">{f.by}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )]);
+
+  const total = pages.length;
+
   return (
     <TpMetaContext.Provider value={meta}>
-    <div id="techpack-canvas" className="tp">
-      {/* غلاف */}
-      <div className="tp-cover">
-        <div className="tp-cover-left">
-          {preview ? <img src={preview} alt="design" className="tp-cover-thumb" crossOrigin="anonymous" /> : <div className="tp-cover-thumb ph"></div>}
-          <div>
-            <div className="tp-code">{tp.styleCode}</div>
-            <div className="tp-name">{tp.garmentName} <span className="tp-name-ar">/ {tp.garmentNameAr}</span></div>
-            <div className="tp-meta">Season: {tp.season} · Category: {tp.category} · Sample: {tp.sampleSize}</div>
-          </div>
-        </div>
-        <div className="tp-cover-right">
-          <div className="tp-brand">{tp.brandName}</div>
-          <div className="tp-desc">{tp.description}</div>
-        </div>
+      <div id="techpack-canvas" className="tp">
+        {pages.map(([title, body], i) => (
+          <TpPage key={i} n={i + 1} total={total} title={title}>
+            {body}
+          </TpPage>
+        ))}
+        <div className="tp-foot">{tp.brandName} · Technical Package</div>
       </div>
-
-      {/* 01 — REFERENCE IMAGES */}
-      <TpSection n="01" title="REFERENCE IMAGES" subtitle="الصورة المرجعية للتصميم">
-        <div className="tp-ref-layout">
-          <div className="tp-ref-img">
-            {preview
-              ? <img src={preview} alt="design reference" crossOrigin="anonymous" />
-              : <div className="tp-ref-ph"></div>}
-          </div>
-          <table className="tp-table tp-ref-table">
-            <tbody>
-              <tr><td className="left" dir="auto"><b>Style Code</b></td><td className="left" dir="auto">{tp.styleCode}</td></tr>
-              <tr><td className="left" dir="auto"><b>Style Name</b></td><td className="left" dir="auto">{tp.garmentName}</td></tr>
-              <tr><td className="left" dir="auto"><b>Season</b></td><td className="left" dir="auto">{tp.season}</td></tr>
-              <tr><td className="left" dir="auto"><b>Category</b></td><td className="left" dir="auto">{tp.category}</td></tr>
-              <tr><td className="left" dir="auto"><b>Sample Size</b></td><td className="left" dir="auto">{tp.sampleSize}</td></tr>
-              <tr><td className="left" dir="auto"><b>Vendor</b></td><td className="left" dir="auto">{tp.brandName}</td></tr>
-              <tr><td className="left" dir="auto"><b>Date</b></td><td className="left" dir="auto">{(tp.generatedAt || '').slice(0, 10)}</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </TpSection>
-
-      {/* 02 — GARMENT INFORMATION */}
-      {tp.garmentInfo && (
-        <TpSection n="02" title="GARMENT INFORMATION" subtitle="معلومات القطعة">
-          <div className="tp-garment-info">
-            <div className="tp-gi-item"><div className="tp-gi-label">Type</div><div className="tp-gi-value">{tp.garmentInfo.type}</div></div>
-            <div className="tp-gi-item"><div className="tp-gi-label">Silhouette</div><div className="tp-gi-value">{tp.garmentInfo.silhouette}</div></div>
-            <div className="tp-gi-item"><div className="tp-gi-label">Construction</div><div className="tp-gi-value">{tp.garmentInfo.construction}</div></div>
-          </div>
-        </TpSection>
-      )}
-
-      {/* 02 — TECHNICAL FLAT SKETCH (أمامي + خلفي، خطوط رمادية) */}
-      {(tp.flatSketchImage || tp.flatColorImage) && (
-        <TpSection n="03" title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية — أمامي وخلفي">
-          <div className="tp-flat-single">
-            <img src={tp.flatSketchImage || tp.flatColorImage} alt="technical flat front and back" className={tp.flatSketchImage ? '' : 'tp-flat-gray'} crossOrigin="anonymous" />
-          </div>
-          <div className="tp-flat-caption">FRONT &amp; BACK · مرجع نقاط القياس في جدول المواصفات (عمود Ref)</div>
-        </TpSection>
-      )}
-
-      {/* 03 — MEASUREMENT SPECIFICATION */}
-      <TpSection n="04" title="MEASUREMENT SPECIFICATION" subtitle="جدول القياسات المتدرّج (سم)">
-        <table className="tp-table">
-          <thead>
-            <tr>
-              <th>Ref</th><th className="ltr">Point of Measure</th><th>Tol.</th>
-              <th>XS</th><th>S</th><th className="hl">M</th><th>L</th><th>XL</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(tp.measurements || []).map((m, i) => (
-              <tr key={i}>
-                <td className="ref-code">{m.code || String.fromCharCode(65 + i)}</td>
-                <td className="left" dir="auto">{m.pom}</td>
-                <td>{m.tolerance}</td>
-                <td>{m.sizes?.XS}</td><td>{m.sizes?.S}</td><td className="hl">{m.sizes?.M}</td><td>{m.sizes?.L}</td><td>{m.sizes?.XL}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TpSection>
-
-      {/* 04 — MATERIALS */}
-      <TpSection n="05" title="MATERIALS" subtitle="الخامات">
-        {tp.materialsPageImage && (
-          <div className="tp-page-img"><img src={tp.materialsPageImage} alt="materials" crossOrigin="anonymous" /></div>
-        )}
-        <div className="tp-materials">
-          {(tp.materials || []).map((m, i) => (
-            <div className="tp-mat" key={i}>
-              <div className="tp-mat-head">
-                <span className="tp-mat-name">{m.name}</span>
-                {m.type && <span className="tp-mat-type">{m.type}</span>}
-              </div>
-              {(m.composition || m.gsm || m.pantone) && (
-                <div className="tp-mat-specs">
-                  {m.composition && <span className="tp-mat-spec"><b>Comp:</b> {m.composition}</span>}
-                  {m.gsm && <span className="tp-mat-spec"><b>Weight:</b> {m.gsm}</span>}
-                  {m.pantone && <span className="tp-mat-spec"><b>Pantone:</b> {m.pantone}</span>}
-                </div>
-              )}
-              {m.placement && <div className="tp-mat-place"><b>Placement:</b> {m.placement}</div>}
-              {m.notes && <div className="tp-mat-notes">{m.notes}</div>}
-            </div>
-          ))}
-        </div>
-      </TpSection>
-
-      {/* 05 — MATERIALS PLACEMENT (رسمة + موضع كل خامة) */}
-      {(tp.flatColorImage || tp.flatSketchImage) && (tp.materials || []).length > 0 && (
-        <TpSection n="06" title="MATERIALS PLACEMENT" subtitle="موضع الخامات على القطعة">
-          <div className="tp-callout-layout">
-            <div className="tp-callout-sketch">
-              <img src={tp.flatColorImage || tp.flatSketchImage} alt="materials placement" crossOrigin="anonymous" />
-            </div>
-            <table className="tp-table tp-callout-table">
-              <thead><tr><th className="ltr">Material</th><th className="ltr">Placement</th></tr></thead>
-              <tbody>
-                {(tp.materials || []).filter((m) => m && m.name).map((m, i) => (
-                  <tr key={i}>
-                    <td className="left" dir="auto"><b>{m.name}</b></td>
-                    <td className="left sm" dir="auto">{m.placement || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </TpSection>
-      )}
-
-      {/* 06 — BILL OF MATERIALS */}
-      <TpSection n="07" title="BILL OF MATERIALS" subtitle="قائمة المواد">
-        <table className="tp-table">
-          <thead><tr><th>#</th><th className="ltr">Item</th><th className="ltr">Description</th><th className="ltr">Placement</th><th>Qty</th><th>Unit</th></tr></thead>
-          <tbody>
-            {(tp.bom || []).map((b, i) => (
-              <tr key={i}>
-                <td className="ref-code">{i + 1}</td>
-                <td className="left" dir="auto">{b.item}</td>
-                <td className="left sm" dir="auto">{b.description}</td>
-                <td className="left sm" dir="auto">{b.placement}</td>
-                <td>{b.qty}</td><td>{b.unit}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TpSection>
-
-      {/* 06 — CONSTRUCTION DETAILS */}
-      <TpSection n="08" title="CONSTRUCTION DETAILS" subtitle="تفاصيل البناء">
-        <table className="tp-table">
-          <thead><tr><th className="ltr">Section</th><th className="ltr">Detail</th><th className="ltr">Description</th></tr></thead>
-          <tbody>
-            {(tp.construction || []).map((c, i) => (
-              <tr key={i}><td className="left" dir="auto">{c.section}</td><td className="left" dir="auto">{c.detail}</td><td className="left sm" dir="auto">{c.description}</td></tr>
-            ))}
-          </tbody>
-        </table>
-      </TpSection>
-
-      {/* 07 — DETAILED VIEWS (صورة صفحة التفاصيل + مواصفات) */}
-      {(tp.detailsPageImage || (tp.detailViews && tp.detailViews.length > 0)) && (
-        <TpSection n="09" title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية">
-          {tp.detailsPageImage && (
-            <div className="tp-page-img"><img src={tp.detailsPageImage} alt="detailed views" crossOrigin="anonymous" /></div>
-          )}
-          {tp.detailViews && tp.detailViews.length > 0 && (
-            <table className="tp-table" style={{ marginTop: tp.detailsPageImage ? '1rem' : 0 }}>
-              <thead><tr><th className="ltr">Area</th><th className="ltr">Detail</th><th className="ltr">Spec</th></tr></thead>
-              <tbody>
-                {tp.detailViews.map((d, i) => (
-                  <tr key={i}><td className="left" dir="auto">{d.area}</td><td className="left sm" dir="auto">{d.detail}</td><td className="left sm" dir="auto">{d.spec}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </TpSection>
-      )}
-
-      {/* 08 — LABEL PLACEMENT */}
-      {tp.labelPlacement && tp.labelPlacement.length > 0 && (
-        <TpSection n="10" title="LABEL PLACEMENT" subtitle="مواضع الليبلات">
-          <table className="tp-table">
-            <thead><tr><th className="ltr">Label</th><th className="ltr">Location</th><th className="ltr">Size</th><th className="ltr">Method</th></tr></thead>
-            <tbody>
-              {tp.labelPlacement.map((l, i) => (
-                <tr key={i}><td className="left" dir="auto">{l.label}</td><td className="left sm" dir="auto">{l.location}</td><td className="left sm" dir="auto">{l.size}</td><td className="left sm" dir="auto">{l.method}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </TpSection>
-      )}
-
-      {/* 09 — COLORWAY & PANTONE */}
-      <TpSection n="11" title="COLORWAY & PANTONE" subtitle="الألوان">
-        <div className="tp-colorway-layout">
-          {(tp.flatColorImage || tp.flatSketchImage) && (
-            <div className="tp-colorway-sketch"><img src={tp.flatColorImage || tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" /></div>
-          )}
-          <div className="tp-colors">
-            {(tp.colorway || []).map((c, i) => (
-              <div className="tp-color" key={i}>
-                <div className="tp-color-sw" style={{ background: c.hex }}></div>
-                <div><div className="tp-color-part">{c.part}</div><div className="tp-color-code">{c.pantone} · {c.hex}</div></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </TpSection>
-
-      {/* 10 — ARTWORK & PLACEMENT */}
-      {tp.artwork && tp.artwork.length > 0 && (
-        <TpSection n="12" title="ARTWORK & PLACEMENT" subtitle="الأرتورك والمواضع">
-          <table className="tp-table">
-            <thead><tr><th className="ltr">Element</th><th className="ltr">Placement</th><th className="ltr">Size</th><th className="ltr">Notes</th></tr></thead>
-            <tbody>
-              {tp.artwork.map((a, i) => (
-                <tr key={i}><td className="left" dir="auto">{a.name}</td><td className="left sm" dir="auto">{a.placement}</td><td className="left sm" dir="auto">{a.size}</td><td className="left sm" dir="auto">{a.notes}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </TpSection>
-      )}
-
-      {/* 11 — SEWING INSTRUCTIONS */}
-      {(tp.sewingSteps || []).length > 0 && (
-      <TpSection n="13" title="SEWING INSTRUCTIONS" subtitle="تعليمات الخياطة">
-        <ol className="tp-steps">
-          {(tp.sewingSteps || []).map((s, i) => (<li key={i} dir="auto">{s}</li>))}
-        </ol>
-      </TpSection>
-      )}
-
-      {/* 13 — FIT LOG & REVISION HISTORY */}
-      <TpSection n="14" title="FIT LOG & REVISION HISTORY" subtitle="سجل القياس والمراجعات">
-        <table className="tp-table">
-          <thead><tr><th>#</th><th className="ltr">Version</th><th className="ltr">Date</th><th className="ltr">Change / Fit Comment</th><th className="ltr">By</th></tr></thead>
-          <tbody>
-            {(tp.fitLog && tp.fitLog.length > 0 ? tp.fitLog : [
-              { version: 'v0', date: (tp.generatedAt || '').slice(0, 10), change: 'Initial sample tech pack generated', by: tp.brandName },
-            ]).map((f, i) => (
-              <tr key={i}>
-                <td className="ref-code">{i + 1}</td>
-                <td className="left" dir="auto">{f.version}</td>
-                <td className="left sm" dir="auto">{f.date}</td>
-                <td className="left sm" dir="auto">{f.change}</td>
-                <td className="left sm" dir="auto">{f.by}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TpSection>
-
-      <div className="tp-foot">{tp.brandName} · Technical Package</div>
-    </div>
     </TpMetaContext.Provider>
   );
 }
 
-function TpSection({ n, title, subtitle, children }) {
+// هيدر الصفحة — مطابق لهيدر النموذج:
+// يسار: صورة مصغّرة + كود الستايل + الاسم + الموسم + المورّد
+// وسط: عنوان الصفحة + (Size / Category / Fabric)
+// يمين: الإصدار + Page X of N + التاريخ + العلامة
+function TpPage({ n, total, title, children }) {
   const meta = useContext(TpMetaContext);
   return (
     <div className="tp-page">
-      <div className="tp-page-head">
-        <div className="tp-page-head-left">
-          {meta.preview ? <img src={meta.preview} alt="" className="tp-page-thumb" crossOrigin="anonymous" /> : <div className="tp-page-thumb ph"></div>}
-          <div className="tp-page-id">
-            <div className="tp-page-code">{meta.styleCode}</div>
-            <div className="tp-page-name">{meta.garmentName}</div>
-            <div className="tp-page-sub">Season: {meta.season} · Sample: {meta.sampleSize}</div>
-            <div className="tp-page-sub">Category: {meta.category}</div>
+      <div className="tp-hd">
+        <div className="tp-hd-left">
+          {meta.preview
+            ? <img src={meta.preview} alt="" className="tp-hd-thumb" crossOrigin="anonymous" />
+            : <div className="tp-hd-thumb ph"></div>}
+          <div>
+            <div className="tp-hd-code">{meta.styleCode}</div>
+            <div className="tp-hd-name">{meta.garmentName}</div>
+            <div className="tp-hd-sub">Season: {meta.season}</div>
+            <div className="tp-hd-sub">Vendor: {meta.brandName}</div>
           </div>
         </div>
-        <div className="tp-page-head-center">
-          <div className="tp-page-title ltr">{title}</div>
-          <div className="tp-page-title-ar">{subtitle}</div>
+        <div className="tp-hd-mid">
+          <div className="tp-hd-title">{title}</div>
+          <div className="tp-hd-cols">
+            <div className="tp-hd-col"><span>Size:</span> {meta.sampleSize} ({meta.sizeRange})</div>
+            <div className="tp-hd-col"><span>Category:</span> {meta.category}</div>
+            <div className="tp-hd-col"><span>Fabric:</span> {meta.fabricSummary}</div>
+          </div>
         </div>
-        <div className="tp-page-head-right">
-          <div className="tp-page-ver">{meta.version || 'v0'}</div>
-          <div className="tp-page-num">{n ? 'Page ' + n : ''}</div>
-          <div className="tp-page-date">{(meta.date || '')}</div>
-          <div className="tp-page-brand">{meta.brandName}</div>
+        <div className="tp-hd-right">
+          <div className="tp-hd-ver">{meta.version}</div>
+          <div className="tp-hd-page">Page {n} of {total}</div>
+          <div className="tp-hd-sub">{meta.date}</div>
+          <div className="tp-hd-sub">{meta.brandName}</div>
         </div>
       </div>
-      <div className="tp-page-rule"></div>
+      <div className="tp-hd-rule"></div>
       <div className="tp-page-body">
         {children}
       </div>
-    </div>
-  );
-}
-
-// ===== الرسمة مع أسهم القياس (طبقة SVG فوق الصورة) =====
-// خريطة المرساة -> إحداثيات نسبية (%) على الرسمة، ونوع السهم (أفقي/عمودي)
-const ANCHOR_MAP = {
-  frontNeck:   { x: 50, y: 15, side: 'right', orient: 'v' },
-  backNeck:    { x: 50, y: 13, side: 'right', orient: 'v' },
-  bust:        { x: 50, y: 24, side: 'both',  orient: 'h' },
-  topFront:    { x: 50, y: 20, side: 'both',  orient: 'h' },
-  topBack:     { x: 50, y: 18, side: 'both',  orient: 'h' },
-  bpToBp:      { x: 50, y: 27, side: 'mid',   orient: 'h' },
-  cupHeight:   { x: 38, y: 22, side: 'left',  orient: 'v' },
-  waist:       { x: 50, y: 40, side: 'both',  orient: 'h' },
-  highHip:     { x: 50, y: 47, side: 'both',  orient: 'h' },
-  lowHip:      { x: 50, y: 52, side: 'both',  orient: 'h' },
-  thigh:       { x: 50, y: 60, side: 'both',  orient: 'h' },
-  knee:        { x: 50, y: 68, side: 'both',  orient: 'h' },
-  flareBreak:  { x: 62, y: 66, side: 'right', orient: 'v' },
-  hemFront:    { x: 50, y: 95, side: 'both',  orient: 'h' },
-  hemBack:     { x: 50, y: 95, side: 'both',  orient: 'h' },
-  train:       { x: 82, y: 88, side: 'right', orient: 'v' },
-  zipper:      { x: 50, y: 42, side: 'right', orient: 'v' },
-  cfLength:    { x: 50, y: 55, side: 'mid',   orient: 'v' },
-  cbLength:    { x: 50, y: 55, side: 'mid',   orient: 'v' },
-  sideLength:  { x: 30, y: 55, side: 'left',  orient: 'v' },
-  bodiceSide:  { x: 30, y: 34, side: 'left',  orient: 'v' },
-  overlay:     { x: 68, y: 58, side: 'right', orient: 'v' },
-  embellishment: { x: 50, y: 30, side: 'right', orient: 'v' },
-  boning:      { x: 32, y: 30, side: 'left',  orient: 'v' },
-  shoulderBust:{ x: 42, y: 18, side: 'left',  orient: 'v' },
-  sleeve:      { x: 78, y: 35, side: 'right', orient: 'v' },
-  inseam:      { x: 50, y: 70, side: 'mid',   orient: 'v' },
-  outseam:     { x: 28, y: 60, side: 'left',  orient: 'v' },
-  rise:        { x: 50, y: 42, side: 'right', orient: 'v' },
-  other:       { x: 74, y: 50, side: 'right', orient: 'v' },
-};
-
-function FlatWithArrows({ img, label, measurements }) {
-  // نضع حرف مرجعي عند كل نقطة قياس لها مرساة معروفة، بترتيب حول الرسمة
-  const marks = [];
-  let ri = 0;
-  (measurements || []).forEach((m) => {
-    const a = ANCHOR_MAP[m.anchor] || null;
-    if (!a) return;
-    // إزاحة بسيطة لمنع التراكب عند تكرار نفس المرساة
-    const dup = marks.filter((k) => k.anchor === m.anchor).length;
-    marks.push({
-      code: m.code || String.fromCharCode(65 + ri),
-      anchor: m.anchor,
-      x: a.x, y: Math.min(97, a.y + dup * 3),
-      side: a.side, orient: a.orient,
-    });
-    ri++;
-  });
-
-  return (
-    <div className="tp-flat-wrap">
-      <div className="tp-flat-inner">
-        {img
-          ? <img src={img} alt={label} crossOrigin="anonymous" className="tp-flat-img" />
-          : <div className="tp-flat-ph"></div>}
-        <svg className="tp-flat-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {marks.map((k, i) => {
-            const labelX = k.side === 'left' ? Math.max(4, k.x - 30) : Math.min(96, k.x + 30);
-            const anchorX = k.side === 'left' ? k.x - 14 : k.x + 14;
-            return (
-              <g key={i}>
-                <line x1={anchorX} y1={k.y} x2={labelX} y2={k.y}
-                  stroke="#7a1420" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
-                <circle cx={labelX} cy={k.y} r="2.4" fill="#fff" stroke="#7a1420" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
-                <text x={labelX} y={k.y + 0.9} fontSize="3" fontWeight="700" fill="#7a1420"
-                  textAnchor="middle" fontFamily="Arial">{k.code}</text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-      <div className="tp-flat-label">{label}</div>
     </div>
   );
 }
@@ -1505,140 +1420,92 @@ function StyleBlock() {
       .platform-name { font-weight: 700; color: var(--ink); direction: ltr; }
       .platform-note { color: var(--ink-soft); font-size: 0.85rem; text-align: left; }
 
-      /* ===== التيك باك ===== */
+      /* ===== التيك باك — هيكل Adstronaut ===== */
       .tp { background: #e8e8ea; border-radius: 8px; padding: 1.4rem; box-shadow: 0 20px 60px rgba(0,0,0,0.08); }
 
-      /* غلاف */
-      .tp-cover { background: #fff; border-radius: 6px; padding: 2rem 2.2rem; display: flex; justify-content: space-between; gap: 2rem; border-bottom: 3px solid var(--ink); margin-bottom: 1.4rem; flex-wrap: wrap; box-shadow: 0 4px 16px rgba(0,0,0,0.05); }
-      .tp-cover-left { display: flex; gap: 1rem; align-items: flex-start; }
-      .tp-cover-thumb { width: 92px; height: 92px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
-      .tp-cover-thumb.ph { background: var(--cream-2); }
-      .tp-cover-right { text-align: left; max-width: 340px; }
-
-      /* صفحة مستقلة لكل قسم — بنفس تنسيق النموذج */
-      .tp-page { background: #fff; border-radius: 6px; padding: 1.8rem 2rem; margin-bottom: 1.2rem; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-      .tp-page-head { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 1rem; align-items: start; }
-      .tp-page-head-left { display: flex; gap: 0.7rem; align-items: flex-start; }
-      .tp-page-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); flex-shrink: 0; }
-      .tp-page-thumb.ph { background: var(--cream-2); }
-      .tp-page-code { font-family: 'Cormorant Garamond', serif; font-weight: 700; font-size: 0.82rem; letter-spacing: 0.5px; color: var(--ink); direction: ltr; text-align: left; }
-      .tp-page-name { font-size: 0.72rem; font-weight: 700; color: var(--ink); direction: ltr; text-align: left; line-height: 1.2; margin-top: 1px; }
-      .tp-page-sub { font-size: 0.62rem; color: var(--ink-soft); direction: ltr; text-align: left; }
-      .tp-page-head-center { text-align: center; }
-      .tp-page-title { font-family: 'Cormorant Garamond', serif; font-size: 1.15rem; font-weight: 700; letter-spacing: 2px; color: var(--ink); }
-      .tp-page-title-ar { font-size: 0.7rem; color: var(--gold-deep); margin-top: 2px; }
-      .tp-page-head-right { text-align: right; }
-      .tp-page-ver { font-size: 0.7rem; font-weight: 700; color: var(--ink); }
-      .tp-page-num { font-size: 0.68rem; color: var(--ink-soft); }
-      .tp-page-date { font-size: 0.62rem; color: var(--ink-soft); }
-      .tp-page-brand { font-size: 0.62rem; color: var(--gold-deep); font-family: 'Cormorant Garamond', serif; }
-      .tp-page-rule { height: 2px; background: var(--ink); margin: 0.7rem 0 1.4rem; }
+      /* صفحة مستقلة لكل قسم */
+      .tp-page { background: #fff; border-radius: 6px; padding: 1.6rem 1.9rem; margin-bottom: 1.2rem; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
       .tp-page-body { min-height: 40px; }
-      @media (max-width: 700px) { .tp-page-head { grid-template-columns: 1fr; gap: 0.4rem; } .tp-page-head-center, .tp-page-head-right { text-align: right; } }
-      .tp-thumb { width: 88px; height: 88px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
-      .tp-thumb.ph { background: var(--cream-2); }
-      .tp-code { font-family: 'Cormorant Garamond', serif; color: var(--gold-deep); font-weight: 700; letter-spacing: 1px; direction: ltr; }
-      .tp-name { font-size: 1.15rem; font-weight: 700; color: var(--ink); direction: ltr; text-align: right; }
-      .tp-name-ar { font-weight: 400; color: var(--ink-soft); font-size: 0.95rem; }
-      .tp-meta { color: var(--ink-soft); font-size: 0.82rem; margin-top: 4px; direction: ltr; text-align: right; }
-      .tp-head-right { text-align: left; max-width: 320px; }
-      .tp-brand { font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; color: var(--ink); letter-spacing: 1px; direction: ltr; }
-      .tp-desc { color: var(--ink-soft); font-size: 0.85rem; margin-top: 4px; line-height: 1.6; }
 
-      .tp-section { margin-bottom: 2.2rem; }
-      .tp-section-head { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.9rem; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
-      .tp-section-n { font-family: 'Cormorant Garamond', serif; font-style: italic; color: var(--gold); font-size: 1rem; }
-      .tp-section-title { font-family: 'Cormorant Garamond', serif; font-size: 1.25rem; font-weight: 700; letter-spacing: 2px; color: var(--ink); }
-      .tp-section-sub { color: var(--gold-deep); font-size: 0.85rem; margin-right: auto; }
+      /* هيدر الصفحة — تخطيط النموذج الحرفي */
+      .tp-hd { display: grid; grid-template-columns: 1.5fr 2fr 0.8fr; gap: 1rem; align-items: start; direction: ltr; }
+      .tp-hd-left { display: flex; gap: 0.6rem; align-items: flex-start; text-align: left; }
+      .tp-hd-thumb { width: 46px; height: 46px; object-fit: cover; border-radius: 4px; border: 1px solid #e5e5e5; flex-shrink: 0; }
+      .tp-hd-thumb.ph { background: #f0f0f0; }
+      .tp-hd-code { font-weight: 800; font-size: 0.8rem; color: #111; letter-spacing: 0.3px; }
+      .tp-hd-name { font-weight: 700; font-size: 0.7rem; color: #111; line-height: 1.3; margin-top: 1px; }
+      .tp-hd-sub { font-size: 0.62rem; color: #777; line-height: 1.5; }
+      .tp-hd-mid { text-align: center; }
+      .tp-hd-title { font-weight: 800; font-size: 1.05rem; letter-spacing: 1.6px; color: #111; font-family: Arial, sans-serif; }
+      .tp-hd-cols { display: flex; justify-content: center; align-items: flex-start; gap: 1.6rem; margin-top: 0.5rem; }
+      .tp-hd-col { font-size: 0.62rem; color: #555; max-width: 240px; text-align: center; line-height: 1.4; }
+      .tp-hd-col span { color: #999; }
+      .tp-hd-right { text-align: right; }
+      .tp-hd-ver { font-weight: 800; font-size: 0.74rem; color: #111; }
+      .tp-hd-page { font-weight: 700; font-size: 0.68rem; color: #111; }
+      .tp-hd-rule { height: 3px; background: #111; margin: 0.7rem 0 1.4rem; }
+      @media (max-width: 700px) {
+        .tp-hd { grid-template-columns: 1fr; gap: 0.5rem; }
+        .tp-hd-mid, .tp-hd-right { text-align: left; }
+        .tp-hd-cols { justify-content: flex-start; flex-wrap: wrap; gap: 0.8rem; }
+        .tp-hd-col { text-align: left; }
+      }
 
-      .tp-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-      .tp-table th { background: var(--cream); color: var(--ink); padding: 0.55rem 0.6rem; text-align: center; font-weight: 700; border: 1px solid var(--line); }
+      /* إطارات الصور */
+      .tp-ref-frame { border: 1px solid #e5e5e5; border-radius: 8px; background: #f6f2e9; padding: 1.2rem; display: flex; justify-content: center; }
+      .tp-ref-frame img { max-width: 560px; width: 100%; display: block; border-radius: 4px; }
+      .tp-img-frame { border: 1px solid #e5e5e5; border-radius: 8px; background: #fafafa; padding: 0.8rem; }
+      .tp-img-frame img { width: 100%; display: block; border-radius: 4px; }
+      .tp-img-ph { width: 100%; background: #f0f0f0; border-radius: 4px; }
+
+      /* الجداول */
+      .tp-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; direction: ltr; }
+      .tp-table th { background: #f4f4f4; color: #111; padding: 0.55rem 0.6rem; text-align: center; font-weight: 700; border: 1px solid #e2e2e2; font-size: 0.7rem; letter-spacing: 0.5px; }
+      .tp-table th.left-h { text-align: left; }
       .tp-table th.ltr, .tp-table td.ltr { direction: ltr; }
-      .tp-table td { padding: 0.5rem 0.6rem; text-align: center; border: 1px solid var(--line); color: var(--ink); }
-      .tp-table td.left { text-align: start; unicode-bidi: plaintext; }
-      .tp-table td.sm { font-size: 0.76rem; color: var(--ink-soft); }
-      .tp-table .hl { background: #f3ead6; font-weight: 700; }
-      .ref-code { font-weight: 700; color: var(--gold-deep); background: var(--cream); font-family: 'Cormorant Garamond', serif; }
+      .tp-table td { padding: 0.5rem 0.6rem; text-align: center; border: 1px solid #e8e8e8; color: #222; }
+      .tp-table td.left { text-align: left; }
+      .tp-table td.sm { font-size: 0.74rem; color: #555; }
+      .tp-table .hl { background: #eef2f0; font-weight: 700; }
+      .ref-code { font-weight: 700; color: var(--gold-deep); background: #faf8f3; font-family: 'Cormorant Garamond', serif; }
+      .tp-grade td.left { line-height: 1.45; }
+      .tp-grade-note { text-align: center; font-size: 0.68rem; color: #999; margin-top: 0.6rem; direction: ltr; }
+      .tp-bom td { vertical-align: top; }
 
-      .tp-flat-note { text-align: center; font-size: 0.8rem; margin-bottom: 0.9rem; direction: ltr; }
-      .tp-flat-note-b { color: var(--ink); font-weight: 700; }
-      .tp-flat-note-r { color: #7a1420; font-weight: 700; }
-      .tp-flat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-      .tp-flat-single { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
-      .tp-page-img { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
-      .tp-page-img img { width: 100%; display: block; }
-      .tp-flat-single img { width: 100%; display: block; }
-      .tp-flat-gray { filter: grayscale(1) contrast(1.15) brightness(1.05); }
-      .tp-flat-caption { text-align: center; font-size: 0.72rem; color: var(--ink-soft); margin-top: 0.5rem; direction: rtl; }
-      @media (max-width: 700px) { .tp-flat-grid { grid-template-columns: 1fr; } }
-      .tp-flat-wrap { border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 0.6rem; }
-      .tp-flat-inner { position: relative; width: 100%; }
-      .tp-flat-img { width: 100%; display: block; }
-      .tp-flat-ph { width: 100%; padding-top: 130%; background: var(--cream-2); }
-      .tp-flat-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-      .tp-flat-label { text-align: center; font-size: 0.8rem; font-weight: 700; letter-spacing: 1px; color: var(--ink); margin-top: 0.4rem; }
-      .tp-garment-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
-      @media (max-width: 700px) { .tp-garment-info { grid-template-columns: 1fr; } }
-      .tp-gi-item { border-right: 2px solid var(--gold); padding-right: 0.9rem; }
-      .tp-gi-label { font-family: 'Cormorant Garamond', serif; letter-spacing: 1px; color: var(--gold-deep); font-size: 0.85rem; margin-bottom: 0.3rem; direction: ltr; text-align: right; }
-      .tp-gi-value { color: var(--ink); font-size: 0.9rem; line-height: 1.5; direction: ltr; text-align: right; }
-      .tp-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin-bottom: 1.2rem; }
-      @media (max-width: 700px) { .tp-swatches { grid-template-columns: repeat(2, 1fr); } }
-      .tp-swatch-card { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--cream); }
-      .tp-swatch-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
-      .tp-swatch-name { padding: 0.5rem; font-size: 0.78rem; color: var(--ink); text-align: center; }
-      .tp-materials { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
-      @media (max-width: 700px) { .tp-materials { grid-template-columns: 1fr; } }
-      .tp-mat { border: 1px solid var(--line); border-radius: 6px; padding: 1rem; background: var(--cream); }
-      .tp-mat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-bottom: 0.4rem; }
-      .tp-mat-name { font-weight: 700; color: var(--ink); direction: ltr; }
-      .tp-mat-type { color: var(--gold-deep); font-size: 0.78rem; direction: ltr; }
-      .tp-mat-specs { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; margin-bottom: 0.4rem; }
-      .tp-mat-spec { font-size: 0.74rem; color: var(--ink); direction: ltr; }
-      .tp-mat-spec b { color: var(--gold-deep); font-weight: 700; }
-      .tp-mat-place { font-size: 0.76rem; color: var(--ink-soft); direction: ltr; margin-bottom: 0.3rem; }
-      .tp-mat-place b { color: var(--ink); }
-      .tp-mat-notes { color: var(--ink-soft); font-size: 0.78rem; line-height: 1.5; direction: ltr; }
+      /* بطاقات الخامات — بطاقة لكل خامة كما في النموذج */
+      .tp-matcards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; direction: ltr; }
+      @media (max-width: 900px) { .tp-matcards { grid-template-columns: repeat(2, 1fr); } }
+      @media (max-width: 500px) { .tp-matcards { grid-template-columns: 1fr; } }
+      .tp-matcard { border: 1px solid #e5e5e5; border-radius: 6px; overflow: hidden; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+      .tp-matcard img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+      .tp-matcard-ph { width: 100%; aspect-ratio: 1; background: #f0f0f0; }
+      .tp-matcard-body { padding: 0.6rem; text-align: left; }
+      .tp-matcard-name { font-weight: 700; font-size: 0.74rem; color: #111; }
+      .tp-matcard-place { font-size: 0.63rem; color: #1a6fc4; margin: 2px 0 3px; line-height: 1.35; }
+      .tp-matcard-desc { font-size: 0.62rem; color: #777; line-height: 1.45; }
 
-      .tp-colors { display: flex; flex-wrap: wrap; gap: 1.2rem; }
-      .tp-colorway-layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1.5rem; align-items: center; }
-      @media (max-width: 700px) { .tp-colorway-layout { grid-template-columns: 1fr; } }
-      .tp-colorway-sketch { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
-      .tp-colorway-sketch img { width: 100%; display: block; }
-      .tp-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; }
-      @media (max-width: 800px) { .tp-detail-grid { grid-template-columns: repeat(2, 1fr); } }
-      @media (max-width: 500px) { .tp-detail-grid { grid-template-columns: 1fr; } }
-      .tp-detail-card { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
-      .tp-detail-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
-      .tp-detail-ph { width: 100%; aspect-ratio: 1; background: var(--cream-2); }
-      .tp-detail-card.no-img { display: flex; align-items: center; background: var(--cream); }
-      .tp-detail-card.no-img .tp-detail-body { padding: 1rem; }
-      .tp-detail-body { padding: 0.7rem; }
-      .tp-detail-area { font-weight: 700; color: var(--ink); font-size: 0.85rem; direction: ltr; }
-      .tp-detail-detail { color: var(--ink-soft); font-size: 0.76rem; line-height: 1.5; margin-top: 2px; direction: ltr; }
-      .tp-detail-spec { color: var(--gold-deep); font-size: 0.74rem; margin-top: 3px; direction: ltr; }
+      /* الألوان والبانتون */
+      .tp-colorways { display: grid; grid-template-columns: 1.1fr 1fr; gap: 1.5rem; align-items: start; }
+      @media (max-width: 700px) { .tp-colorways { grid-template-columns: 1fr; } }
+      .tp-pantone-title { font-weight: 700; font-size: 0.82rem; direction: ltr; text-align: left; margin-bottom: 0.6rem; color: #111; }
+      .tp-pantone-row { display: flex; gap: 0.7rem; align-items: center; padding: 0.55rem 0; border-bottom: 1px solid #eee; direction: ltr; }
+      .tp-pantone-row:last-child { border-bottom: none; }
+      .tp-pantone-sw { width: 36px; height: 36px; border-radius: 4px; border: 1px solid #e2e2e2; flex-shrink: 0; }
+      .tp-pantone-part { font-size: 0.76rem; font-weight: 700; color: #111; text-align: left; }
+      .tp-pantone-code { font-size: 0.66rem; color: #888; text-align: left; }
 
-      .tp-callout-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: start; }
-      .tp-ref-layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 1.5rem; align-items: start; }
-      @media (max-width: 700px) { .tp-ref-layout { grid-template-columns: 1fr; } }
-      .tp-ref-img { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
-      .tp-ref-img img { width: 100%; display: block; }
-      .tp-ref-ph { width: 100%; aspect-ratio: 3/4; background: var(--cream-2); }
-      .tp-ref-table { font-size: 0.8rem; }
-      .tp-ref-table td { padding: 0.45rem 0.6rem; }
-      .tp-callout-table { font-size: 0.78rem; }
-      .tp-callout-table td, .tp-callout-table th { padding: 0.4rem 0.5rem; }
-      @media (max-width: 700px) { .tp-callout-layout { grid-template-columns: 1fr; } }
-      .tp-callout-sketch { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; padding: 0.6rem; }
-      .tp-color { display: flex; gap: 0.6rem; align-items: center; }
-      .tp-color-sw { width: 42px; height: 42px; border-radius: 6px; border: 1px solid var(--line); }
-      .tp-color-part { font-weight: 600; color: var(--ink); font-size: 0.85rem; }
-      .tp-color-code { color: var(--ink-soft); font-size: 0.76rem; direction: ltr; text-align: right; }
+      /* دليل البناء */
+      .tp-gi-head { font-weight: 700; font-size: 0.82rem; color: #111; direction: ltr; text-align: left; padding-bottom: 0.4rem; border-bottom: 1px solid #eee; margin-bottom: 0.8rem; }
+      .tp-gi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; direction: ltr; text-align: left; margin-bottom: 1.6rem; }
+      @media (max-width: 700px) { .tp-gi { grid-template-columns: 1fr; } }
+      .tp-gi div { font-size: 0.74rem; color: #333; line-height: 1.55; }
+      .tp-gi b { color: #999; font-weight: 700; }
 
-      .tp-steps { padding-right: 0; list-style: none; counter-reset: step; }
-      .tp-steps li { counter-increment: step; padding: 0.5rem 0; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 0.85rem; unicode-bidi: plaintext; text-align: start; position: relative; padding-inline-start: 2rem; }
-      .tp-steps li:before { content: counter(step); position: absolute; inset-inline-start: 0; color: var(--gold-deep); font-family: 'Cormorant Garamond', serif; font-weight: 700; }
-      .tp-foot { text-align: center; margin-top: 2rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--gold); font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; }
+      /* تعليمات الخياطة */
+      .tp-steps { padding-left: 0; list-style: none; counter-reset: step; direction: ltr; }
+      .tp-steps li { counter-increment: step; padding: 0.5rem 0; border-bottom: 1px solid #eee; color: #333; font-size: 0.8rem; text-align: left; position: relative; padding-left: 2rem; line-height: 1.55; }
+      .tp-steps li:before { content: counter(step); position: absolute; left: 0; color: var(--gold-deep); font-family: 'Cormorant Garamond', serif; font-weight: 700; }
+      .tp-foot { text-align: center; margin-top: 1rem; padding-top: 1.2rem; border-top: 1px solid #ddd; color: var(--gold); font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; }
 
       /* النافذة */
       .modal-overlay { position: fixed; inset: 0; background: rgba(44,38,32,0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
