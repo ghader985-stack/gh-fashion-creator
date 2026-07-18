@@ -929,9 +929,31 @@ function TechpackView({ tp, preview }) {
         </div>
       </div>
 
-      {/* 01 — REFERENCE / معلومات القطعة */}
+      {/* 01 — REFERENCE IMAGES */}
+      <TpSection n="01" title="REFERENCE IMAGES" subtitle="الصورة المرجعية للتصميم">
+        <div className="tp-ref-layout">
+          <div className="tp-ref-img">
+            {preview
+              ? <img src={preview} alt="design reference" crossOrigin="anonymous" />
+              : <div className="tp-ref-ph"></div>}
+          </div>
+          <table className="tp-table tp-ref-table">
+            <tbody>
+              <tr><td className="ltr left"><b>Style Code</b></td><td className="ltr left">{tp.styleCode}</td></tr>
+              <tr><td className="ltr left"><b>Style Name</b></td><td className="ltr left">{tp.garmentName}</td></tr>
+              <tr><td className="ltr left"><b>Season</b></td><td className="ltr left">{tp.season}</td></tr>
+              <tr><td className="ltr left"><b>Category</b></td><td className="ltr left">{tp.category}</td></tr>
+              <tr><td className="ltr left"><b>Sample Size</b></td><td className="ltr left">{tp.sampleSize}</td></tr>
+              <tr><td className="ltr left"><b>Vendor</b></td><td className="ltr left">{tp.brandName}</td></tr>
+              <tr><td className="ltr left"><b>Date</b></td><td className="ltr left">{(tp.generatedAt || '').slice(0, 10)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </TpSection>
+
+      {/* 02 — GARMENT INFORMATION */}
       {tp.garmentInfo && (
-        <TpSection n="01" title="GARMENT INFORMATION" subtitle="معلومات القطعة">
+        <TpSection n="02" title="GARMENT INFORMATION" subtitle="معلومات القطعة">
           <div className="tp-garment-info">
             <div className="tp-gi-item"><div className="tp-gi-label">Type</div><div className="tp-gi-value">{tp.garmentInfo.type}</div></div>
             <div className="tp-gi-item"><div className="tp-gi-label">Silhouette</div><div className="tp-gi-value">{tp.garmentInfo.silhouette}</div></div>
@@ -942,16 +964,16 @@ function TechpackView({ tp, preview }) {
 
       {/* 02 — TECHNICAL FLAT SKETCH (أمامي + خلفي، خطوط رمادية) */}
       {(tp.flatSketchImage || tp.flatColorImage) && (
-        <TpSection n="02" title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية — أمامي وخلفي">
+        <TpSection n="03" title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية — أمامي وخلفي">
           <div className="tp-flat-single">
-            <img src={tp.flatSketchImage || tp.flatColorImage} alt="technical flat front and back" className="tp-flat-gray" crossOrigin="anonymous" />
+            <img src={tp.flatSketchImage || tp.flatColorImage} alt="technical flat front and back" className={tp.flatSketchImage ? '' : 'tp-flat-gray'} crossOrigin="anonymous" />
           </div>
           <div className="tp-flat-caption">FRONT &amp; BACK · مرجع نقاط القياس في جدول المواصفات (عمود Ref)</div>
         </TpSection>
       )}
 
       {/* 03 — MEASUREMENT SPECIFICATION */}
-      <TpSection n="03" title="MEASUREMENT SPECIFICATION" subtitle="جدول القياسات المتدرّج (سم)">
+      <TpSection n="04" title="MEASUREMENT SPECIFICATION" subtitle="جدول القياسات المتدرّج (سم)">
         <table className="tp-table">
           <thead>
             <tr>
@@ -973,7 +995,7 @@ function TechpackView({ tp, preview }) {
       </TpSection>
 
       {/* 04 — MATERIALS */}
-      <TpSection n="04" title="MATERIALS" subtitle="الخامات">
+      <TpSection n="05" title="MATERIALS" subtitle="الخامات">
         {tp.materialsPageImage && (
           <div className="tp-page-img"><img src={tp.materialsPageImage} alt="materials" crossOrigin="anonymous" /></div>
         )}
@@ -998,27 +1020,30 @@ function TechpackView({ tp, preview }) {
         </div>
       </TpSection>
 
-      {/* 05 — MATERIALS CALLOUT (رسمة + دليل الخامات مرقّم) */}
+      {/* 05 — MATERIALS PLACEMENT (رسمة + موضع كل خامة) */}
       {(tp.flatColorImage || tp.flatSketchImage) && (tp.materials || []).length > 0 && (
-        <TpSection n="05" title="MATERIALS CALLOUT" subtitle="دليل الخامات">
+        <TpSection n="06" title="MATERIALS PLACEMENT" subtitle="موضع الخامات على القطعة">
           <div className="tp-callout-layout">
             <div className="tp-callout-sketch">
-              <img src={tp.flatColorImage || tp.flatSketchImage} alt="materials callout" crossOrigin="anonymous" />
+              <img src={tp.flatColorImage || tp.flatSketchImage} alt="materials placement" crossOrigin="anonymous" />
             </div>
-            <ol className="tp-callout-list">
-              {(tp.materials || []).map((m, i) => (
-                <li key={i}>
-                  <span className="tp-callout-num">{i + 1}</span>
-                  <span><b>{m.name}</b>{m.placement ? ' — ' + m.placement : ''}</span>
-                </li>
-              ))}
-            </ol>
+            <table className="tp-table tp-callout-table">
+              <thead><tr><th className="ltr">Material</th><th className="ltr">Placement</th></tr></thead>
+              <tbody>
+                {(tp.materials || []).filter((m) => m && m.name).map((m, i) => (
+                  <tr key={i}>
+                    <td className="ltr left"><b>{m.name}</b></td>
+                    <td className="ltr left sm">{m.placement || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </TpSection>
       )}
 
       {/* 06 — BILL OF MATERIALS */}
-      <TpSection n="06" title="BILL OF MATERIALS" subtitle="قائمة المواد">
+      <TpSection n="07" title="BILL OF MATERIALS" subtitle="قائمة المواد">
         <table className="tp-table">
           <thead><tr><th>#</th><th className="ltr">Item</th><th className="ltr">Description</th><th className="ltr">Placement</th><th>Qty</th><th>Unit</th></tr></thead>
           <tbody>
@@ -1036,7 +1061,7 @@ function TechpackView({ tp, preview }) {
       </TpSection>
 
       {/* 06 — CONSTRUCTION DETAILS */}
-      <TpSection n="07" title="CONSTRUCTION DETAILS" subtitle="تفاصيل البناء">
+      <TpSection n="08" title="CONSTRUCTION DETAILS" subtitle="تفاصيل البناء">
         <table className="tp-table">
           <thead><tr><th className="ltr">Section</th><th className="ltr">Detail</th><th className="ltr">Description</th></tr></thead>
           <tbody>
@@ -1049,7 +1074,7 @@ function TechpackView({ tp, preview }) {
 
       {/* 07 — DETAILED VIEWS (صورة صفحة التفاصيل + مواصفات) */}
       {(tp.detailsPageImage || (tp.detailViews && tp.detailViews.length > 0)) && (
-        <TpSection n="08" title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية">
+        <TpSection n="09" title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية">
           {tp.detailsPageImage && (
             <div className="tp-page-img"><img src={tp.detailsPageImage} alt="detailed views" crossOrigin="anonymous" /></div>
           )}
@@ -1068,7 +1093,7 @@ function TechpackView({ tp, preview }) {
 
       {/* 08 — LABEL PLACEMENT */}
       {tp.labelPlacement && tp.labelPlacement.length > 0 && (
-        <TpSection n="09" title="LABEL PLACEMENT" subtitle="مواضع الليبلات">
+        <TpSection n="10" title="LABEL PLACEMENT" subtitle="مواضع الليبلات">
           <table className="tp-table">
             <thead><tr><th className="ltr">Label</th><th className="ltr">Location</th><th className="ltr">Size</th><th className="ltr">Method</th></tr></thead>
             <tbody>
@@ -1081,7 +1106,7 @@ function TechpackView({ tp, preview }) {
       )}
 
       {/* 09 — COLORWAY & PANTONE */}
-      <TpSection n="10" title="COLORWAY & PANTONE" subtitle="الألوان">
+      <TpSection n="11" title="COLORWAY & PANTONE" subtitle="الألوان">
         <div className="tp-colorway-layout">
           {(tp.flatColorImage || tp.flatSketchImage) && (
             <div className="tp-colorway-sketch"><img src={tp.flatColorImage || tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" /></div>
@@ -1099,7 +1124,7 @@ function TechpackView({ tp, preview }) {
 
       {/* 10 — ARTWORK & PLACEMENT */}
       {tp.artwork && tp.artwork.length > 0 && (
-        <TpSection n="11" title="ARTWORK & PLACEMENT" subtitle="الأرتورك والمواضع">
+        <TpSection n="12" title="ARTWORK & PLACEMENT" subtitle="الأرتورك والمواضع">
           <table className="tp-table">
             <thead><tr><th className="ltr">Element</th><th className="ltr">Placement</th><th className="ltr">Size</th><th className="ltr">Notes</th></tr></thead>
             <tbody>
@@ -1112,14 +1137,16 @@ function TechpackView({ tp, preview }) {
       )}
 
       {/* 11 — SEWING INSTRUCTIONS */}
-      <TpSection n="12" title="SEWING INSTRUCTIONS" subtitle="تعليمات الخياطة">
+      {(tp.sewingSteps || []).length > 0 && (
+      <TpSection n="13" title="SEWING INSTRUCTIONS" subtitle="تعليمات الخياطة">
         <ol className="tp-steps">
           {(tp.sewingSteps || []).map((s, i) => (<li key={i} className="ltr">{s}</li>))}
         </ol>
       </TpSection>
+      )}
 
       {/* 13 — FIT LOG & REVISION HISTORY */}
-      <TpSection n="13" title="FIT LOG & REVISION HISTORY" subtitle="سجل القياس والمراجعات">
+      <TpSection n="14" title="FIT LOG & REVISION HISTORY" subtitle="سجل القياس والمراجعات">
         <table className="tp-table">
           <thead><tr><th>#</th><th className="ltr">Version</th><th className="ltr">Date</th><th className="ltr">Change / Fit Comment</th><th className="ltr">By</th></tr></thead>
           <tbody>
@@ -1588,12 +1615,18 @@ function StyleBlock() {
       .tp-detail-detail { color: var(--ink-soft); font-size: 0.76rem; line-height: 1.5; margin-top: 2px; direction: ltr; }
       .tp-detail-spec { color: var(--gold-deep); font-size: 0.74rem; margin-top: 3px; direction: ltr; }
 
-      .tp-callout-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: center; }
+      .tp-callout-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: start; }
+      .tp-ref-layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 1.5rem; align-items: start; }
+      @media (max-width: 700px) { .tp-ref-layout { grid-template-columns: 1fr; } }
+      .tp-ref-img { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+      .tp-ref-img img { width: 100%; display: block; }
+      .tp-ref-ph { width: 100%; aspect-ratio: 3/4; background: var(--cream-2); }
+      .tp-ref-table { font-size: 0.8rem; }
+      .tp-ref-table td { padding: 0.45rem 0.6rem; }
+      .tp-callout-table { font-size: 0.78rem; }
+      .tp-callout-table td, .tp-callout-table th { padding: 0.4rem 0.5rem; }
       @media (max-width: 700px) { .tp-callout-layout { grid-template-columns: 1fr; } }
       .tp-callout-sketch { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; padding: 0.6rem; }
-      .tp-callout-list { list-style: none; padding: 0; }
-      .tp-callout-list li { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--line); direction: ltr; text-align: left; font-size: 0.82rem; color: var(--ink); }
-      .tp-callout-num { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; background: #7a1420; color: #fff; font-size: 0.72rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
       .tp-color { display: flex; gap: 0.6rem; align-items: center; }
       .tp-color-sw { width: 42px; height: 42px; border-radius: 6px; border: 1px solid var(--line); }
       .tp-color-part { font-weight: 600; color: var(--ink); font-size: 0.85rem; }
