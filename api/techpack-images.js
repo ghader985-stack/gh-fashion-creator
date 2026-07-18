@@ -178,13 +178,28 @@ export default async function handler(req, res) {
       'Do NOT add sheer panels, mesh, chiffon yokes, illusion necklines, straps, sleeves, collars or any fabric that is not in the reference. ' +
       'Keep the exact neckline shape, the exact strap/strapless configuration, and reproduce all embroidery, beading and embellishment exactly where they appear. ';
 
+    // نقاط القياس تُرسم كأسهم استدعاء بأحرف مرجعية على الرسمة التقنية —
+    // يرسمها نفس النموذج الذي يرسم القطعة، فتقع في مواضعها الصحيحة.
+    const pts = Array.isArray(meta.measurePoints) ? meta.measurePoints.filter((p) => p && p.code && p.pom) : [];
+    const frontPts = pts.filter((p) => (p.view || 'front') !== 'back').map((p) => p.code + ' = ' + p.pom).join('; ');
+    const backPts = pts.filter((p) => p.view === 'back').map((p) => p.code + ' = ' + p.pom).join('; ');
+    const calloutInstruction = pts.length
+      ? ('Add measurement callouts exactly like a factory tech pack: for each point below draw a thin straight leader line from the correct anatomical location on the garment outward to the margin, ending in a small circle containing its reference letter. ' +
+         'Draw the leader lines and letter circles in a thin darker line so they are clearly separate from the garment outline. ' +
+         'Place the letters neatly along the outside edges, evenly spaced, never overlapping each other or the garment. ' +
+         (frontPts ? 'On the FRONT view (left drawing) mark: ' + frontPts + '. ' : '') +
+         (backPts ? 'On the BACK view (right drawing) mark: ' + backPts + '. ' : '') +
+         'Only single capital letters inside the circles — no other text, no numbers, no words. ')
+      : '';
+
     const techFlatPrompt =
       'Create a professional fashion technical flat sketch (CAD line drawing) of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale, both fully inside the frame with margins. ' +
       NO_INVENT +
       'Remove the person, model and body — draw only the garment as a flat technical drawing. ' +
       'Thin uniform black outlines on pure white background, no color, no shading, no fill. ' +
       'Draw the embroidery and embellishment as fine outlined detail, and show the seams, darts, princess lines, center-back zipper and back neckline. ' +
-      'Technical apparel production drawing, precise, vector style. No text, no arrows, no measurements, no watermark.';
+      calloutInstruction +
+      'Technical apparel production drawing, precise, vector style. No watermark.';
 
     const colorFlatPrompt =
       'Create two colored flat lay product drawings of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with margins. ' +
