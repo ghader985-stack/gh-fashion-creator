@@ -75,7 +75,7 @@ async function pollPrediction(prediction, token, maxTries) {
   return null;
 }
 
-async function generateFlatKontext(imageUrl, prompt, token, attempt = 0) {
+async function generateFlatKontext(imageUrl, prompt, token, aspect = 'match_input_image', attempt = 0) {
   const createRes = await fetch(REPLICATE_KONTEXT_URL, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
@@ -84,7 +84,7 @@ async function generateFlatKontext(imageUrl, prompt, token, attempt = 0) {
         prompt,
         input_image: imageUrl,
         output_format: 'jpg',
-        aspect_ratio: 'match_input_image',
+        aspect_ratio: aspect,
         safety_tolerance: 2,
       },
     }),
@@ -94,7 +94,7 @@ async function generateFlatKontext(imageUrl, prompt, token, attempt = 0) {
   try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Kontext رد غير متوقع'); }
   if (createRes.status === 429 && attempt < 3) {
     await new Promise((r) => setTimeout(r, 6000));
-    return generateFlatKontext(imageUrl, prompt, token, attempt + 1);
+    return generateFlatKontext(imageUrl, prompt, token, aspect, attempt + 1);
   }
   if (!createRes.ok || prediction.error) {
     throw new Error('Kontext (' + createRes.status + ')');
@@ -122,11 +122,11 @@ async function generateImage(prompt, aspectRatio, token, attempt = 0) {
 }
 
 // محاولة واحدة + إعادة محاولة واحدة عند الفشل (لضمان اكتمال الصور)
-async function safeKontext(imageUrl, prompt, token, capMs) {
-  let u = await withTimeout(generateFlatKontext(imageUrl, prompt, token).catch(() => null), capMs);
+async function safeKontext(imageUrl, prompt, token, capMs, aspect = 'match_input_image') {
+  let u = await withTimeout(generateFlatKontext(imageUrl, prompt, token, aspect).catch(() => null), capMs);
   if (!u) {
     await new Promise((r) => setTimeout(r, 2000));
-    u = await withTimeout(generateFlatKontext(imageUrl, prompt, token).catch(() => null), capMs);
+    u = await withTimeout(generateFlatKontext(imageUrl, prompt, token, aspect).catch(() => null), capMs);
   }
   return u;
 }
@@ -172,26 +172,43 @@ export default async function handler(req, res) {
       : '';
     const areaList = Array.isArray(meta.detailAreas) ? meta.detailAreas.filter(Boolean).join(', ') : '';
 
+    const NO_INVENT =
+      'CRITICAL: reproduce the garment EXACTLY as in the reference image. ' +
+      'Do NOT add, remove or alter any design element. ' +
+      'Do NOT add sheer panels, mesh, chiffon yokes, illusion necklines, straps, sleeves, collars or any fabric that is not in the reference. ' +
+      'Keep the exact neckline shape, the exact strap/strapless configuration, and reproduce all embroidery, beading and embellishment exactly where they appear. ';
+
     const techFlatPrompt =
-      'Convert this garment into a clean professional fashion technical flat sketch (CAD line drawing) showing the FRONT view on the left and the BACK view on the right, side by side on one white sheet. ' +
-      'Completely remove the person, model and body — show only the dress as a flat technical drawing. ' +
+      'Create a professional fashion technical flat sketch (CAD line drawing) of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale, both fully inside the frame with margins. ' +
+      NO_INVENT +
+      'Remove the person, model and body — draw only the garment as a flat technical drawing. ' +
       'Thin uniform black outlines on pure white background, no color, no shading, no fill. ' +
-      'The back view must show the center-back zipper and back neckline. Keep the exact silhouette, neckline, seams, embroidery placement and train. ' +
+      'Draw the embroidery and embellishment as fine outlined detail, and show the seams, darts, princess lines, center-back zipper and back neckline. ' +
       'Technical apparel production drawing, precise, vector style. No text, no arrows, no measurements, no watermark.';
 
     const colorFlatPrompt =
-      'Turn this garment into two clean flat lay product drawings placed side by side on one white sheet: the FRONT view on the left and the BACK view on the right. ' +
-      'Completely remove the person, model, body, head, arms and legs — show only the dress itself laid flat, no mannequin. ' +
-      'Keep the exact same design, color, silhouette, neckline, embroidery, seams and train. The back view must clearly show the center-back zipper and back neckline. ' +
-      'Even soft studio lighting, pure white background, both views same height and aligned. Fashion lookbook flat product shot. No text, no labels, no arrows, no watermark.';
+      'Create two colored flat lay product drawings of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with margins. ' +
+      NO_INVENT +
+      'Remove the person, model, body, head, arms and legs — show only the dress laid flat, no mannequin. ' +
+      'Keep the exact same colors, fabrics, embroidery and train as the reference. The back view must show the center-back zipper and back neckline. ' +
+      'Even soft studio lighting, pure white background. Fashion lookbook flat product shot. No text, no labels, no arrows, no watermark.';
 
     const matPrompt = (meta.materialsPagePrompt && meta.materialsPagePrompt.length > 40)
       ? meta.materialsPagePrompt
-      : ('A clean professional fashion tech pack MATERIALS page: an organized neat grid of equal square fabric and trim swatches on a white background, each square showing a different real material of this garment (' + matList + '). Studio product photography, soft even lighting, perfectly aligned grid, magazine quality.');
+      : ('Overhead flat lay photograph of real fabric and trim SAMPLES arranged in tidy rows on a plain white surface. ' +
+         'Each sample is a separate physical piece of textile with visible weave, texture, sheen and soft natural folds at the edges, casting subtle shadows — like a designer fabric sample board. ' +
+         'The samples are: ' + matList + '. Use these exact colors. ' +
+         'Include the trims as real objects too (zipper tape, boning strip, thread spool, hook-and-eye, crystals, woven label) photographed next to the fabrics. ' +
+         'Professional macro product photography, soft even studio lighting, shallow depth of field. ' +
+         'NOT a flat color chart, NOT wallpaper, NOT solid color squares, NOT a digital swatch grid.');
 
     const detPrompt = (meta.detailsPagePrompt && meta.detailsPagePrompt.length > 40)
       ? meta.detailsPagePrompt
-      : ('A clean professional fashion tech pack DETAILED VIEWS page: an organized grid of close-up macro photographs showing construction details of this exact garment (' + areaList + '), same color and design. Studio macro photography, soft lighting, aligned grid, high detail.');
+      : ('Create a page of close-up macro photographs of THIS EXACT garment, arranged as a neat grid of six detail shots on a white background. ' +
+         NO_INVENT +
+         'The details to show are: ' + (areaList || 'neckline, bust embroidery, center-back zipper, waist seam, hem, embellishment scatter') + '. ' +
+         'Every close-up must use the exact same fabric colors, embroidery and materials as the reference garment. ' +
+         'Studio macro photography, soft lighting, high detail, aligned grid. No text, no labels, no watermark.');
 
     // رفع صورة التصميم (مطلوب لاستدعاءات Kontext)
     let uploadedUrl = null;
@@ -201,12 +218,16 @@ export default async function handler(req, res) {
     const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
     // 4 استدعاءات فقط — واحد لكل صفحة — بالتوازي مع تباعد بسيط لتفادي 429.
-    // لكل واحد إعادة محاولة تلقائية واحدة عند الفشل.
+    // الرسمتان بنسبة عرضية (3:2) حتى يتّسع العرضان أمامي+خلفي دون قص.
+    // صفحة التفاصيل تُولَّد من صورة التصميم نفسها (Kontext) لا من نص،
+    // فتأتي بألوان القطعة وتطريزها الحقيقيين لا بألوان مخترَعة.
     const [flatSketchImage, flatColorImage, materialsPageImage, detailsPageImage] = await Promise.all([
-      uploadedUrl ? safeKontext(uploadedUrl, techFlatPrompt, replicateToken, 115000) : Promise.resolve(null),
-      uploadedUrl ? delay(1500).then(() => safeKontext(uploadedUrl, colorFlatPrompt, replicateToken, 115000)) : Promise.resolve(null),
-      delay(3000).then(() => safeFlux(matPrompt + '. ' + paletteHint + 'Use exact colors. ' + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken, 105000)),
-      delay(4500).then(() => safeFlux(detPrompt + '. ' + paletteHint + 'Use exact garment color. ' + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken, 105000)),
+      uploadedUrl ? safeKontext(uploadedUrl, techFlatPrompt, replicateToken, 115000, '3:2') : Promise.resolve(null),
+      uploadedUrl ? delay(1500).then(() => safeKontext(uploadedUrl, colorFlatPrompt, replicateToken, 115000, '3:2')) : Promise.resolve(null),
+      delay(3000).then(() => safeFlux(matPrompt + ' ' + paletteHint + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken, 105000)),
+      uploadedUrl
+        ? delay(4500).then(() => safeKontext(uploadedUrl, detPrompt + ' ' + paletteHint, replicateToken, 105000, '4:3'))
+        : delay(4500).then(() => safeFlux(detPrompt + ' ' + paletteHint + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken, 105000)),
     ]);
 
     return res.status(200).json({
