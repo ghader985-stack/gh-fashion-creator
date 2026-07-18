@@ -353,40 +353,61 @@ ${INDUSTRY_RULES}
       return res.status(500).json({ error: 'فشل تحليل التصميم: ' + errText.slice(0, 200) });
     }
 
-    // قراءة تدفّق الأحداث (SSE) وتجميع نص الرد
+    // قراءة تدفّق الأحداث (SSE) وتجميع نص الرد.
+    // ندعم نوعَي التدفّق: Web ReadableStream (getReader) و Node Readable (async iterator)
+    // حتى لا يفشل الاستلام حسب بيئة التشغيل.
     let raw = '';
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const consumeChunk = (chunk) => {
+      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t.startsWith('data:')) continue;
+        const payloadStr = t.slice(5).trim();
+        if (!payloadStr || payloadStr === '[DONE]') continue;
+        try {
+          const evt = JSON.parse(payloadStr);
+          if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
+            raw += evt.delta.text;
+          }
+        } catch (e) { /* سطر غير مكتمل — يُكمَّل في الدفعة التالية */ }
+      }
+    };
+
     try {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          const t = line.trim();
-          if (!t.startsWith('data:')) continue;
-          const payloadStr = t.slice(5).trim();
-          if (!payloadStr || payloadStr === '[DONE]') continue;
-          try {
-            const evt = JSON.parse(payloadStr);
-            if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
-              raw += evt.delta.text;
-            }
-          } catch (e) { /* تجاهل أسطر غير مكتملة */ }
+      const body = response.body;
+      if (body && typeof body.getReader === 'function') {
+        const reader = body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          consumeChunk(value);
         }
+      } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
+        for await (const chunk of body) consumeChunk(chunk);
+      } else {
+        // لا تدفّق متاح — نقرأ الرد كاملاً كنص
+        const full = await response.text();
+        full.split('\n').forEach((l) => consumeChunk(l + '\n'));
       }
     } catch (e) {
-      clearTimeout(claudeTimer);
-      return res.status(500).json({ error: 'انقطع تحليل التصميم أثناء الاستلام، حاولي مرة ثانية' });
+      // انقطاع أثناء الاستلام: لا نُهدر ما وصل — نكمل بما جُمِّع ونصلحه لاحقاً
     }
     clearTimeout(claudeTimer);
+
+    if (!raw || raw.trim().length < 40) {
+      return res.status(500).json({ error: 'انقطع تحليل التصميم أثناء الاستلام، حاولي مرة ثانية' });
+    }
 
     let techpack;
     try { techpack = safeJsonParse(raw); }
     catch (e) {
+      return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
+    }
+    if (!techpack || typeof techpack !== 'object' || Array.isArray(techpack)) {
       return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
     }
 
@@ -407,7 +428,6 @@ ${INDUSTRY_RULES}
       const matList = Array.isArray(techpack.materials)
         ? techpack.materials.map((m) => (m.name||'') + (m.pantone ? ' ('+m.pantone+')' : '')).filter(Boolean).join(', ')
         : '';
-      const gap = () => new Promise((r) => setTimeout(r, 1500)); // فاصل بين الطلبات لتفادي 429
 
       // نرفع صورة التصميم مرة واحدة (تُستخدم في استدعاءات Kontext)
       let uploadedUrl = null;
