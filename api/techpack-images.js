@@ -1,15 +1,15 @@
 // api/techpack-images.js
-// الطور 2: توليد كل صور التيك باك بهيكل Adstronaut الحرفي:
-// 1) SAMPLE MEASUREMENTS: رسمة أمامي+خلفي، القطعة بالأسود وخطوط القياس وأسماؤها بالأحمر الداكن
-// 2) MATERIALS CALLOUT: رسمة أمامي+خلفي بدوائر مرقّمة مطابقة لأرقام الـ BOM
-// 3) SEWING DETAILS: رسمة أمامي+خلفي بتسميات إنشائية قصيرة
-// 4) COLORWAYS: موك أب ملوّن أمامي+خلفي بدون جسم
-// 5) DETAILED VIEWS: شبكة ست لقطات ماكرو من القطعة نفسها
-// 6) صورة مستقلة لكل خامة (بطاقات صفحة MATERIALS) — بترتيب الـ BOM نفسه
+// الطور 2: توليد صور التيك باك.
 //
-// تستقبل: صورة التصميم (multipart) + حقل meta (JSON).
-// تُرجِع: { specSheetImage, calloutImage, sewingDetailImage, coloredMockupImage,
-//          detailsPageImage, materialPhotos: [...] }
+// درس التجربة السابقة (من لوغز Vercel): إطلاق 19 توليد بالتوازي اصطدم بسقف
+// التزامن عند Replicate — أول ~10 نجحوا والباقي انرفضوا فوراً (استدعاءات 20ms).
+// الحل: مجمّع تنفيذ (pool) بحد 4 مهام متزامنة، فلا يُرفض أي طلب.
+//
+// وقرار ثانٍ: لا نطلب من نماذج الصور رسم نصوص/أرقام (تطلع مشوّهة) —
+// نولّد رسمة تقنية نظيفة واحدة، والواجهة ترسم فوقها خطوط القياس والأرقام
+// والتسميات ككود (نص حاد 100%). هذا يقلّص Kontext من 5 إلى 3 استدعاءات.
+//
+// المخرجات: { flatImage, coloredMockupImage, detailsPageImage, materialPhotos: [...] }
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -24,6 +24,9 @@ const REPLICATE_FLUX_URL = 'https://api.replicate.com/v1/models/' + FLUX_MODEL +
 
 const KONTEXT_MODEL = 'black-forest-labs/flux-kontext-pro';
 const REPLICATE_KONTEXT_URL = 'https://api.replicate.com/v1/models/' + KONTEXT_MODEL + '/predictions';
+
+const CONCURRENCY = 4;      // تحت سقف التزامن عند Replicate
+const DEADLINE_MS = 240000; // نتوقف عن بدء محاولات جديدة قبل انتهاء مهلة الدالة
 
 // ============================================================================
 function withTimeout(promise, ms) {
@@ -80,73 +83,61 @@ async function pollPrediction(prediction, token, maxTries) {
   return null;
 }
 
-async function generateFlatKontext(imageUrl, prompt, token, aspect, attempt = 0) {
-  const createRes = await fetch(REPLICATE_KONTEXT_URL, {
+async function createPrediction(url, input, token, attempt = 0) {
+  const createRes = await fetch(url, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
-    body: JSON.stringify({
-      input: {
-        prompt,
-        input_image: imageUrl,
-        output_format: 'jpg',
-        aspect_ratio: aspect,
-        safety_tolerance: 2,
-      },
-    }),
-  });
-  const bodyText = await createRes.text();
-  let prediction;
-  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Kontext رد غير متوقع'); }
-  if (createRes.status === 429 && attempt < 3) {
-    await new Promise((r) => setTimeout(r, 6000));
-    return generateFlatKontext(imageUrl, prompt, token, aspect, attempt + 1);
-  }
-  if (!createRes.ok || prediction.error) {
-    throw new Error('Kontext (' + createRes.status + ')');
-  }
-  return pollPrediction(prediction, token, 70);
-}
-
-async function generateImage(prompt, aspectRatio, token, attempt = 0) {
-  const createRes = await fetch(REPLICATE_FLUX_URL, {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
-    body: JSON.stringify({
-      input: { prompt, aspect_ratio: aspectRatio, output_format: 'jpg', output_quality: 95, safety_tolerance: 2 },
-    }),
+    body: JSON.stringify({ input }),
   });
   const bodyText = await createRes.text();
   let prediction;
   try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('رد غير متوقع من Replicate'); }
-  if (createRes.status === 429 && attempt < 3) {
-    await new Promise((r) => setTimeout(r, 6000));
-    return generateImage(prompt, aspectRatio, token, attempt + 1);
+  if (createRes.status === 429 && attempt < 4) {
+    await new Promise((r) => setTimeout(r, 5000));
+    return createPrediction(url, input, token, attempt + 1);
   }
   if (!createRes.ok || prediction.error) throw new Error('Replicate (' + createRes.status + ')');
-  return pollPrediction(prediction, token, 60);
+  return pollPrediction(prediction, token, 70);
 }
 
-// محاولة + إعادة محاولة واحدة عند الفشل
-async function safeKontext(imageUrl, prompt, token, capMs, aspect) {
-  let u = await withTimeout(generateFlatKontext(imageUrl, prompt, token, aspect).catch(() => null), capMs);
-  if (!u) {
-    await new Promise((r) => setTimeout(r, 2000));
-    u = await withTimeout(generateFlatKontext(imageUrl, prompt, token, aspect).catch(() => null), capMs);
-  }
-  return u;
+const generateFlatKontext = (imageUrl, prompt, token, aspect) =>
+  createPrediction(REPLICATE_KONTEXT_URL, {
+    prompt, input_image: imageUrl, output_format: 'jpg', aspect_ratio: aspect, safety_tolerance: 2,
+  }, token);
+
+const generateImage = (prompt, aspectRatio, token) =>
+  createPrediction(REPLICATE_FLUX_URL, {
+    prompt, aspect_ratio: aspectRatio, output_format: 'jpg', output_quality: 95, safety_tolerance: 2,
+  }, token);
+
+// محاولة + إعادة محاولة واحدة، مع احترام الموعد النهائي للدالة
+function makeSafe(deadline) {
+  return async function safeRun(fn, capMs) {
+    if (Date.now() > deadline - 15000) return null;
+    let u = await withTimeout(fn().catch(() => null), Math.min(capMs, deadline - Date.now()));
+    if (!u && Date.now() < deadline - 20000) {
+      await new Promise((r) => setTimeout(r, 2000));
+      u = await withTimeout(fn().catch(() => null), Math.min(capMs, deadline - Date.now()));
+    }
+    return u;
+  };
 }
 
-async function safeFlux(prompt, aspect, token, capMs) {
-  let u = await withTimeout(generateImage(prompt, aspect, token).catch(() => null), capMs);
-  if (!u) {
-    await new Promise((r) => setTimeout(r, 2000));
-    u = await withTimeout(generateImage(prompt, aspect, token).catch(() => null), capMs);
-  }
-  return u;
+// مجمّع تنفيذ بحد أقصى للتزامن — يمنع رفض Replicate الفوري للطلبات الزائدة
+async function runPool(tasks, limit) {
+  const results = new Array(tasks.length).fill(null);
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) {
+      const i = next++;
+      try { results[i] = await tasks[i](); } catch (e) { results[i] = null; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
 }
 
 function getField(v) { return Array.isArray(v) ? v[0] : v; }
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ============================================================================
 export default async function handler(req, res) {
@@ -168,25 +159,6 @@ export default async function handler(req, res) {
     const imgBuffer = fs.readFileSync(imageFile.filepath);
     const mediaType = detectImageType(imgBuffer);
 
-    // ------------------------------------------------------------------
-    // بيانات الـ meta القادمة من طور التحليل
-    // ------------------------------------------------------------------
-    const labels = meta.specSheetLabels || {};
-    const frontLabels = Array.isArray(labels.front) ? labels.front.filter(Boolean) : [];
-    const backLabels = Array.isArray(labels.back) ? labels.back.filter(Boolean) : [];
-
-    const calloutMap = Array.isArray(meta.calloutMap)
-      ? meta.calloutMap.filter((c) => c && c.num && c.target)
-      : [];
-    const frontCallouts = calloutMap.filter((c) => (c.view || 'front') !== 'back');
-    const backCallouts = calloutMap.filter((c) => c.view === 'back');
-
-    const sewLabels = Array.isArray(meta.sewingDetailLabels)
-      ? meta.sewingDetailLabels.filter((s) => s && s.label)
-      : [];
-    const frontSew = sewLabels.filter((s) => (s.view || 'front') !== 'back').map((s) => s.label);
-    const backSew = sewLabels.filter((s) => s.view === 'back').map((s) => s.label);
-
     const materials = Array.isArray(meta.materials) ? meta.materials.slice(0, 16) : [];
     const areaList = Array.isArray(meta.detailAreas) ? meta.detailAreas.filter(Boolean).join(', ') : '';
     const paletteHint = Array.isArray(meta.colorway) && meta.colorway.length
@@ -194,72 +166,48 @@ export default async function handler(req, res) {
       : '';
 
     // ------------------------------------------------------------------
-    // البرومبتات — مطابقة لهيكل صفحات النموذج
+    // البرومبتات — بدون أي طلب لرسم نصوص أو أرقام داخل الصورة
     // ------------------------------------------------------------------
     const NO_INVENT =
       'CRITICAL: reproduce the garment EXACTLY as in the reference image. ' +
       'Do NOT add, remove or alter any design element. ' +
       'Do NOT add sheer panels, mesh, chiffon yokes, illusion necklines, straps, sleeves, collars or any fabric that is not in the reference. ' +
-      'Keep the exact neckline shape, the exact strap/strapless configuration, and reproduce all embroidery, beading and embellishment exactly where they appear. ';
+      'Keep the exact neckline shape and the exact strap/strapless configuration. ' +
+      'Preserve and reproduce ALL embroidery motifs, beading, crystals and embellishments in their exact locations, shapes and density. ';
 
-    const FLAT_BASE =
-      'Create a professional fashion technical flat drawing from this reference garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with generous margins. ' +
-      NO_INVENT +
-      'Remove the person, model and body entirely — draw only the garment as a flat technical CAD drawing with thin uniform BLACK outlines on a pure white background, no color, no shading, no fill. ' +
-      'Draw the embroidery and embellishment as fine outlined detail, and show the seams, darts, princess lines, the center-back zipper and the back neckline. ';
+    const NO_PERSON =
+      'Do NOT include any person, model, mannequin, dress form, body, skin, face, head, hair, arms, hands or legs anywhere in the image — the garment only. ';
 
-    // 1) صفحة SAMPLE MEASUREMENTS: خطوط القطعة سوداء + خطوط وأسماء القياس بالأحمر الداكن
-    const specSheetPrompt =
-      FLAT_BASE +
-      'Then annotate it exactly like a factory garment spec sheet: draw thin DARK RED measurement lines with small arrowheads spanning each measured area of the garment, and label every measurement line with its name written in small DARK RED capital letters next to or above the line. ' +
-      'The garment drawing stays BLACK; ALL measurement lines, arrows and label text are DARK RED so they are clearly separate from the garment. ' +
-      (frontLabels.length ? 'On the FRONT view (left drawing) annotate these measurements: ' + frontLabels.join(', ') + '. ' : '') +
-      (backLabels.length ? 'On the BACK view (right drawing) annotate these measurements: ' + backLabels.join(', ') + '. ' : '') +
-      'Horizontal measurements get horizontal double-arrow lines across the garment at the correct height; vertical lengths get vertical double-arrow lines along the garment. ' +
-      'Add a light gray dashed horizontal line labeled "Floor Plane" in small gray letters near the hem of the BACK view, with the train extending below it. ' +
-      'Labels must be short, clean, evenly placed, never overlapping each other or the garment outline. ' +
-      'No other text anywhere, no watermark. Precise vector-style technical apparel production drawing.';
+    // 1) رسمة تقنية نظيفة واحدة (أمامي + خلفي) — الواجهة ترسم فوقها القياسات والأرقام والتسميات
+    const flatPrompt =
+      'Create a professional fashion technical flat drawing from this reference garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with generous empty margins on the left and right sides. ' +
+      NO_INVENT + NO_PERSON +
+      'Flat technical CAD drawing style with thin uniform BLACK outlines on a pure white background, no color, no shading, no fill. ' +
+      'Draw the embroidery and embellishment as fine outlined detail. Show the seams, darts, princess lines, the center-back zipper and the back neckline on the back view. ' +
+      'Absolutely NO text, NO letters, NO numbers, NO labels, NO arrows, NO measurement lines, NO watermark — a completely clean drawing. Precise vector-style apparel production drawing.';
 
-    // 2) صفحة MATERIALS CALLOUT: دوائر مرقّمة بأرقام الـ BOM
-    const calloutLines = (list) => list.map((c) => c.num + ' = ' + c.target).join('; ');
-    const calloutPrompt =
-      FLAT_BASE +
-      'Then add numbered material callouts exactly like a factory tech pack: for each item below draw one thin straight BLACK leader line from the correct location on the garment outward to the clear margin, ending in a small circle containing its number. ' +
-      (frontCallouts.length ? 'On the FRONT view (left drawing) mark: ' + calloutLines(frontCallouts) + '. ' : '') +
-      (backCallouts.length ? 'On the BACK view (right drawing) mark: ' + calloutLines(backCallouts) + '. ' : '') +
-      'Only plain numerals inside the circles — no letters, no words, no other text anywhere. ' +
-      'Circles placed neatly in the margins, evenly spaced, never overlapping each other or the garment. No watermark.';
-
-    // 3) صفحة SEWING DETAILS: تسميات إنشائية قصيرة
-    const sewingPrompt =
-      FLAT_BASE +
-      'Then annotate the construction points like a factory sewing detail sheet: for each point below draw one thin BLACK leader line from the correct location on the garment outward to the margin, ending in a short printed text label in small dark capital letters naming that construction point. ' +
-      (frontSew.length ? 'On the FRONT view (left drawing) label: ' + frontSew.join('; ') + '. ' : '') +
-      (backSew.length ? 'On the BACK view (right drawing) label: ' + backSew.join('; ') + '. ' : '') +
-      'Labels short and clean, placed in the margins, evenly spaced, never overlapping. No other text, no watermark.';
-
-    // 4) صفحة COLORWAYS: موك أب ملوّن أمامي+خلفي بدون جسم
+    // 2) موك أب ملوّن أمامي + خلفي بدون جسم (صفحة الألوان)
     const coloredMockupPrompt =
       'Create two colored flat product drawings of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with margins. ' +
-      NO_INVENT +
-      'Remove the person, model, body, head, arms and legs — show only the garment laid flat, no mannequin. ' +
+      NO_INVENT + NO_PERSON +
+      'Show only the garment laid flat as a ghost-mannequin style product illustration. ' +
       'Keep the exact same colors, fabrics, embroidery and train as the reference. The back view must show the center-back zipper and back neckline. ' +
       paletteHint +
-      'Even soft studio lighting, pure white background. Fashion lookbook flat product shot. No text, no labels, no arrows, no watermark.';
+      'Even soft studio lighting, pure white background. No text, no labels, no arrows, no watermark.';
 
-    // 5) صفحة DETAILED VIEWS: شبكة ست لقطات ماكرو من القطعة نفسها
+    // 3) شبكة لقطات ماكرو للتفاصيل — قماش القطعة فقط، بدون أي جسم
     const detailsPrompt =
-      'Create a page of close-up macro photographs of THIS EXACT garment, arranged as a neat aligned grid of six detail shots on a white background. ' +
-      NO_INVENT +
-      'The details to show are: ' + (areaList || 'neckline, bust embroidery, center-back zipper, waist seam, hem, embellishment detail') + '. ' +
-      'Every close-up must use the exact same fabric colors, embroidery and materials as the reference garment. ' +
+      'Create a page of extreme close-up macro photographs of THIS EXACT garment, arranged as a neat aligned grid of six detail shots on a white background. ' +
+      NO_INVENT + NO_PERSON +
+      'Each shot is a tight macro crop of the garment fabric surface only: ' + (areaList || 'neckline edge, bust embroidery, center-back zipper, waist seam, hem edge, embellishment detail') + '. ' +
+      'Every close-up must use the exact same fabric colors, embroidery, beading and materials as the reference garment. ' +
       paletteHint +
       'Studio macro photography, soft even lighting, high detail. No text, no labels, no watermark.';
 
     // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
     const materialPrompt = (m) => {
       const p = (m && m.photoPrompt) || '';
-      if (p && p.length > 30) return p + ' No text, no watermark.';
+      if (p && p.length > 30) return p + ' No text, no letters, no watermark.';
       const name = (m && m.name) || 'fabric sample';
       const pantone = m && m.pantone ? ' color PANTONE ' + m.pantone + ',' : '';
       return 'Professional studio product photograph of a single ' + name + ' sample,' + pantone +
@@ -268,43 +216,33 @@ export default async function handler(req, res) {
     };
 
     // ------------------------------------------------------------------
-    // رفع صورة التصميم (مطلوبة لاستدعاءات Kontext الخمسة)
+    // رفع صورة التصميم (مطلوبة لاستدعاءات Kontext)
     // ------------------------------------------------------------------
     let uploadedUrl = null;
     try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 30000); }
     catch (e) { uploadedUrl = null; }
 
     // ------------------------------------------------------------------
-    // التنفيذ: 5 صفحات Kontext + صورة لكل خامة، بالتوازي مع تباعد لتفادي 429
+    // التنفيذ عبر المجمّع: 3 Kontext + صورة لكل خامة، بحد 4 متزامنة
     // ------------------------------------------------------------------
-    const kontextJobs = uploadedUrl
-      ? [
-          safeKontext(uploadedUrl, specSheetPrompt, replicateToken, 115000, '3:2'),
-          delay(1200).then(() => safeKontext(uploadedUrl, calloutPrompt, replicateToken, 115000, '3:2')),
-          delay(2400).then(() => safeKontext(uploadedUrl, sewingPrompt, replicateToken, 115000, '3:2')),
-          delay(3600).then(() => safeKontext(uploadedUrl, coloredMockupPrompt, replicateToken, 115000, '3:2')),
-          delay(4800).then(() => safeKontext(uploadedUrl, detailsPrompt, replicateToken, 110000, '4:3')),
-        ]
-      : [Promise.resolve(null), Promise.resolve(null), Promise.resolve(null), Promise.resolve(null), Promise.resolve(null)];
+    const deadline = Date.now() + DEADLINE_MS;
+    const safeRun = makeSafe(deadline);
 
-    const materialJobs = materials.map((m, i) =>
-      delay(6000 + i * 800).then(() => safeFlux(materialPrompt(m), '1:1', replicateToken, 90000))
-    );
+    const tasks = [];
+    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, flatPrompt, replicateToken, '3:2'), 110000) : Promise.resolve(null));
+    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, coloredMockupPrompt, replicateToken, '3:2'), 110000) : Promise.resolve(null));
+    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, detailsPrompt, replicateToken, '4:3'), 110000) : Promise.resolve(null));
+    for (const m of materials) {
+      tasks.push(() => safeRun(() => generateImage(materialPrompt(m), '1:1', replicateToken), 70000));
+    }
 
-    const [pageResults, materialPhotos] = await Promise.all([
-      Promise.all(kontextJobs),
-      Promise.all(materialJobs),
-    ]);
-
-    const [specSheetImage, calloutImage, sewingDetailImage, coloredMockupImage, detailsPageImage] = pageResults;
+    const results = await runPool(tasks, CONCURRENCY);
 
     return res.status(200).json({
-      specSheetImage: specSheetImage || null,
-      calloutImage: calloutImage || null,
-      sewingDetailImage: sewingDetailImage || null,
-      coloredMockupImage: coloredMockupImage || null,
-      detailsPageImage: detailsPageImage || null,
-      materialPhotos: materialPhotos.map((u) => u || null),
+      flatImage: results[0] || null,
+      coloredMockupImage: results[1] || null,
+      detailsPageImage: results[2] || null,
+      materialPhotos: results.slice(3).map((u) => u || null),
     });
   } catch (error) {
     return res.status(500).json({ error: 'خطأ في توليد الصور: ' + (error.message || 'غير معروف') });
