@@ -914,18 +914,13 @@ function TechpackView({ tp, preview }) {
         </TpSection>
       )}
 
-      {/* 02 — TECHNICAL FLAT SKETCH (أمامي + خلفي مع أسهم القياس) */}
-      {(tp.flatSketchFront || tp.flatSketchImage || tp.flatSketchBack) && (
-        <TpSection n="02" title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية (أمامي وخلفي)">
-          <div className="tp-flat-note"><span className="tp-flat-note-b">Garment: BLACK</span> · <span className="tp-flat-note-r">Measurement lines &amp; reference letters: RED</span></div>
-          <div className="tp-flat-grid">
-            <FlatWithArrows img={tp.flatSketchFront || tp.flatSketchImage} label="FRONT"
-              measurements={(tp.measurements || []).filter((m) => (m.view || 'front') === 'front')} />
-            {tp.flatSketchBack && (
-              <FlatWithArrows img={tp.flatSketchBack} label="BACK"
-                measurements={(tp.measurements || []).filter((m) => m.view === 'back')} />
-            )}
+      {/* 02 — TECHNICAL FLAT SKETCH (أمامي + خلفي، خطوط رمادية) */}
+      {(tp.flatSketchImage || tp.flatColorImage) && (
+        <TpSection n="02" title="TECHNICAL FLAT SKETCH" subtitle="الرسمة التقنية — أمامي وخلفي">
+          <div className="tp-flat-single">
+            <img src={tp.flatSketchImage || tp.flatColorImage} alt="technical flat front and back" className="tp-flat-gray" crossOrigin="anonymous" />
           </div>
+          <div className="tp-flat-caption">FRONT &amp; BACK · مرجع نقاط القياس في جدول المواصفات (عمود Ref)</div>
         </TpSection>
       )}
 
@@ -953,15 +948,8 @@ function TechpackView({ tp, preview }) {
 
       {/* 04 — MATERIALS */}
       <TpSection n="04" title="MATERIALS" subtitle="الخامات">
-        {tp.swatchImages && tp.swatchImages.length > 0 && (
-          <div className="tp-swatches">
-            {tp.swatchImages.filter((s) => s.url).map((s, i) => (
-              <div className="tp-swatch-card" key={i}>
-                <img src={s.url} alt={s.name} crossOrigin="anonymous" />
-                <div className="tp-swatch-name">{s.name}</div>
-              </div>
-            ))}
-          </div>
+        {tp.materialsPageImage && (
+          <div className="tp-page-img"><img src={tp.materialsPageImage} alt="materials" crossOrigin="anonymous" /></div>
         )}
         <div className="tp-materials">
           {(tp.materials || []).map((m, i) => (
@@ -984,32 +972,19 @@ function TechpackView({ tp, preview }) {
         </div>
       </TpSection>
 
-      {/* 05 — MATERIALS CALLOUT (رسمة بأرقام تشير للخامات) */}
-      {(tp.flatSketchFront || tp.flatSketchImage) && (tp.materials || []).length > 0 && (
-        <TpSection n="05" title="MATERIALS CALLOUT" subtitle="خريطة الخامات على الرسمة">
+      {/* 05 — MATERIALS CALLOUT (رسمة + دليل الخامات مرقّم) */}
+      {(tp.flatColorImage || tp.flatSketchImage) && (tp.materials || []).length > 0 && (
+        <TpSection n="05" title="MATERIALS CALLOUT" subtitle="دليل الخامات">
           <div className="tp-callout-layout">
             <div className="tp-callout-sketch">
-              <div className="tp-flat-inner">
-                <img src={tp.flatSketchFront || tp.flatSketchImage} alt="materials callout" crossOrigin="anonymous" className="tp-flat-img" />
-                <svg className="tp-flat-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  {(tp.materials || []).slice(0, 8).map((m, i) => {
-                    const pos = [
-                      { x: 50, y: 30 }, { x: 62, y: 55 }, { x: 50, y: 18 }, { x: 38, y: 45 },
-                      { x: 66, y: 78 }, { x: 34, y: 68 }, { x: 50, y: 88 }, { x: 58, y: 40 },
-                    ][i] || { x: 50, y: 50 };
-                    return (
-                      <g key={i}>
-                        <circle cx={pos.x} cy={pos.y} r="2.6" fill="#7a1420" stroke="#fff" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
-                        <text x={pos.x} y={pos.y + 0.9} fontSize="3" fontWeight="700" fill="#fff" textAnchor="middle" fontFamily="Arial">{i + 1}</text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
+              <img src={tp.flatColorImage || tp.flatSketchImage} alt="materials callout" crossOrigin="anonymous" />
             </div>
             <ol className="tp-callout-list">
-              {(tp.materials || []).slice(0, 8).map((m, i) => (
-                <li key={i}><span className="tp-callout-num">{i + 1}</span><span>{m.name}{m.placement ? ' — ' + m.placement : ''}</span></li>
+              {(tp.materials || []).map((m, i) => (
+                <li key={i}>
+                  <span className="tp-callout-num">{i + 1}</span>
+                  <span><b>{m.name}</b>{m.placement ? ' — ' + m.placement : ''}</span>
+                </li>
               ))}
             </ol>
           </div>
@@ -1046,23 +1021,22 @@ function TechpackView({ tp, preview }) {
         </table>
       </TpSection>
 
-      {/* 07 — DETAILED VIEWS (صور تكبير للأجزاء) */}
-      {tp.detailViews && tp.detailViews.length > 0 && (
-        <TpSection n="08" title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية (تكبير الأجزاء)">
-          <div className="tp-detail-grid">
-            {tp.detailViews.map((d, i) => (
-              <div className="tp-detail-card" key={i}>
-                {d.image
-                  ? <img src={d.image} alt={d.area} crossOrigin="anonymous" />
-                  : <div className="tp-detail-ph"></div>}
-                <div className="tp-detail-body">
-                  <div className="tp-detail-area">{d.area}</div>
-                  <div className="tp-detail-detail">{d.detail}</div>
-                  {d.spec && <div className="tp-detail-spec">{d.spec}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* 07 — DETAILED VIEWS (صورة صفحة التفاصيل + مواصفات) */}
+      {(tp.detailsPageImage || (tp.detailViews && tp.detailViews.length > 0)) && (
+        <TpSection n="08" title="DETAILED VIEWS" subtitle="التفاصيل الإنشائية">
+          {tp.detailsPageImage && (
+            <div className="tp-page-img"><img src={tp.detailsPageImage} alt="detailed views" crossOrigin="anonymous" /></div>
+          )}
+          {tp.detailViews && tp.detailViews.length > 0 && (
+            <table className="tp-table" style={{ marginTop: tp.detailsPageImage ? '1rem' : 0 }}>
+              <thead><tr><th className="ltr">Area</th><th className="ltr">Detail</th><th className="ltr">Spec</th></tr></thead>
+              <tbody>
+                {tp.detailViews.map((d, i) => (
+                  <tr key={i}><td className="ltr left">{d.area}</td><td className="ltr left sm">{d.detail}</td><td className="ltr left sm">{d.spec}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </TpSection>
       )}
 
@@ -1083,8 +1057,8 @@ function TechpackView({ tp, preview }) {
       {/* 09 — COLORWAY & PANTONE */}
       <TpSection n="10" title="COLORWAY & PANTONE" subtitle="الألوان">
         <div className="tp-colorway-layout">
-          {(tp.flatSketchFront || tp.flatSketchImage) && (
-            <div className="tp-colorway-sketch"><img src={tp.flatSketchFront || tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" /></div>
+          {(tp.flatColorImage || tp.flatSketchImage) && (
+            <div className="tp-colorway-sketch"><img src={tp.flatColorImage || tp.flatSketchImage} alt="colorway flat" crossOrigin="anonymous" /></div>
           )}
           <div className="tp-colors">
             {(tp.colorway || []).map((c, i) => (
@@ -1533,6 +1507,12 @@ function StyleBlock() {
       .tp-flat-note-b { color: var(--ink); font-weight: 700; }
       .tp-flat-note-r { color: #7a1420; font-weight: 700; }
       .tp-flat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .tp-flat-single { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+      .tp-page-img { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
+      .tp-page-img img { width: 100%; display: block; }
+      .tp-flat-single img { width: 100%; display: block; }
+      .tp-flat-gray { filter: grayscale(1) contrast(1.15) brightness(1.05); }
+      .tp-flat-caption { text-align: center; font-size: 0.72rem; color: var(--ink-soft); margin-top: 0.5rem; direction: rtl; }
       @media (max-width: 700px) { .tp-flat-grid { grid-template-columns: 1fr; } }
       .tp-flat-wrap { border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 0.6rem; }
       .tp-flat-inner { position: relative; width: 100%; }
@@ -1574,6 +1554,8 @@ function StyleBlock() {
       .tp-detail-card { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; }
       .tp-detail-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
       .tp-detail-ph { width: 100%; aspect-ratio: 1; background: var(--cream-2); }
+      .tp-detail-card.no-img { display: flex; align-items: center; background: var(--cream); }
+      .tp-detail-card.no-img .tp-detail-body { padding: 1rem; }
       .tp-detail-body { padding: 0.7rem; }
       .tp-detail-area { font-weight: 700; color: var(--ink); font-size: 0.85rem; direction: ltr; }
       .tp-detail-detail { color: var(--ink-soft); font-size: 0.76rem; line-height: 1.5; margin-top: 2px; direction: ltr; }
