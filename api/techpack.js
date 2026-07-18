@@ -319,7 +319,7 @@ ${INDUSTRY_RULES}
 
     const payload = {
       model: MODEL,
-      max_tokens: 20000,
+      max_tokens: 14000,
       stream: true,
       messages: [{
         role: 'user',
@@ -330,11 +330,21 @@ ${INDUSTRY_RULES}
       }],
     };
 
-    // نستخدم streaming: يبقي الاتصال حيّاً أثناء التحليل الطويل (لا انقطاع socket)،
-    // ونجمّع النص أثناء وصوله. مهلة أمان إجمالية 180 ثانية.
-    let response;
+    // مهلة "خمول" لا مهلة ثابتة: طالما النص يتدفّق، لا نقطع أبداً.
+    // نقطع فقط إذا توقّف الوصول 30 ثانية، أو عند سقف مطلق 175 ثانية.
+    const IDLE_MS = 30000;
+    const HARD_MS = 185000;
     const claudeController = new AbortController();
-    const claudeTimer = setTimeout(() => claudeController.abort(), 100000);
+    let idleTimer = null;
+    const resetIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => claudeController.abort(), IDLE_MS);
+    };
+    const hardTimer = setTimeout(() => claudeController.abort(), HARD_MS);
+    const clearClaudeTimers = () => { if (idleTimer) clearTimeout(idleTimer); clearTimeout(hardTimer); };
+    resetIdle();
+
+    let response;
     try {
       response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -343,12 +353,12 @@ ${INDUSTRY_RULES}
         signal: claudeController.signal,
       });
     } catch (e) {
-      clearTimeout(claudeTimer);
+      clearClaudeTimers();
       return res.status(500).json({ error: 'انتهت مهلة تحليل التصميم، حاولي مرة ثانية' });
     }
 
     if (!response.ok) {
-      clearTimeout(claudeTimer);
+      clearClaudeTimers();
       const errText = await response.text();
       return res.status(500).json({ error: 'فشل تحليل التصميم: ' + errText.slice(0, 200) });
     }
@@ -360,6 +370,7 @@ ${INDUSTRY_RULES}
     const decoder = new TextDecoder();
     let buffer = '';
     const consumeChunk = (chunk) => {
+      resetIdle(); // وصلت بيانات ⇒ نُصفّر مؤقّت الخمول فلا يُقطع تحليل شغّال
       buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -396,7 +407,7 @@ ${INDUSTRY_RULES}
     } catch (e) {
       // انقطاع أثناء الاستلام: لا نُهدر ما وصل — نكمل بما جُمِّع ونصلحه لاحقاً
     }
-    clearTimeout(claudeTimer);
+    clearClaudeTimers();
 
     if (!raw || raw.trim().length < 40) {
       return res.status(500).json({ error: 'انقطع تحليل التصميم أثناء الاستلام، حاولي مرة ثانية' });
@@ -414,69 +425,8 @@ ${INDUSTRY_RULES}
     techpack.brandName = brandName;
     techpack.generatedAt = new Date().toISOString();
 
-    // توليد الصور محاط بحماية كاملة: أي خطأ هنا لا يُسقط التيك باك (500)،
-    // بل يرجّع التيك باك بالنصوص والجداول + ما اكتمل من صور. التحليل نجح =
-    // النتيجة تصل دائماً، فلا يضيع رصيد Claude المدفوع.
-    try {
-    if (replicateToken) {
-
-      const STYLE = 'professional fashion technical documentation, high quality, clean, 8k';
-      const NO_TEXT = 'no text, no letters, no words, no watermark';
-      const paletteHint = Array.isArray(techpack.colorway) && techpack.colorway.length
-        ? 'garment color palette: ' + techpack.colorway.map((c) => (c.part||'')+' '+(c.hex||'')).join(', ') + '. '
-        : '';
-      const matList = Array.isArray(techpack.materials)
-        ? techpack.materials.map((m) => (m.name||'') + (m.pantone ? ' ('+m.pantone+')' : '')).filter(Boolean).join(', ')
-        : '';
-
-      // نرفع صورة التصميم مرة واحدة (تُستخدم في استدعاءات Kontext)
-      let uploadedUrl = null;
-      try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 20000); } catch (e) { uploadedUrl = null; }
-
-      // ===== استدعاء 1 و 2 معاً (بالتوازي): الرسمة التقنية + الكلورواي =====
-      const techFlatPrompt =
-        'Convert this garment into a clean professional fashion technical flat sketch (CAD line drawing) showing the FRONT view on the left and the BACK view on the right, side by side on one white sheet. ' +
-        'Completely remove the person, model and body — show only the dress as a flat technical drawing. ' +
-        'Thin uniform black outlines on pure white background, no color, no shading, no fill. ' +
-        'The back view must show the center-back zipper and back neckline. Keep the exact silhouette, neckline, seams, embroidery placement and train. ' +
-        'Technical apparel production drawing, precise, vector style. No text, no arrows, no measurements, no watermark.';
-      const colorFlatPrompt =
-        'Turn this garment into two clean flat lay product drawings placed side by side on one white sheet: the FRONT view on the left and the BACK view on the right. ' +
-        'Completely remove the person, model, body, head, arms and legs — show only the dress itself laid flat, no mannequin. ' +
-        'Keep the exact same design, color, silhouette, neckline, embroidery, seams and train. The back view must clearly show the center-back zipper and back neckline. ' +
-        'Even soft studio lighting, pure white background, both views same height and aligned. Fashion lookbook flat product shot. No text, no labels, no arrows, no watermark.';
-      // ===== كل الصور (4) بالتوازي مع تأخير بسيط بينها لتفادي 429 =====
-      // 4 استدعاءات متزامنة فقط (تحت حد Replicate)، فتنتهي مرحلة الصور بأسرع وقت.
-      const matPrompt = (techpack.materialsPagePrompt && techpack.materialsPagePrompt.length > 40)
-        ? techpack.materialsPagePrompt
-        : ('A clean professional fashion tech pack materials page: an organized neat grid of equal square fabric and trim swatches on a white background, each square a different real material of this garment (' + matList + '). Studio product photography, soft even lighting, perfectly aligned grid, magazine quality.');
-      const areaList = Array.isArray(techpack.detailViews)
-        ? techpack.detailViews.map((d) => d.area).filter(Boolean).join(', ') : '';
-      const detPrompt = (techpack.detailsPagePrompt && techpack.detailsPagePrompt.length > 40)
-        ? techpack.detailsPagePrompt
-        : ('A clean professional fashion tech pack detailed views page: an organized grid of close-up macro photographs showing construction details of this exact garment (' + areaList + '), same color and design. Studio macro photography, soft lighting, aligned grid, high detail.');
-      const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
-      const results = await Promise.all([
-        // 1) الرسمة التقنية (خطوط)
-        uploadedUrl ? withTimeout(safeFlatKontext(uploadedUrl, techFlatPrompt, replicateToken), 110000) : Promise.resolve(null),
-        // 2) الكلورواي (ملوّن) — تأخير 1.5s
-        uploadedUrl ? delay(1500).then(() => withTimeout(safeFlatKontext(uploadedUrl, colorFlatPrompt, replicateToken), 110000)) : Promise.resolve(null),
-        // 3) صفحة الخامات — تأخير 3s
-        delay(3000).then(() => withTimeout(safeGenerate(matPrompt + '. ' + paletteHint + 'Use exact colors. ' + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken), 95000)),
-        // 4) صفحة التفاصيل — تأخير 4.5s
-        delay(4500).then(() => withTimeout(safeGenerate(detPrompt + '. ' + paletteHint + 'Use exact garment color. ' + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken), 95000)),
-      ]);
-      if (results[0]) { techpack.flatSketchImage = results[0]; techpack.flatSketchFront = results[0]; }
-      if (results[1]) techpack.flatColorImage = results[1];
-      if (results[2]) techpack.materialsPageImage = results[2];
-      if (results[3]) techpack.detailsPageImage = results[3];
-    }
-    } catch (imgErr) {
-      // خطأ في مرحلة الصور لا يُسقط التيك باك — نرجّعه بما توفّر.
-      if (!Array.isArray(techpack.swatchImages)) techpack.swatchImages = [];
-    }
-
+    // الصور تُولَّد في نقطة نهاية منفصلة (/api/techpack-images) لكي يحصل كل
+    // طور على سقف 5 دقائق مستقل — فلا يزاحم التحليلُ الصورَ على وقت واحد.
     return res.status(200).json(techpack);
   } catch (error) {
     return res.status(500).json({ error: 'خطأ في الخادم: ' + (error.message || 'غير معروف') });
