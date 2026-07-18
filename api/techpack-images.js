@@ -1,10 +1,15 @@
 // api/techpack-images.js
-// نقطة نهاية مستقلة لتوليد صور التيك باك (4 صور — صفحة لكل استدعاء).
-// فصلها عن /api/techpack يمنح كل طور سقف 5 دقائق مستقلاً، فلا يزاحم
-// التحليلُ الصورَ على وقت واحد، ولا ينقطع أحدهما بسبب الآخر.
+// الطور 2: توليد كل صور التيك باك بهيكل Adstronaut الحرفي:
+// 1) SAMPLE MEASUREMENTS: رسمة أمامي+خلفي، القطعة بالأسود وخطوط القياس وأسماؤها بالأحمر الداكن
+// 2) MATERIALS CALLOUT: رسمة أمامي+خلفي بدوائر مرقّمة مطابقة لأرقام الـ BOM
+// 3) SEWING DETAILS: رسمة أمامي+خلفي بتسميات إنشائية قصيرة
+// 4) COLORWAYS: موك أب ملوّن أمامي+خلفي بدون جسم
+// 5) DETAILED VIEWS: شبكة ست لقطات ماكرو من القطعة نفسها
+// 6) صورة مستقلة لكل خامة (بطاقات صفحة MATERIALS) — بترتيب الـ BOM نفسه
 //
-// تستقبل: صورة التصميم (multipart) + حقل meta (JSON) فيه البرومبتات والبيانات.
-// تُرجِع: { flatSketchImage, flatColorImage, materialsPageImage, detailsPageImage }
+// تستقبل: صورة التصميم (multipart) + حقل meta (JSON).
+// تُرجِع: { specSheetImage, calloutImage, sewingDetailImage, coloredMockupImage,
+//          detailsPageImage, materialPhotos: [...] }
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -75,7 +80,7 @@ async function pollPrediction(prediction, token, maxTries) {
   return null;
 }
 
-async function generateFlatKontext(imageUrl, prompt, token, aspect = 'match_input_image', attempt = 0) {
+async function generateFlatKontext(imageUrl, prompt, token, aspect, attempt = 0) {
   const createRes = await fetch(REPLICATE_KONTEXT_URL, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
@@ -121,8 +126,8 @@ async function generateImage(prompt, aspectRatio, token, attempt = 0) {
   return pollPrediction(prediction, token, 60);
 }
 
-// محاولة واحدة + إعادة محاولة واحدة عند الفشل (لضمان اكتمال الصور)
-async function safeKontext(imageUrl, prompt, token, capMs, aspect = 'match_input_image') {
+// محاولة + إعادة محاولة واحدة عند الفشل
+async function safeKontext(imageUrl, prompt, token, capMs, aspect) {
   let u = await withTimeout(generateFlatKontext(imageUrl, prompt, token, aspect).catch(() => null), capMs);
   if (!u) {
     await new Promise((r) => setTimeout(r, 2000));
@@ -141,6 +146,7 @@ async function safeFlux(prompt, aspect, token, capMs) {
 }
 
 function getField(v) { return Array.isArray(v) ? v[0] : v; }
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ============================================================================
 export default async function handler(req, res) {
@@ -162,94 +168,143 @@ export default async function handler(req, res) {
     const imgBuffer = fs.readFileSync(imageFile.filepath);
     const mediaType = detectImageType(imgBuffer);
 
-    const STYLE = 'professional fashion technical documentation, high quality, clean, 8k';
-    const NO_TEXT = 'no text, no letters, no words, no watermark';
-    const paletteHint = Array.isArray(meta.colorway) && meta.colorway.length
-      ? 'garment color palette: ' + meta.colorway.map((c) => (c.part||'')+' '+(c.hex||'')).join(', ') + '. '
-      : '';
-    const matList = Array.isArray(meta.materials)
-      ? meta.materials.map((m) => (m.name||'') + (m.pantone ? ' ('+m.pantone+')' : '')).filter(Boolean).join(', ')
-      : '';
-    const areaList = Array.isArray(meta.detailAreas) ? meta.detailAreas.filter(Boolean).join(', ') : '';
+    // ------------------------------------------------------------------
+    // بيانات الـ meta القادمة من طور التحليل
+    // ------------------------------------------------------------------
+    const labels = meta.specSheetLabels || {};
+    const frontLabels = Array.isArray(labels.front) ? labels.front.filter(Boolean) : [];
+    const backLabels = Array.isArray(labels.back) ? labels.back.filter(Boolean) : [];
 
+    const calloutMap = Array.isArray(meta.calloutMap)
+      ? meta.calloutMap.filter((c) => c && c.num && c.target)
+      : [];
+    const frontCallouts = calloutMap.filter((c) => (c.view || 'front') !== 'back');
+    const backCallouts = calloutMap.filter((c) => c.view === 'back');
+
+    const sewLabels = Array.isArray(meta.sewingDetailLabels)
+      ? meta.sewingDetailLabels.filter((s) => s && s.label)
+      : [];
+    const frontSew = sewLabels.filter((s) => (s.view || 'front') !== 'back').map((s) => s.label);
+    const backSew = sewLabels.filter((s) => s.view === 'back').map((s) => s.label);
+
+    const materials = Array.isArray(meta.materials) ? meta.materials.slice(0, 16) : [];
+    const areaList = Array.isArray(meta.detailAreas) ? meta.detailAreas.filter(Boolean).join(', ') : '';
+    const paletteHint = Array.isArray(meta.colorway) && meta.colorway.length
+      ? 'Garment color palette: ' + meta.colorway.map((c) => (c.part || '') + ' ' + (c.hex || '')).join(', ') + '. '
+      : '';
+
+    // ------------------------------------------------------------------
+    // البرومبتات — مطابقة لهيكل صفحات النموذج
+    // ------------------------------------------------------------------
     const NO_INVENT =
       'CRITICAL: reproduce the garment EXACTLY as in the reference image. ' +
       'Do NOT add, remove or alter any design element. ' +
       'Do NOT add sheer panels, mesh, chiffon yokes, illusion necklines, straps, sleeves, collars or any fabric that is not in the reference. ' +
       'Keep the exact neckline shape, the exact strap/strapless configuration, and reproduce all embroidery, beading and embellishment exactly where they appear. ';
 
-    // نقاط القياس تُرسم كأسهم استدعاء بأحرف مرجعية على الرسمة التقنية —
-    // يرسمها نفس النموذج الذي يرسم القطعة، فتقع في مواضعها الصحيحة.
-    const pts = Array.isArray(meta.measurePoints) ? meta.measurePoints.filter((p) => p && p.code && p.pom) : [];
-    const frontPts = pts.filter((p) => (p.view || 'front') !== 'back').map((p) => p.code + ' = ' + p.pom).join('; ');
-    const backPts = pts.filter((p) => p.view === 'back').map((p) => p.code + ' = ' + p.pom).join('; ');
-    const calloutInstruction = pts.length
-      ? ('Add measurement callouts exactly like a factory tech pack: for each point below draw a thin straight leader line from the correct anatomical location on the garment outward to the margin, ending in a small circle containing its reference letter. ' +
-         'Draw the leader lines and letter circles in a thin darker line so they are clearly separate from the garment outline. ' +
-         'Place the letters neatly along the outside edges, evenly spaced, never overlapping each other or the garment. ' +
-         (frontPts ? 'On the FRONT view (left drawing) mark: ' + frontPts + '. ' : '') +
-         (backPts ? 'On the BACK view (right drawing) mark: ' + backPts + '. ' : '') +
-         'Only single capital letters inside the circles — no other text, no numbers, no words. ')
-      : '';
-
-    const techFlatPrompt =
-      'Create a professional fashion technical flat sketch (CAD line drawing) of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale, both fully inside the frame with margins. ' +
+    const FLAT_BASE =
+      'Create a professional fashion technical flat drawing from this reference garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with generous margins. ' +
       NO_INVENT +
-      'Remove the person, model and body — draw only the garment as a flat technical drawing. ' +
-      'Thin uniform black outlines on pure white background, no color, no shading, no fill. ' +
-      'Draw the embroidery and embellishment as fine outlined detail, and show the seams, darts, princess lines, center-back zipper and back neckline. ' +
-      calloutInstruction +
-      'Technical apparel production drawing, precise, vector style. No watermark.';
+      'Remove the person, model and body entirely — draw only the garment as a flat technical CAD drawing with thin uniform BLACK outlines on a pure white background, no color, no shading, no fill. ' +
+      'Draw the embroidery and embellishment as fine outlined detail, and show the seams, darts, princess lines, the center-back zipper and the back neckline. ';
 
-    const colorFlatPrompt =
-      'Create two colored flat lay product drawings of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with margins. ' +
+    // 1) صفحة SAMPLE MEASUREMENTS: خطوط القطعة سوداء + خطوط وأسماء القياس بالأحمر الداكن
+    const specSheetPrompt =
+      FLAT_BASE +
+      'Then annotate it exactly like a factory garment spec sheet: draw thin DARK RED measurement lines with small arrowheads spanning each measured area of the garment, and label every measurement line with its name written in small DARK RED capital letters next to or above the line. ' +
+      'The garment drawing stays BLACK; ALL measurement lines, arrows and label text are DARK RED so they are clearly separate from the garment. ' +
+      (frontLabels.length ? 'On the FRONT view (left drawing) annotate these measurements: ' + frontLabels.join(', ') + '. ' : '') +
+      (backLabels.length ? 'On the BACK view (right drawing) annotate these measurements: ' + backLabels.join(', ') + '. ' : '') +
+      'Horizontal measurements get horizontal double-arrow lines across the garment at the correct height; vertical lengths get vertical double-arrow lines along the garment. ' +
+      'Add a light gray dashed horizontal line labeled "Floor Plane" in small gray letters near the hem of the BACK view, with the train extending below it. ' +
+      'Labels must be short, clean, evenly placed, never overlapping each other or the garment outline. ' +
+      'No other text anywhere, no watermark. Precise vector-style technical apparel production drawing.';
+
+    // 2) صفحة MATERIALS CALLOUT: دوائر مرقّمة بأرقام الـ BOM
+    const calloutLines = (list) => list.map((c) => c.num + ' = ' + c.target).join('; ');
+    const calloutPrompt =
+      FLAT_BASE +
+      'Then add numbered material callouts exactly like a factory tech pack: for each item below draw one thin straight BLACK leader line from the correct location on the garment outward to the clear margin, ending in a small circle containing its number. ' +
+      (frontCallouts.length ? 'On the FRONT view (left drawing) mark: ' + calloutLines(frontCallouts) + '. ' : '') +
+      (backCallouts.length ? 'On the BACK view (right drawing) mark: ' + calloutLines(backCallouts) + '. ' : '') +
+      'Only plain numerals inside the circles — no letters, no words, no other text anywhere. ' +
+      'Circles placed neatly in the margins, evenly spaced, never overlapping each other or the garment. No watermark.';
+
+    // 3) صفحة SEWING DETAILS: تسميات إنشائية قصيرة
+    const sewingPrompt =
+      FLAT_BASE +
+      'Then annotate the construction points like a factory sewing detail sheet: for each point below draw one thin BLACK leader line from the correct location on the garment outward to the margin, ending in a short printed text label in small dark capital letters naming that construction point. ' +
+      (frontSew.length ? 'On the FRONT view (left drawing) label: ' + frontSew.join('; ') + '. ' : '') +
+      (backSew.length ? 'On the BACK view (right drawing) label: ' + backSew.join('; ') + '. ' : '') +
+      'Labels short and clean, placed in the margins, evenly spaced, never overlapping. No other text, no watermark.';
+
+    // 4) صفحة COLORWAYS: موك أب ملوّن أمامي+خلفي بدون جسم
+    const coloredMockupPrompt =
+      'Create two colored flat product drawings of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with margins. ' +
       NO_INVENT +
-      'Remove the person, model, body, head, arms and legs — show only the dress laid flat, no mannequin. ' +
+      'Remove the person, model, body, head, arms and legs — show only the garment laid flat, no mannequin. ' +
       'Keep the exact same colors, fabrics, embroidery and train as the reference. The back view must show the center-back zipper and back neckline. ' +
+      paletteHint +
       'Even soft studio lighting, pure white background. Fashion lookbook flat product shot. No text, no labels, no arrows, no watermark.';
 
-    const matPrompt = (meta.materialsPagePrompt && meta.materialsPagePrompt.length > 40)
-      ? meta.materialsPagePrompt
-      : ('Overhead flat lay photograph of real fabric and trim SAMPLES arranged in tidy rows on a plain white surface. ' +
-         'Each sample is a separate physical piece of textile with visible weave, texture, sheen and soft natural folds at the edges, casting subtle shadows — like a designer fabric sample board. ' +
-         'The samples are: ' + matList + '. Use these exact colors. ' +
-         'Include the trims as real objects too (zipper tape, boning strip, thread spool, hook-and-eye, crystals, woven label) photographed next to the fabrics. ' +
-         'Professional macro product photography, soft even studio lighting, shallow depth of field. ' +
-         'NOT a flat color chart, NOT wallpaper, NOT solid color squares, NOT a digital swatch grid.');
+    // 5) صفحة DETAILED VIEWS: شبكة ست لقطات ماكرو من القطعة نفسها
+    const detailsPrompt =
+      'Create a page of close-up macro photographs of THIS EXACT garment, arranged as a neat aligned grid of six detail shots on a white background. ' +
+      NO_INVENT +
+      'The details to show are: ' + (areaList || 'neckline, bust embroidery, center-back zipper, waist seam, hem, embellishment detail') + '. ' +
+      'Every close-up must use the exact same fabric colors, embroidery and materials as the reference garment. ' +
+      paletteHint +
+      'Studio macro photography, soft even lighting, high detail. No text, no labels, no watermark.';
 
-    const detPrompt = (meta.detailsPagePrompt && meta.detailsPagePrompt.length > 40)
-      ? meta.detailsPagePrompt
-      : ('Create a page of close-up macro photographs of THIS EXACT garment, arranged as a neat grid of six detail shots on a white background. ' +
-         NO_INVENT +
-         'The details to show are: ' + (areaList || 'neckline, bust embroidery, center-back zipper, waist seam, hem, embellishment scatter') + '. ' +
-         'Every close-up must use the exact same fabric colors, embroidery and materials as the reference garment. ' +
-         'Studio macro photography, soft lighting, high detail, aligned grid. No text, no labels, no watermark.');
+    // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
+    const materialPrompt = (m) => {
+      const p = (m && m.photoPrompt) || '';
+      if (p && p.length > 30) return p + ' No text, no watermark.';
+      const name = (m && m.name) || 'fabric sample';
+      const pantone = m && m.pantone ? ' color PANTONE ' + m.pantone + ',' : '';
+      return 'Professional studio product photograph of a single ' + name + ' sample,' + pantone +
+        ' shown alone with visible texture and material detail, soft natural folds if it is a textile, on a plain neutral background. ' +
+        'Macro product photography, soft even studio lighting, photorealistic, high detail. No text, no letters, no watermark.';
+    };
 
-    // رفع صورة التصميم (مطلوب لاستدعاءات Kontext)
+    // ------------------------------------------------------------------
+    // رفع صورة التصميم (مطلوبة لاستدعاءات Kontext الخمسة)
+    // ------------------------------------------------------------------
     let uploadedUrl = null;
     try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 30000); }
     catch (e) { uploadedUrl = null; }
 
-    const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+    // ------------------------------------------------------------------
+    // التنفيذ: 5 صفحات Kontext + صورة لكل خامة، بالتوازي مع تباعد لتفادي 429
+    // ------------------------------------------------------------------
+    const kontextJobs = uploadedUrl
+      ? [
+          safeKontext(uploadedUrl, specSheetPrompt, replicateToken, 115000, '3:2'),
+          delay(1200).then(() => safeKontext(uploadedUrl, calloutPrompt, replicateToken, 115000, '3:2')),
+          delay(2400).then(() => safeKontext(uploadedUrl, sewingPrompt, replicateToken, 115000, '3:2')),
+          delay(3600).then(() => safeKontext(uploadedUrl, coloredMockupPrompt, replicateToken, 115000, '3:2')),
+          delay(4800).then(() => safeKontext(uploadedUrl, detailsPrompt, replicateToken, 110000, '4:3')),
+        ]
+      : [Promise.resolve(null), Promise.resolve(null), Promise.resolve(null), Promise.resolve(null), Promise.resolve(null)];
 
-    // 4 استدعاءات فقط — واحد لكل صفحة — بالتوازي مع تباعد بسيط لتفادي 429.
-    // الرسمتان بنسبة عرضية (3:2) حتى يتّسع العرضان أمامي+خلفي دون قص.
-    // صفحة التفاصيل تُولَّد من صورة التصميم نفسها (Kontext) لا من نص،
-    // فتأتي بألوان القطعة وتطريزها الحقيقيين لا بألوان مخترَعة.
-    const [flatSketchImage, flatColorImage, materialsPageImage, detailsPageImage] = await Promise.all([
-      uploadedUrl ? safeKontext(uploadedUrl, techFlatPrompt, replicateToken, 115000, '3:2') : Promise.resolve(null),
-      uploadedUrl ? delay(1500).then(() => safeKontext(uploadedUrl, colorFlatPrompt, replicateToken, 115000, '3:2')) : Promise.resolve(null),
-      delay(3000).then(() => safeFlux(matPrompt + ' ' + paletteHint + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken, 105000)),
-      uploadedUrl
-        ? delay(4500).then(() => safeKontext(uploadedUrl, detPrompt + ' ' + paletteHint, replicateToken, 105000, '4:3'))
-        : delay(4500).then(() => safeFlux(detPrompt + ' ' + paletteHint + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken, 105000)),
+    const materialJobs = materials.map((m, i) =>
+      delay(6000 + i * 800).then(() => safeFlux(materialPrompt(m), '1:1', replicateToken, 90000))
+    );
+
+    const [pageResults, materialPhotos] = await Promise.all([
+      Promise.all(kontextJobs),
+      Promise.all(materialJobs),
     ]);
 
+    const [specSheetImage, calloutImage, sewingDetailImage, coloredMockupImage, detailsPageImage] = pageResults;
+
     return res.status(200).json({
-      flatSketchImage: flatSketchImage || null,
-      flatColorImage: flatColorImage || null,
-      materialsPageImage: materialsPageImage || null,
+      specSheetImage: specSheetImage || null,
+      calloutImage: calloutImage || null,
+      sewingDetailImage: sewingDetailImage || null,
+      coloredMockupImage: coloredMockupImage || null,
       detailsPageImage: detailsPageImage || null,
+      materialPhotos: materialPhotos.map((u) => u || null),
     });
   } catch (error) {
     return res.status(500).json({ error: 'خطأ في توليد الصور: ' + (error.message || 'غير معروف') });
