@@ -298,22 +298,22 @@ ${INDUSTRY_RULES}
   "materials": [ { "name": "اسم الخامة بالإنجليزية", "type": "النوع", "composition": "التركيب مثل 100% Silk", "gsm": "الوزن التقديري مثل 180-220 gsm", "pantone": "كود Pantone إن أمكن", "placement": "مكان الاستخدام بالتفصيل", "notes": "وصف احترافي كامل للملمس والاستخدام (جملتان)" } ],
   "bom": [ { "item": "المادة بالإنجليزية", "description": "وصف تقني كامل مع GSM/القياس", "placement": "مكان الاستخدام", "qty": "الكمية", "unit": "الوحدة" } ],
   "construction": [ { "section": "القسم", "detail": "التفصيل", "description": "الوصف" } ],
-  "detailViews": [ { "area": "المنطقة بالإنجليزية مثل Neckline / Bust Embroidery / CB Zipper / Hem", "detail": "وصف التفصيل الإنشائي", "spec": "مواصفة/قياس", "zoomPrompt": "برومبت إنجليزي لصورة تكبير (close-up macro) لهذا الجزء من القطعة الفعلية، بنفس اللون والتصميم. extreme close-up detail, technical documentation photography" } ],
+  "detailViews": [ { "area": "المنطقة بالإنجليزية مثل Neckline / Bust Embroidery / CB Zipper / Hem", "detail": "وصف التفصيل الإنشائي", "spec": "مواصفة/قياس" } ],
   "labelPlacement": [ { "label": "اسم الليبل بالإنجليزية", "location": "المكان الدقيق", "size": "القياس", "method": "الطريقة مثل Woven/Printed/Heat-seal" } ],
   "colorway": [ { "part": "الجزء", "pantone": "كود Pantone", "hex": "#XXXXXX" } ],
   "artwork": [ { "name": "العنصر", "placement": "المكان", "size": "القياس", "notes": "ملاحظات" } ],
   "sewingSteps": [ "خطوة 1", "... (10 خطوات على الأقل)" ],
   "fitLog": [ { "version": "v0", "date": "التاريخ", "change": "وصف التغيير أو ملاحظة الفِت بالإنجليزية", "by": "GH Couture AI" } ],
-  "materialSwatches": [ { "name": "الخامة", "swatchPrompt": "برومبت إنجليزي لصورة ماكرو قريبة للخامة. اذكري اللون الدقيق صراحةً في البداية مثل 'emerald green silk chiffon'. fabric swatch macro photography, soft even studio lighting" } ]
+  "materialsPagePrompt": "برومبت إنجليزي واحد لصورة صفحة الخامات كاملة: شبكة (grid) أنيقة ومنظّمة من مربّعات متساوية، كل مربّع عيّنة قماش/خامة حقيقية مختلفة من هذه القطعة (اذكري كل خامة بلونها: main body fabric, lining, chiffon overlay, embroidered tulle, zipper, thread, boning, crystals...). صياغة مقترحة: 'A clean professional fashion tech pack MATERIALS page: an organized neat grid of equal square swatches on a white background, each square showing a different real fabric or trim of this garment [list them with exact colors]. Studio product photography, soft even lighting, aligned grid, magazine quality. No text, no labels, no watermark.'",
+  "detailsPagePrompt": "برومبت إنجليزي واحد لصورة صفحة التفاصيل كاملة: شبكة (grid) أنيقة من صور تكبير (close-up macro) لأجزاء هذه القطعة (bust embroidery, neckline, CB zipper, hem, crystal scatter, seams). صياغة مقترحة: 'A clean professional fashion tech pack DETAILED VIEWS page: an organized grid of close-up macro photographs showing construction details of this exact garment [list areas], same color and design. Studio macro photography, soft lighting, aligned grid, high detail. No text, no labels, no watermark.'"
 }
 
 مهم جداً:
-- 27 نقطة قياس على الأقل، متدرّجة منطقياً. كل نقطة لها view (front أو back)، anchor صحيح من القائمة، و orient (h أفقي أو v عمودي) — هذه لوضع الأسهم على الرسمة.
-- flatSketchPromptFront و flatSketchPromptBack ضروريان — صِفي القطعة الفعلية بدقة داخلهما.
-- المواد (materials): وصف احترافي كامل لكل خامة مع composition و gsm و pantone و placement — لا اختصار. الهدف مستوى تيك باك مصنع حقيقي.
-- BOM: قائمة كاملة تشمل كل الإكسسوارات (السحاب، الخيط بلونه، hook-and-eye، الحشوات/الدعامات، الكريستال، الليبلات، أشرطة التثبيت، التغليف) — 12 بند على الأقل.
-- materialSwatches: عنصر واحد لكل خامة رئيسية (بحد أقصى 4).
-- detailViews: 4-6 مناطق مع zoomPrompt لكل واحدة.
+- 27 نقطة قياس على الأقل، متدرّجة منطقياً. كل نقطة لها view (front أو back).
+- المواد (materials): يجب أن تشمل نوعين — (أ) الأقمشة الرئيسية، و(ب) كل التريمات والإكسسوارات: السحاب، الخيط بلونه، hook-and-eye، الدعامات/العظام (boning)، شريط الدعم، الكريستال/الخرز، الليبلات (رئيسي + عناية)، الحشوات، التغليف. لكل عنصر composition/gsm/pantone/placement حين ينطبق ووصف احترافي. الحد الأدنى 10 عناصر. لا اختصار.
+- BOM: قائمة كاملة تشمل كل الإكسسوارات — 12 بند على الأقل.
+- detailViews: 4-6 مناطق (نصوص فقط، بدون برومبت لكل واحدة).
+- materialsPagePrompt و detailsPagePrompt: برومبت واحد لكل صفحة يصف شبكة منظّمة أنيقة (مش عناصر مبعثرة) — مهم جداً أن تكون الصورة مرتّبة كشبكة احترافية.
 - لا تضيفي أي خامة لم تذكرها المصممة صراحةً إن حدّدت خامات.
 - كل الأقسام ممتلئة بمحتوى حقيقي مبني على الصورة.`;
 
@@ -334,7 +334,7 @@ ${INDUSTRY_RULES}
     // ونجمّع النص أثناء وصوله. مهلة أمان إجمالية 180 ثانية.
     let response;
     const claudeController = new AbortController();
-    const claudeTimer = setTimeout(() => claudeController.abort(), 180000);
+    const claudeTimer = setTimeout(() => claudeController.abort(), 100000);
     try {
       response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -404,55 +404,53 @@ ${INDUSTRY_RULES}
       const paletteHint = Array.isArray(techpack.colorway) && techpack.colorway.length
         ? 'garment color palette: ' + techpack.colorway.map((c) => (c.part||'')+' '+(c.hex||'')).join(', ') + '. '
         : '';
-      const gap = () => new Promise((r) => setTimeout(r, 1200)); // فاصل بين الطلبات لتفادي 429
+      const matList = Array.isArray(techpack.materials)
+        ? techpack.materials.map((m) => (m.name||'') + (m.pantone ? ' ('+m.pantone+')' : '')).filter(Boolean).join(', ')
+        : '';
+      const gap = () => new Promise((r) => setTimeout(r, 1500)); // فاصل بين الطلبات لتفادي 429
 
-      // ===== 1) الرسمة الفلات (أمامي + خلفي) عبر Kontext =====
-      const defaultFront =
-        'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing) showing BOTH the FRONT view and the BACK view side by side on the same sheet. ' +
-        'Front view on the left, back view on the right (showing the back closure/zipper, back neckline and back seams). ' +
-        'Remove the model and body completely, show only the garment as flat lay drawings. ' +
-        'Thin uniform black outlines on pure white background, no shading, no color, no fill, ' +
-        'keep the exact same silhouette, neckline, seams and construction details. ' +
-        'Technical apparel production drawing, minimal, precise, vector style. No text, no arrows, no measurements, no watermark.';
-      const frontPrompt = (techpack.flatSketchPromptFront && techpack.flatSketchPromptFront.length > 40)
-        ? techpack.flatSketchPromptFront : defaultFront;
-
+      // نرفع صورة التصميم مرة واحدة (تُستخدم في استدعاءات Kontext)
       let uploadedUrl = null;
       try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 20000); } catch (e) { uploadedUrl = null; }
 
-      if (uploadedUrl) {
-        const u = await withTimeout(safeFlatKontext(uploadedUrl, frontPrompt, replicateToken), 110000);
-        if (u) { techpack.flatSketchFront = u; techpack.flatSketchImage = u; }
-      }
+      // ===== استدعاء 1 و 2 معاً (بالتوازي): الرسمة التقنية + الكلورواي =====
+      const techFlatPrompt =
+        'Convert this garment into a clean professional fashion technical flat sketch (CAD line drawing) showing the FRONT view on the left and the BACK view on the right, side by side on one white sheet. ' +
+        'Completely remove the person, model and body — show only the dress as a flat technical drawing. ' +
+        'Thin uniform black outlines on pure white background, no color, no shading, no fill. ' +
+        'The back view must show the center-back zipper and back neckline. Keep the exact silhouette, neckline, seams, embroidery placement and train. ' +
+        'Technical apparel production drawing, precise, vector style. No text, no arrows, no measurements, no watermark.';
+      const colorFlatPrompt =
+        'Turn this garment into two clean flat lay product drawings placed side by side on one white sheet: the FRONT view on the left and the BACK view on the right. ' +
+        'Completely remove the person, model, body, head, arms and legs — show only the dress itself laid flat, no mannequin. ' +
+        'Keep the exact same design, color, silhouette, neckline, embroidery, seams and train. The back view must clearly show the center-back zipper and back neckline. ' +
+        'Even soft studio lighting, pure white background, both views same height and aligned. Fashion lookbook flat product shot. No text, no labels, no arrows, no watermark.';
+      // ===== كل الصور (4) بالتوازي مع تأخير بسيط بينها لتفادي 429 =====
+      // 4 استدعاءات متزامنة فقط (تحت حد Replicate)، فتنتهي مرحلة الصور بأسرع وقت.
+      const matPrompt = (techpack.materialsPagePrompt && techpack.materialsPagePrompt.length > 40)
+        ? techpack.materialsPagePrompt
+        : ('A clean professional fashion tech pack materials page: an organized neat grid of equal square fabric and trim swatches on a white background, each square a different real material of this garment (' + matList + '). Studio product photography, soft even lighting, perfectly aligned grid, magazine quality.');
+      const areaList = Array.isArray(techpack.detailViews)
+        ? techpack.detailViews.map((d) => d.area).filter(Boolean).join(', ') : '';
+      const detPrompt = (techpack.detailsPagePrompt && techpack.detailsPagePrompt.length > 40)
+        ? techpack.detailsPagePrompt
+        : ('A clean professional fashion tech pack detailed views page: an organized grid of close-up macro photographs showing construction details of this exact garment (' + areaList + '), same color and design. Studio macro photography, soft lighting, aligned grid, high detail.');
+      const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-      // ===== 2) صور الخامات — واحدة تلو الأخرى (تفادي 429) =====
-      const swatches = Array.isArray(techpack.materialSwatches) ? techpack.materialSwatches.slice(0,4) : [];
-      const swatchResults = [];
-      for (const sw of swatches) {
-        if (sw && sw.swatchPrompt) {
-          await gap();
-          const url = await withTimeout(
-            safeGenerate(`${sw.swatchPrompt}. ${paletteHint}Use the exact fabric color described, do not change the color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken),
-            70000
-          );
-          if (url) swatchResults.push({ name: sw.name || '', url });
-        }
-      }
-      techpack.swatchImages = swatchResults;
-
-      // ===== 3) صور تكبير الأجزاء — واحدة تلو الأخرى =====
-      const details = Array.isArray(techpack.detailViews) ? techpack.detailViews.slice(0,2) : [];
-      for (let i = 0; i < details.length; i++) {
-        const dv = details[i];
-        if (dv && dv.zoomPrompt) {
-          await gap();
-          const url = await withTimeout(
-            safeGenerate(`${dv.zoomPrompt}. ${paletteHint}Use the exact garment color. ${STYLE}. ${NO_TEXT}.`, '1:1', replicateToken),
-            70000
-          );
-          if (url) techpack.detailViews[i].image = url;
-        }
-      }
+      const results = await Promise.all([
+        // 1) الرسمة التقنية (خطوط)
+        uploadedUrl ? withTimeout(safeFlatKontext(uploadedUrl, techFlatPrompt, replicateToken), 110000) : Promise.resolve(null),
+        // 2) الكلورواي (ملوّن) — تأخير 1.5s
+        uploadedUrl ? delay(1500).then(() => withTimeout(safeFlatKontext(uploadedUrl, colorFlatPrompt, replicateToken), 110000)) : Promise.resolve(null),
+        // 3) صفحة الخامات — تأخير 3s
+        delay(3000).then(() => withTimeout(safeGenerate(matPrompt + '. ' + paletteHint + 'Use exact colors. ' + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken), 95000)),
+        // 4) صفحة التفاصيل — تأخير 4.5s
+        delay(4500).then(() => withTimeout(safeGenerate(detPrompt + '. ' + paletteHint + 'Use exact garment color. ' + STYLE + '. ' + NO_TEXT + '.', '4:3', replicateToken), 95000)),
+      ]);
+      if (results[0]) { techpack.flatSketchImage = results[0]; techpack.flatSketchFront = results[0]; }
+      if (results[1]) techpack.flatColorImage = results[1];
+      if (results[2]) techpack.materialsPageImage = results[2];
+      if (results[3]) techpack.detailsPageImage = results[3];
     }
     } catch (imgErr) {
       // خطأ في مرحلة الصور لا يُسقط التيك باك — نرجّعه بما توفّر.
