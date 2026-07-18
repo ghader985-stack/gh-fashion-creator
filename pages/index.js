@@ -35,6 +35,7 @@ export default function Home() {
   const [tpSeason, setTpSeason] = useState('');
   const [tpNotes, setTpNotes] = useState('');
   const [tpLoading, setTpLoading] = useState(false);
+  const [tpStage, setTpStage] = useState('');
   const [techpack, setTechpack] = useState(null);
   const [tpError, setTpError] = useState('');
   const [tpDownloading, setTpDownloading] = useState(false);
@@ -251,6 +252,8 @@ export default function Home() {
     if (!tpImage) { alert('ارفعي صورة التصميم أولاً'); return; }
     setTpLoading(true); setTechpack(null); setTpError('');
     try {
+      // ===== الطور 1: التحليل (نص + جداول) =====
+      setTpStage('جارٍ تحليل التصميم…');
       const fd = new FormData();
       fd.append('image', tpImage);
       fd.append('garmentName', tpName);
@@ -260,10 +263,33 @@ export default function Home() {
       fd.append('brandName', 'GH Couture AI');
       const r = await fetch('/api/techpack', { method: 'POST', body: fd });
       const d = await r.json();
-      if (d.error) setTpError(d.error);
-      else { setTechpack(d); incrementUsage(); }
+      if (d.error) { setTpError(d.error); setTpLoading(false); setTpStage(''); return; }
+
+      // ===== الطور 2: الصور (4 صور — صفحة لكل استدعاء) =====
+      // طلب مستقل بسقف زمني مستقل، فلا يزاحم التحليلَ على الوقت.
+      setTpStage('جارٍ توليد صور التيك باك…');
+      let images = {};
+      try {
+        const fd2 = new FormData();
+        fd2.append('image', tpImage);
+        fd2.append('meta', JSON.stringify({
+          materialsPagePrompt: d.materialsPagePrompt || '',
+          detailsPagePrompt: d.detailsPagePrompt || '',
+          colorway: d.colorway || [],
+          materials: (d.materials || []).map((m) => ({ name: m.name, pantone: m.pantone })),
+          detailAreas: (d.detailViews || []).map((x) => x.area),
+        }));
+        const r2 = await fetch('/api/techpack-images', { method: 'POST', body: fd2 });
+        const d2 = await r2.json();
+        if (!d2.error) images = d2;
+      } catch { /* التحليل نجح — نعرضه حتى لو تعذّر توليد الصور */ }
+
+      // عرض النتيجة مرة واحدة كاملة
+      setTechpack({ ...d, ...images });
+      incrementUsage();
     } catch { setTpError('خطأ في الاتصال، حاولي مرة ثانية'); }
     setTpLoading(false);
+    setTpStage('');
   };
 
   const downloadTechpack = async () => {
@@ -605,12 +631,12 @@ export default function Home() {
                     </div>
                   </div>
                   <button onClick={handleTechpack} disabled={tpLoading} className="cta">
-                    {tpLoading ? <><span className="spinner"></span> جاري تحليل التصميم وبناء التيك باك...</> : 'أنشئي التيك باك'}
+                    {tpLoading ? <><span className="spinner"></span> {tpStage || 'جارٍ بناء التيك باك…'}</> : 'أنشئي التيك باك'}
                   </button>
                   {tpError && <div className="err">{tpError}</div>}
                 </section>
 
-                {tpLoading && <div className="loading-block"><span className="spinner-lg"></span><p>يتم تحليل التصميم واستخراج القياسات والمواد...</p></div>}
+                {tpLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{tpStage || 'يتم بناء التيك باك…'}</p><p className="loading-note">التيك باك سيظهر كاملاً عند الانتهاء</p></div>}
                 {!tpLoading && !techpack && <p className="placeholder">التيك باك سيظهر هنا</p>}
 
                 {techpack && (
@@ -1384,6 +1410,7 @@ function StyleBlock() {
 
       .err { margin-top: 1rem; padding: 0.9rem 1rem; background: #fdf0ed; color: #b04a35; border-radius: 8px; border: 1px solid #f0d5cd; font-size: 0.9rem; }
       .loading-block { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 3.5rem; color: var(--gold-deep); }
+      .loading-note { font-size: 0.78rem; color: var(--ink-soft); margin: 0; }
       .placeholder { color: var(--ink-soft); text-align: center; padding: 3rem; font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 1.2rem; opacity: 0.7; }
 
       .result-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
