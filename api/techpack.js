@@ -290,22 +290,20 @@ ${INDUSTRY_RULES}
   "description": "وصف دقيق للقطعة (بالعربية، سطرين)",
   "silhouette": "وصف السيلويت بالإنجليزية",
   "garmentInfo": { "type": "النوع", "silhouette": "السيلويت", "construction": "البناء", "neckline": "نوع الرقبة" },
-  "flatSketchPromptFront": "برومبت إنجليزي دقيق للرسمة الأمامية عبر image-to-image. صِفي القطعة الفعلية بدقة. استخدمي: 'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing), FRONT view. Remove the model and body completely, show only the [garment description] as a flat lay garment. Thin uniform black outlines on pure white background, no shading, no color, no fill, keep the exact same silhouette, neckline, seams and construction details. Technical apparel production drawing, minimal, precise, vector style. No text, no arrows, no measurements, no watermark.'",
-  "flatSketchPromptBack": "نفس البرومبت لكن BACK view: 'Convert this garment into a clean professional fashion technical flat sketch (CAD flat drawing), BACK view of the same garment. Show the back closure (zipper), back neckline and back seams. Remove the model and body completely, flat lay, thin uniform black outlines on pure white background, no shading, no color. Keep the exact same silhouette. Technical apparel production drawing, minimal, precise. No text, no arrows, no measurements, no watermark.'",
   "measurements": [
-    { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "view": "front|back", "anchor": "bust|topFront|topBack|waist|highHip|lowHip|thigh|knee|flareBreak|hemFront|hemBack|train|frontNeck|backNeck|zipper|cupHeight|bpToBp|sideLength|cfLength|cbLength|shoulderBust|sleeve|inseam|outseam|rise|other", "orient": "h|v", "tolerance": "±X.X", "sizes": { "XS":0,"S":0,"M":0,"L":0,"XL":0 } }
+    { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "view": "front|back", "tolerance": "±X.X", "sizes": { "XS":0,"S":0,"M":0,"L":0,"XL":0 } }
   ],
-  "materials": [ { "name": "اسم الخامة بالإنجليزية", "type": "النوع", "composition": "التركيب مثل 100% Silk", "gsm": "الوزن التقديري مثل 180-220 gsm", "pantone": "كود Pantone إن أمكن", "placement": "مكان الاستخدام بالتفصيل", "notes": "وصف احترافي كامل للملمس والاستخدام (جملتان)" } ],
-  "bom": [ { "item": "المادة بالإنجليزية", "description": "وصف تقني كامل مع GSM/القياس", "placement": "مكان الاستخدام", "qty": "الكمية", "unit": "الوحدة" } ],
+  "materials": [ { "name": "اسم الخامة بالإنجليزية", "type": "النوع", "composition": "التركيب مثل 100% Silk", "gsm": "الوزن التقديري مثل 180-220 gsm", "pantone": "كود Pantone إن أمكن", "placement": "موضع الاستخدام بالإنجليزية التقنية فقط، بصياغة مصانع الأزياء مثل: Bodice, waist panels and upper skirt / Center back seam / Flare skirt overlay and train. لا تترجمي المصطلحات حرفياً إلى العربية", "notes": "وصف احترافي كامل للملمس والاستخدام (جملتان)" } ],
+  "bom": [ { "item": "المادة بالإنجليزية", "description": "وصف تقني كامل مع GSM/القياس", "placement": "موضع الاستخدام بالإنجليزية التقنية فقط", "qty": "الكمية", "unit": "الوحدة" } ],
   "construction": [ { "section": "القسم", "detail": "التفصيل", "description": "الوصف" } ],
   "detailViews": [ { "area": "المنطقة بالإنجليزية مثل Neckline / Bust Embroidery / CB Zipper / Hem", "detail": "وصف التفصيل الإنشائي", "spec": "مواصفة/قياس" } ],
   "labelPlacement": [ { "label": "اسم الليبل بالإنجليزية", "location": "المكان الدقيق", "size": "القياس", "method": "الطريقة مثل Woven/Printed/Heat-seal" } ],
   "colorway": [ { "part": "الجزء", "pantone": "كود Pantone", "hex": "#XXXXXX" } ],
-  "artwork": [ { "name": "العنصر", "placement": "المكان", "size": "القياس", "notes": "ملاحظات" } ],
+  "artwork": [ { "name": "العنصر", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس", "notes": "ملاحظات" } ],
   "sewingSteps": [ "خطوة 1", "... (10 خطوات على الأقل)" ],
   "fitLog": [ { "version": "v0", "date": "التاريخ", "change": "وصف التغيير أو ملاحظة الفِت بالإنجليزية", "by": "GH Couture AI" } ],
-  "materialsPagePrompt": "برومبت إنجليزي واحد لصورة صفحة الخامات كاملة: شبكة (grid) أنيقة ومنظّمة من مربّعات متساوية، كل مربّع عيّنة قماش/خامة حقيقية مختلفة من هذه القطعة (اذكري كل خامة بلونها: main body fabric, lining, chiffon overlay, embroidered tulle, zipper, thread, boning, crystals...). صياغة مقترحة: 'A clean professional fashion tech pack MATERIALS page: an organized neat grid of equal square swatches on a white background, each square showing a different real fabric or trim of this garment [list them with exact colors]. Studio product photography, soft even lighting, aligned grid, magazine quality. No text, no labels, no watermark.'",
-  "detailsPagePrompt": "برومبت إنجليزي واحد لصورة صفحة التفاصيل كاملة: شبكة (grid) أنيقة من صور تكبير (close-up macro) لأجزاء هذه القطعة (bust embroidery, neckline, CB zipper, hem, crystal scatter, seams). صياغة مقترحة: 'A clean professional fashion tech pack DETAILED VIEWS page: an organized grid of close-up macro photographs showing construction details of this exact garment [list areas], same color and design. Studio macro photography, soft lighting, aligned grid, high detail. No text, no labels, no watermark.'"
+  "materialsPagePrompt": "برومبت إنجليزي واحد لصورة صفحة الخامات: صورة فوتوغرافية علوية (flat lay) لعيّنات قماش وتريمات حقيقية مرتّبة بصفوف على سطح أبيض — كل عيّنة قطعة نسيج فعلية لها ملمس ونسيج وثنيات وظلال ناعمة، مثل لوحة عيّنات المصمّم. اذكري كل خامة بلونها الدقيق، واذكري التريمات ككائنات حقيقية (شريط سحاب، شريحة boning، بكرة خيط، hook-and-eye، كريستالات، ليبل منسوج). أضيفي صراحةً: NOT a flat color chart, NOT wallpaper, NOT solid color squares, NOT a digital swatch grid. صياغة: 'Overhead flat lay photograph of real fabric and trim samples arranged in tidy rows on a white surface, each with visible weave, texture and soft folds... Professional macro product photography.'",
+  "detailsPagePrompt": "برومبت إنجليزي واحد لصفحة التفاصيل: شبكة من ست لقطات ماكرو قريبة لنفس القطعة تماماً (bust embroidery, neckline, CB zipper, waist seam, hem, crystal scatter). يجب التشديد: reproduce the garment exactly as in the reference image; do NOT add sheer panels, mesh, chiffon yokes, straps or sleeves that are not in the reference; use the exact same fabric colors and embroidery. صياغة: 'Close-up macro photographs of this exact garment arranged as a neat grid on white... same fabric colors and embroidery as the reference.'"
 }
 
 مهم جداً:
@@ -313,7 +311,8 @@ ${INDUSTRY_RULES}
 - المواد (materials): يجب أن تشمل نوعين — (أ) الأقمشة الرئيسية، و(ب) كل التريمات والإكسسوارات: السحاب، الخيط بلونه، hook-and-eye، الدعامات/العظام (boning)، شريط الدعم، الكريستال/الخرز، الليبلات (رئيسي + عناية)، الحشوات، التغليف. لكل عنصر composition/gsm/pantone/placement حين ينطبق ووصف احترافي. الحد الأدنى 10 عناصر. لا اختصار.
 - BOM: قائمة كاملة تشمل كل الإكسسوارات — 12 بند على الأقل.
 - detailViews: 4-6 مناطق (نصوص فقط، بدون برومبت لكل واحدة).
-- materialsPagePrompt و detailsPagePrompt: برومبت واحد لكل صفحة يصف شبكة منظّمة أنيقة (مش عناصر مبعثرة) — مهم جداً أن تكون الصورة مرتّبة كشبكة احترافية.
+- materialsPagePrompt: يصف تصويراً فوتوغرافياً لعيّنات قماش وتريمات حقيقية بملمس وثنيات وظلال — لا مربّعات لون ولا شبكة رقمية ولا ورق جدران.
+- detailsPagePrompt: يصف لقطات ماكرو لنفس القطعة تماماً بألوانها وتطريزها الحقيقيين، مع منع صريح لإضافة أي قماش شفاف أو ياقة أو حمّالات أو أكمام غير موجودة في الصورة.
 - لا تضيفي أي خامة لم تذكرها المصممة صراحةً إن حدّدت خامات.
 - كل الأقسام ممتلئة بمحتوى حقيقي مبني على الصورة.`;
 
