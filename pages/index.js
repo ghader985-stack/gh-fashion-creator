@@ -278,6 +278,9 @@ export default function Home() {
           colorway: d.colorway || [],
           materials: (d.materials || []).map((m) => ({ name: m.name, pantone: m.pantone })),
           detailAreas: (d.detailViews || []).map((x) => x.area),
+          measurePoints: (d.measurements || []).slice(0, 14).map((x) => ({
+            code: x.code, pom: x.pom, view: x.view || 'front',
+          })),
         }));
         const r2 = await fetch('/api/techpack-images', { method: 'POST', body: fd2 });
         const d2 = await r2.json();
@@ -939,13 +942,13 @@ function TechpackView({ tp, preview }) {
           </div>
           <table className="tp-table tp-ref-table">
             <tbody>
-              <tr><td className="ltr left"><b>Style Code</b></td><td className="ltr left">{tp.styleCode}</td></tr>
-              <tr><td className="ltr left"><b>Style Name</b></td><td className="ltr left">{tp.garmentName}</td></tr>
-              <tr><td className="ltr left"><b>Season</b></td><td className="ltr left">{tp.season}</td></tr>
-              <tr><td className="ltr left"><b>Category</b></td><td className="ltr left">{tp.category}</td></tr>
-              <tr><td className="ltr left"><b>Sample Size</b></td><td className="ltr left">{tp.sampleSize}</td></tr>
-              <tr><td className="ltr left"><b>Vendor</b></td><td className="ltr left">{tp.brandName}</td></tr>
-              <tr><td className="ltr left"><b>Date</b></td><td className="ltr left">{(tp.generatedAt || '').slice(0, 10)}</td></tr>
+              <tr><td className="left" dir="auto"><b>Style Code</b></td><td className="left" dir="auto">{tp.styleCode}</td></tr>
+              <tr><td className="left" dir="auto"><b>Style Name</b></td><td className="left" dir="auto">{tp.garmentName}</td></tr>
+              <tr><td className="left" dir="auto"><b>Season</b></td><td className="left" dir="auto">{tp.season}</td></tr>
+              <tr><td className="left" dir="auto"><b>Category</b></td><td className="left" dir="auto">{tp.category}</td></tr>
+              <tr><td className="left" dir="auto"><b>Sample Size</b></td><td className="left" dir="auto">{tp.sampleSize}</td></tr>
+              <tr><td className="left" dir="auto"><b>Vendor</b></td><td className="left" dir="auto">{tp.brandName}</td></tr>
+              <tr><td className="left" dir="auto"><b>Date</b></td><td className="left" dir="auto">{(tp.generatedAt || '').slice(0, 10)}</td></tr>
             </tbody>
           </table>
         </div>
@@ -985,7 +988,7 @@ function TechpackView({ tp, preview }) {
             {(tp.measurements || []).map((m, i) => (
               <tr key={i}>
                 <td className="ref-code">{m.code || String.fromCharCode(65 + i)}</td>
-                <td className="ltr left">{m.pom}</td>
+                <td className="left" dir="auto">{m.pom}</td>
                 <td>{m.tolerance}</td>
                 <td>{m.sizes?.XS}</td><td>{m.sizes?.S}</td><td className="hl">{m.sizes?.M}</td><td>{m.sizes?.L}</td><td>{m.sizes?.XL}</td>
               </tr>
@@ -1032,8 +1035,8 @@ function TechpackView({ tp, preview }) {
               <tbody>
                 {(tp.materials || []).filter((m) => m && m.name).map((m, i) => (
                   <tr key={i}>
-                    <td className="ltr left"><b>{m.name}</b></td>
-                    <td className="ltr left sm">{m.placement || '—'}</td>
+                    <td className="left" dir="auto"><b>{m.name}</b></td>
+                    <td className="left sm" dir="auto">{m.placement || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1050,9 +1053,9 @@ function TechpackView({ tp, preview }) {
             {(tp.bom || []).map((b, i) => (
               <tr key={i}>
                 <td className="ref-code">{i + 1}</td>
-                <td className="ltr left">{b.item}</td>
-                <td className="ltr left sm">{b.description}</td>
-                <td className="ltr left sm">{b.placement}</td>
+                <td className="left" dir="auto">{b.item}</td>
+                <td className="left sm" dir="auto">{b.description}</td>
+                <td className="left sm" dir="auto">{b.placement}</td>
                 <td>{b.qty}</td><td>{b.unit}</td>
               </tr>
             ))}
@@ -1066,7 +1069,7 @@ function TechpackView({ tp, preview }) {
           <thead><tr><th className="ltr">Section</th><th className="ltr">Detail</th><th className="ltr">Description</th></tr></thead>
           <tbody>
             {(tp.construction || []).map((c, i) => (
-              <tr key={i}><td className="ltr left">{c.section}</td><td className="ltr left">{c.detail}</td><td className="ltr left sm">{c.description}</td></tr>
+              <tr key={i}><td className="left" dir="auto">{c.section}</td><td className="left" dir="auto">{c.detail}</td><td className="left sm" dir="auto">{c.description}</td></tr>
             ))}
           </tbody>
         </table>
@@ -1083,7 +1086,7 @@ function TechpackView({ tp, preview }) {
               <thead><tr><th className="ltr">Area</th><th className="ltr">Detail</th><th className="ltr">Spec</th></tr></thead>
               <tbody>
                 {tp.detailViews.map((d, i) => (
-                  <tr key={i}><td className="ltr left">{d.area}</td><td className="ltr left sm">{d.detail}</td><td className="ltr left sm">{d.spec}</td></tr>
+                  <tr key={i}><td className="left" dir="auto">{d.area}</td><td className="left sm" dir="auto">{d.detail}</td><td className="left sm" dir="auto">{d.spec}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -1098,7 +1101,7 @@ function TechpackView({ tp, preview }) {
             <thead><tr><th className="ltr">Label</th><th className="ltr">Location</th><th className="ltr">Size</th><th className="ltr">Method</th></tr></thead>
             <tbody>
               {tp.labelPlacement.map((l, i) => (
-                <tr key={i}><td className="ltr left">{l.label}</td><td className="ltr left sm">{l.location}</td><td className="ltr left sm">{l.size}</td><td className="ltr left sm">{l.method}</td></tr>
+                <tr key={i}><td className="left" dir="auto">{l.label}</td><td className="left sm" dir="auto">{l.location}</td><td className="left sm" dir="auto">{l.size}</td><td className="left sm" dir="auto">{l.method}</td></tr>
               ))}
             </tbody>
           </table>
@@ -1129,7 +1132,7 @@ function TechpackView({ tp, preview }) {
             <thead><tr><th className="ltr">Element</th><th className="ltr">Placement</th><th className="ltr">Size</th><th className="ltr">Notes</th></tr></thead>
             <tbody>
               {tp.artwork.map((a, i) => (
-                <tr key={i}><td className="ltr left">{a.name}</td><td className="ltr left sm">{a.placement}</td><td className="ltr left sm">{a.size}</td><td className="ltr left sm">{a.notes}</td></tr>
+                <tr key={i}><td className="left" dir="auto">{a.name}</td><td className="left sm" dir="auto">{a.placement}</td><td className="left sm" dir="auto">{a.size}</td><td className="left sm" dir="auto">{a.notes}</td></tr>
               ))}
             </tbody>
           </table>
@@ -1140,7 +1143,7 @@ function TechpackView({ tp, preview }) {
       {(tp.sewingSteps || []).length > 0 && (
       <TpSection n="13" title="SEWING INSTRUCTIONS" subtitle="تعليمات الخياطة">
         <ol className="tp-steps">
-          {(tp.sewingSteps || []).map((s, i) => (<li key={i} className="ltr">{s}</li>))}
+          {(tp.sewingSteps || []).map((s, i) => (<li key={i} dir="auto">{s}</li>))}
         </ol>
       </TpSection>
       )}
@@ -1155,10 +1158,10 @@ function TechpackView({ tp, preview }) {
             ]).map((f, i) => (
               <tr key={i}>
                 <td className="ref-code">{i + 1}</td>
-                <td className="ltr left">{f.version}</td>
-                <td className="ltr left sm">{f.date}</td>
-                <td className="ltr left sm">{f.change}</td>
-                <td className="ltr left sm">{f.by}</td>
+                <td className="left" dir="auto">{f.version}</td>
+                <td className="left sm" dir="auto">{f.date}</td>
+                <td className="left sm" dir="auto">{f.change}</td>
+                <td className="left sm" dir="auto">{f.by}</td>
               </tr>
             ))}
           </tbody>
@@ -1552,7 +1555,7 @@ function StyleBlock() {
       .tp-table th { background: var(--cream); color: var(--ink); padding: 0.55rem 0.6rem; text-align: center; font-weight: 700; border: 1px solid var(--line); }
       .tp-table th.ltr, .tp-table td.ltr { direction: ltr; }
       .tp-table td { padding: 0.5rem 0.6rem; text-align: center; border: 1px solid var(--line); color: var(--ink); }
-      .tp-table td.left { text-align: left; }
+      .tp-table td.left { text-align: start; unicode-bidi: plaintext; }
       .tp-table td.sm { font-size: 0.76rem; color: var(--ink-soft); }
       .tp-table .hl { background: #f3ead6; font-weight: 700; }
       .ref-code { font-weight: 700; color: var(--gold-deep); background: var(--cream); font-family: 'Cormorant Garamond', serif; }
@@ -1633,8 +1636,8 @@ function StyleBlock() {
       .tp-color-code { color: var(--ink-soft); font-size: 0.76rem; direction: ltr; text-align: right; }
 
       .tp-steps { padding-right: 0; list-style: none; counter-reset: step; }
-      .tp-steps li { counter-increment: step; padding: 0.5rem 0; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 0.85rem; direction: ltr; text-align: left; position: relative; padding-left: 2rem; }
-      .tp-steps li:before { content: counter(step); position: absolute; left: 0; color: var(--gold-deep); font-family: 'Cormorant Garamond', serif; font-weight: 700; }
+      .tp-steps li { counter-increment: step; padding: 0.5rem 0; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 0.85rem; unicode-bidi: plaintext; text-align: start; position: relative; padding-inline-start: 2rem; }
+      .tp-steps li:before { content: counter(step); position: absolute; inset-inline-start: 0; color: var(--gold-deep); font-family: 'Cormorant Garamond', serif; font-weight: 700; }
       .tp-foot { text-align: center; margin-top: 2rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--gold); font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; }
 
       /* النافذة */
