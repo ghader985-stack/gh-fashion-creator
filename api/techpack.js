@@ -1,12 +1,9 @@
 // api/techpack.js
-// يستقبل صورة تصميم + مواصفات من المصممة، يحلّلها عبر Claude Vision،
-// ويرجّع تيك باك كامل منظّم (JSON).
-//
-// الرسمة التقنية: تُبنى عبر FLUX Kontext (image-to-image) — يحوّل صورة التصميم
-// إلى رسمة فلات مسطّحة نظيفة (بدون موديل، خطوط سوداء رفيعة، خلفية بيضاء)،
-// مع الحفاظ على شكل القطعة الفعلي. ثم تُركّب أسهم القياس فوقها كطبقة SVG
-// متجهة في الواجهة (index.js) — بأحرف مرجعية مربوطة بجدول القياسات.
-// هذه هي نفس طريقة المنصات الاحترافية (image-to-flat + arrow overlay).
+// الطور 1: يستقبل صورة تصميم + مواصفات، يحلّلها عبر Claude Vision،
+// ويرجّع تيك باك كامل (JSON) بهيكل مطابق حرفياً لنموذج Adstronaut:
+// مقاسات رقمية 2-12 مع عيّنة 6، أوصاف POM كاملة، 14 خامة مرتّبة = BOM،
+// تسميات صفحة القياسات المشروحة، وخريطة الترقيم لصفحة الـ Callout.
+// الصور تُولَّد في الطور 2 (/api/techpack-images).
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -18,151 +15,14 @@ export const config = {
 
 const MODEL = 'claude-sonnet-5';
 
-// FLUX 1.1 Pro لصور الخامات (كما هو)
-const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
-const REPLICATE_FLUX_URL = 'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
-
-// FLUX Kontext Pro لتحويل صورة التصميم إلى رسمة فلات نظيفة (image-to-image)
-const KONTEXT_MODEL = 'black-forest-labs/flux-kontext-pro';
-const REPLICATE_KONTEXT_URL = 'https://api.replicate.com/v1/models/' + KONTEXT_MODEL + '/predictions';
-
-// ============================================================================
-// ============ رفع صورة التصميم إلى Replicate للحصول على رابط عام ==========
-// ============================================================================
-async function uploadToReplicate(buffer, mediaType, token) {
-  const ext = (mediaType.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-  const boundary = '----ghBoundary' + Date.now();
-  const pre = Buffer.from(
-    '--' + boundary + '\r\n' +
-    'Content-Disposition: form-data; name="content"; filename="design.' + ext + '"\r\n' +
-    'Content-Type: ' + mediaType + '\r\n\r\n'
-  );
-  const post = Buffer.from('\r\n--' + boundary + '--\r\n');
-  const body = Buffer.concat([pre, buffer, post]);
-  const res = await fetch('https://api.replicate.com/v1/files', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'multipart/form-data; boundary=' + boundary },
-    body,
-  });
-  if (!res.ok) throw new Error('فشل رفع الصورة (' + res.status + ')');
-  const data = await res.json();
-  return (data.urls && data.urls.get) || null;
-}
-
-// ============================================================================
-// ============ توليد الرسمة الفلات عبر Kontext (image-to-image) ============
-// ============================================================================
-async function generateFlatKontext(imageUrl, prompt, token, attempt = 0) {
-  const createRes = await fetch(REPLICATE_KONTEXT_URL, {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
-    body: JSON.stringify({
-      input: {
-        prompt,
-        input_image: imageUrl,
-        output_format: 'jpg',
-        aspect_ratio: 'match_input_image',
-        safety_tolerance: 2,
-      },
-    }),
-  });
-  const bodyText = await createRes.text();
-  let prediction;
-  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('Kontext رد غير متوقع'); }
-  if (createRes.status === 429 && attempt < 3) {
-    await new Promise((r) => setTimeout(r, 6000));
-    return generateFlatKontext(imageUrl, prompt, token, attempt + 1);
-  }
-  if (!createRes.ok || prediction.error) {
-    throw new Error('Kontext (' + createRes.status + '): ' + (prediction.detail || prediction.error || ''));
-  }
-  let result = prediction, tries = 0;
-  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 55) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
-      headers: { Authorization: 'Bearer ' + token },
-    });
-    result = await pollRes.json();
-    tries++;
-  }
-  if (result.status !== 'succeeded') throw new Error('Kontext لم يكتمل');
-  let output = result.output;
-  output = Array.isArray(output) ? output[0] : output;
-  if (typeof output === 'string' && output.startsWith('http')) return output;
-  return null;
-}
-
-async function safeFlatKontext(imageUrl, prompt, token) {
-  try { return await generateFlatKontext(imageUrl, prompt, token); } catch (e) { return null; }
-}
-
-// يلفّ أي وعد بمهلة قصوى — لو تجاوزها يرجّع null بدل ما يعلّق للأبد
-function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((resolve) => setTimeout(() => resolve(null), ms)),
-  ]);
-}
-
-// ============================================================================
-// ============ توليد صور الخامات عبر FLUX 1.1 Pro (كما هو) =================
-// ============================================================================
-async function generateImage(prompt, aspectRatio, token, attempt = 0) {
-  const createRes = await fetch(REPLICATE_FLUX_URL, {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
-    body: JSON.stringify({
-      input: { prompt, aspect_ratio: aspectRatio, output_format: 'jpg', output_quality: 95, safety_tolerance: 2 },
-    }),
-  });
-  const bodyText = await createRes.text();
-  let prediction;
-  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('رد غير متوقع من Replicate'); }
-  if (createRes.status === 429 && attempt < 3) {
-    await new Promise((r) => setTimeout(r, 6000));
-    return generateImage(prompt, aspectRatio, token, attempt + 1);
-  }
-  if (!createRes.ok) throw new Error('Replicate (' + createRes.status + ')');
-  if (prediction.error) throw new Error('Replicate: ' + prediction.error);
-  let result = prediction, tries = 0;
-  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < 45) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
-      headers: { Authorization: 'Bearer ' + token },
-    });
-    result = await pollRes.json();
-    tries++;
-  }
-  if (result.status !== 'succeeded') throw new Error('فشل توليد الصورة');
-  let output = result.output;
-  output = Array.isArray(output) ? output[0] : output;
-  if (typeof output === 'string' && output.startsWith('http')) return output;
-  return null;
-}
-
-async function safeGenerate(prompt, aspect, token) {
-  try { return await generateImage(prompt, aspect, token); } catch (e) { return null; }
-}
-
 // ============================================================================
 const INDUSTRY_RULES = `
-معايير صناعية مرجعية لبناء التيك باك (طبّقها بذكاء حسب القطعة الفعلية، لا تخترع أرقاماً عشوائية):
-
-# نقاط القياس (POM) — الحد الأدنى 27 نقطة لقطعة كاملة، اختَر المناسب لنوع القطعة:
-للفساتين الطويلة/السهرة: Center Front Length, Center Back Length, Side Seam Length, Bust Width, Top Edge Width Front, Top Edge Width Back, Waist Width, Waist Position, High Hip Width, Low Hip Width, Thigh Width, Knee Width, Flare Break Height, Hem Sweep Front, Hem Sweep Back, Train Length, Front Neckline Drop, Back Neckline Drop, Bodice Side Height, Cup Height, Bust Point to Bust Point, CB Zipper Length, Embellishment Depth, Overlay Start Height, Boning Length, Lining Length CF, Shoulder to Bust.
-لأنواع أخرى (بنطال/جاكيت/توب): استبدل بالنقاط المناسبة (Inseam, Outseam, Rise, Sleeve Length, Across Shoulder, Armhole...).
-
-# التدرّج (XS S M L XL): الأبعاد الأفقية ~1.2-1.5 سم بين المقاسات، الأطوال ~1 سم، التفاصيل الصغيرة ~0.3 سم.
-# التفاوتات: أفقي كبير ±0.6, أطوال ±1.0 إلى ±1.5, تفاصيل ±0.3 إلى ±0.5.
-# BOM: القماش الرئيسي، البطانة، الخيوط، السحابات/الأزرار، الحشوات، الليبلات، الإكسسوارات الخاصة.
-# تعليمات الخياطة: تسلسل منطقي حسب بناء القطعة (8 خطوات على الأقل).
+معايير مرجعية (طبّقيها حسب القطعة الفعلية، لا أرقام عشوائية):
+# نقاط القياس: 26 نقطة على الأقل. للفساتين الطويلة: CF Length, CB Length, Side Seam Length, Bust Width, Top Edge Width Front/Back, Waist Width, Waist Position, High Hip, Low Hip, Thigh, Knee Width at Flare Break, Flare Break Height, Hem Sweep Front, Hem Sweep Back incl. Train, Train Length, Front/Back Neckline Drop, Bodice Side Height, Cup Height, BP to BP, CB Zipper Length, Embellishment Depth, Overlay Start Height, Boning Length, Lining Length CF, Shoulder to Bust. لأنواع أخرى استبدلي بالمناسب (Inseam, Outseam, Rise, Sleeve Length, Across Shoulder, Armhole...).
+# التدرّج بين المقاسات المتتالية: الأبعاد الأفقية ~1.2-1.5 سم، الأطوال ~0.5-1 سم، التفاصيل الصغيرة ~0.3 سم. قياسات ثابتة عبر المقاسات (مثل Train Length) تبقى ثابتة.
+# التفاوتات بصيغة "+-X.X": أفقي كبير +-0.6، أطوال +-1.0 إلى +-2.5، تفاصيل +-0.3 إلى +-0.5.
+# تعليمات الخياطة: تسلسل مصنع منطقي، 16 خطوة على الأقل.
 `;
-
-function extractText(content) {
-  if (!Array.isArray(content)) return '';
-  const t = content.find((b) => b.type === 'text');
-  return t ? t.text : '';
-}
 
 function detectImageType(buffer) {
   if (!buffer || buffer.length < 12) return 'image/jpeg';
@@ -182,18 +42,13 @@ function safeJsonParse(raw) {
   s = s.slice(start);
   const end = s.lastIndexOf('}');
   let candidate = end > 0 ? s.slice(0, end + 1) : s;
-  // محاولة أولى: تحويل مباشر
   try { return JSON.parse(candidate); } catch (e) {}
-  // محاولة ثانية: إصلاح JSON مقطوع بإغلاق الأقواس المفتوحة
   try { return JSON.parse(repairJson(s)); } catch (e) {}
-  // محاولة ثالثة: من البداية حتى آخر '}' مع الإصلاح
   return JSON.parse(repairJson(candidate));
 }
 
-// يغلق الأقواس/الأقواس المربعة المفتوحة في JSON مقطوع، ويزيل قيمة معلّقة
 function repairJson(text) {
   let s = text.trim();
-  // إذا انتهى داخل سلسلة نصية غير مغلقة، نقصّها عند آخر '"'
   let inStr = false, esc = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
@@ -207,16 +62,14 @@ function repairJson(text) {
     const lastQuote = s.lastIndexOf('"');
     if (lastQuote > 0) s = s.slice(0, lastQuote + 1);
   }
-  // إزالة نهايات معلّقة: فاصلة زائدة، أو مفتاح بلا قيمة، أو قيمة جزئية
   let prev;
   do {
     prev = s;
     s = s.replace(/,\s*$/, '');
-    s = s.replace(/"[^"]*"\s*:\s*$/, '');          // "key":
-    s = s.replace(/"[^"]*"\s*:\s*[-\d.]+$/, '');    // "key":123 (رقم قد يكون مقطوعاً)
+    s = s.replace(/"[^"]*"\s*:\s*$/, '');
+    s = s.replace(/"[^"]*"\s*:\s*[-\d.]+$/, '');
     s = s.replace(/,\s*$/, '');
   } while (s !== prev);
-  // إعادة حساب الأقواس المفتوحة بعد التنظيف، ثم إغلاقها
   const stack = [];
   inStr = false; esc = false;
   for (let i = 0; i < s.length; i++) {
@@ -242,7 +95,6 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'مفتاح Claude غير مضبوط على الخادم' });
-  const replicateToken = process.env.REPLICATE_API_TOKEN;
 
   try {
     const form = formidable({ maxFileSize: 12 * 1024 * 1024 });
@@ -264,61 +116,68 @@ export default async function handler(req, res) {
     const base64 = imgBuffer.toString('base64');
     const mediaType = detectImageType(imgBuffer);
 
-    const instruction = `أنتِ مصمِّمة تقنية (Technical Designer) خبيرة في إعداد التيك باك الاحترافي للمصانع.
+    const today = new Date();
+    const yymmdd = today.toISOString().slice(2, 10).replace(/-/g, '');
 
-لديكِ صورة تصميم قطعة أزياء. حلّليها بدقة عالية جداً واستخرجي كل خصائص القطعة الفعلية (نوعها، القصّة، السيلويت، الرقبة، الأكمام، الطول، التفاصيل الزخرفية، السحابات).
+    const instruction = `أنتِ مصمِّمة تقنية (Technical Designer) خبيرة تبني تيك باك بمعيار منصات المصانع الاحترافية.
 
-ثم ابني تيك باك كامل احترافي مبني على القطعة الفعلية، مطبّقةً المعايير التالية بشكل تكيّفي (لا أرقام عشوائية):
+حلّلي صورة القطعة بدقة عالية جداً واستخرجي خصائصها الفعلية (النوع، القصّة، السيلويت، الرقبة، الطول، الإغلاق، التفاصيل الزخرفية) ثم ابني تيك باك كاملاً:
 
 ${INDUSTRY_RULES}
 
-معلومات إضافية من المصممة:
+معلومات المصممة:
 - اسم القطعة: ${garmentName || 'استنتجيه من الصورة'}
-- مواصفات القماش: ${fabricInfo || 'اقترحي خامات منطقية حسب التصميم، ووضّحي أنها اقتراح'}
-- الموسم: ${season || 'غير محدد'}
+- مواصفات القماش: ${fabricInfo || 'اقترحي خامات منطقية حسب التصميم'}
+- الموسم: ${season || 'استنتجيه'}
 - ملاحظات: ${extraNotes || 'لا يوجد'}
 
-أرجعي النتيجة JSON فقط (بدون أي نص أو أسوار ماركداون)، بهذا الشكل:
+أرجعي JSON فقط (بدون أي نص أو أسوار ماركداون) بهذا الشكل الحرفي:
 
 {
-  "styleCode": "STY-XXXXX",
-  "garmentName": "الاسم بالإنجليزية",
+  "styleCode": "STY_XXXXXX_${yymmdd}_XXXX",
+  "garmentName": "الاسم الوصفي الكامل بالإنجليزية مثل: Emerald Strapless Sweetheart Mermaid Evening Gown with Embroidered Tulle Bust",
   "garmentNameAr": "الاسم بالعربية",
-  "category": "الفئة بالإنجليزية",
-  "season": "الموسم",
-  "sampleSize": "M",
-  "description": "وصف دقيق للقطعة (بالعربية، سطرين)",
-  "silhouette": "وصف السيلويت بالإنجليزية",
-  "garmentInfo": { "type": "النوع", "silhouette": "السيلويت", "construction": "البناء", "neckline": "نوع الرقبة" },
+  "category": "الفئة بالإنجليزية مثل Dresses",
+  "season": "الموسم مثل SS26",
+  "sizeRange": "2 - 12",
+  "sampleSize": "6",
+  "fabricSummary": "سطر إنجليزي واحد يلخّص الأقمشة الرئيسية للهيدر مثل: Emerald duchess satin with lightweight silk chiffon train overlay",
+  "description": "وصف دقيق للقطعة بالعربية، سطران",
+  "garmentInfo": { "type": "بالإنجليزية مثل Strapless formal evening gown", "silhouette": "بالإنجليزية", "construction": "بالإنجليزية" },
   "measurements": [
-    { "code": "A", "pom": "اسم نقطة القياس بالإنجليزية", "view": "front|back", "tolerance": "±X.X", "sizes": { "XS":0,"S":0,"M":0,"L":0,"XL":0 } }
+    { "pom": "الاسم بالإنجليزية مع وصف كامل بين قوسين مثل: Center Front Length (top edge of bodice at CF V-point to front hem edge)", "view": "front|back", "tolerance": "+-1.0", "sizes": { "2": 130.0, "4": 131.0, "6": 132, "8": 133.0, "10": 134.0, "12": 135.0 } }
   ],
-  "materials": [ { "name": "اسم الخامة بالإنجليزية", "type": "النوع", "composition": "التركيب مثل 100% Silk", "gsm": "الوزن التقديري مثل 180-220 gsm", "pantone": "كود Pantone إن أمكن", "placement": "موضع الاستخدام بالإنجليزية التقنية فقط، بصياغة مصانع الأزياء مثل: Bodice, waist panels and upper skirt / Center back seam / Flare skirt overlay and train. لا تترجمي المصطلحات حرفياً إلى العربية", "notes": "وصف احترافي كامل للملمس والاستخدام (جملتان)" } ],
-  "bom": [ { "item": "المادة بالإنجليزية", "description": "وصف تقني كامل مع GSM/القياس", "placement": "موضع الاستخدام بالإنجليزية التقنية فقط", "qty": "الكمية", "unit": "الوحدة" } ],
-  "construction": [ { "section": "القسم بالإنجليزية مثل Bodice / Skirt / Closure", "detail": "التفصيل بالإنجليزية", "description": "الوصف بالإنجليزية التقنية فقط — لغة مصانع الأزياء، جملة واحدة واضحة" } ],
-  "detailViews": [ { "area": "المنطقة بالإنجليزية مثل Neckline / Bust Embroidery / CB Zipper / Hem", "detail": "وصف التفصيل الإنشائي بالإنجليزية التقنية فقط", "spec": "المواصفة/القياس بالإنجليزية مثل CB Zipper Length 55cm ±1.0" } ],
-  "labelPlacement": [ { "label": "اسم الليبل بالإنجليزية", "location": "المكان الدقيق", "size": "القياس", "method": "الطريقة مثل Woven/Printed/Heat-seal" } ],
-  "colorway": [ { "part": "الجزء", "pantone": "كود Pantone", "hex": "#XXXXXX" } ],
-  "artwork": [ { "name": "العنصر", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس", "notes": "ملاحظات" } ],
-  "sewingSteps": [ "خطوات الخياطة بالإنجليزية التقنية فقط، بصياغة أوامر المصنع مثل: Cut all main fabric, lining and chiffon pieces per approved pattern.", "... (10 خطوات على الأقل، كلها بالإنجليزية)" ],
-  "fitLog": [ { "version": "v0", "date": "التاريخ", "change": "وصف التغيير أو ملاحظة الفِت بالإنجليزية", "by": "GH Couture AI" } ],
-  "materialsPagePrompt": "برومبت إنجليزي واحد لصورة صفحة الخامات: صورة فوتوغرافية علوية (flat lay) لعيّنات قماش وتريمات حقيقية مرتّبة بصفوف على سطح أبيض — كل عيّنة قطعة نسيج فعلية لها ملمس ونسيج وثنيات وظلال ناعمة، مثل لوحة عيّنات المصمّم. اذكري كل خامة بلونها الدقيق، واذكري التريمات ككائنات حقيقية (شريط سحاب، شريحة boning، بكرة خيط، hook-and-eye، كريستالات، ليبل منسوج). أضيفي صراحةً: NOT a flat color chart, NOT wallpaper, NOT solid color squares, NOT a digital swatch grid. صياغة: 'Overhead flat lay photograph of real fabric and trim samples arranged in tidy rows on a white surface, each with visible weave, texture and soft folds... Professional macro product photography.'",
-  "detailsPagePrompt": "برومبت إنجليزي واحد لصفحة التفاصيل: شبكة من ست لقطات ماكرو قريبة لنفس القطعة تماماً (bust embroidery, neckline, CB zipper, waist seam, hem, crystal scatter). يجب التشديد: reproduce the garment exactly as in the reference image; do NOT add sheer panels, mesh, chiffon yokes, straps or sleeves that are not in the reference; use the exact same fabric colors and embroidery. صياغة: 'Close-up macro photographs of this exact garment arranged as a neat grid on white... same fabric colors and embroidery as the reference.'"
+  "specSheetLabels": {
+    "front": ["FRONT NECKLINE DROP", "BUST WIDTH", "BP-BP", "WAIST WIDTH", "LOW HIP WIDTH", "CFL", "HFS WIDTH"],
+    "back": ["BACK NECKLINE DROP", "CB ZIPPER LENGTH", "CBL", "TRAIN LENGTH", "HBS WIDTH incl. TRAIN"]
+  },
+  "materials": [
+    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark." }
+  ],
+  "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back" } ],
+  "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back" } ],
+  "colorway": [ { "part": "الجزء بالإنجليزية", "pantone": "الكود", "hex": "#XXXXXX" } ],
+  "detailViews": [ { "area": "المنطقة بالإنجليزية", "detail": "الوصف بالإنجليزية التقنية", "spec": "المواصفة/القياس بالإنجليزية" } ],
+  "artwork": [ { "name": "العنصر بالإنجليزية", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس", "notes": "ملاحظات بالإنجليزية" } ],
+  "construction": [ { "section": "القسم بالإنجليزية مثل Bodice", "detailType": "نوع التفصيل بالإنجليزية مثل Seam / Closure / Support", "description": "جملة إنجليزية تقنية واحدة" } ],
+  "sewingSteps": [ "خطوات إنجليزية تقنية بصيغة أوامر المصنع، 16 خطوة على الأقل" ],
+  "fitLog": [ { "version": "v0", "date": "${today.toISOString().slice(0, 10)}", "change": "Initial sample tech pack generated", "by": "${brandName}" } ]
 }
 
-مهم جداً:
-- 27 نقطة قياس على الأقل، متدرّجة منطقياً. كل نقطة لها view (front أو back).
-- المواد (materials): يجب أن تشمل نوعين — (أ) الأقمشة الرئيسية، و(ب) كل التريمات والإكسسوارات: السحاب، الخيط بلونه، hook-and-eye، الدعامات/العظام (boning)، شريط الدعم، الكريستال/الخرز، الليبلات (رئيسي + عناية)، الحشوات، التغليف. لكل عنصر composition/gsm/pantone/placement حين ينطبق ووصف احترافي. الحد الأدنى 10 عناصر. لا اختصار.
-- BOM: قائمة كاملة تشمل كل الإكسسوارات — 12 بند على الأقل.
-- detailViews: 4-6 مناطق (نصوص فقط، بدون برومبت لكل واحدة).
-- materialsPagePrompt: يصف تصويراً فوتوغرافياً لعيّنات قماش وتريمات حقيقية بملمس وثنيات وظلال — لا مربّعات لون ولا شبكة رقمية ولا ورق جدران.
-- detailsPagePrompt: يصف لقطات ماكرو لنفس القطعة تماماً بألوانها وتطريزها الحقيقيين، مع منع صريح لإضافة أي قماش شفاف أو ياقة أو حمّالات أو أكمام غير موجودة في الصورة.
-- لا تضيفي أي خامة لم تذكرها المصممة صراحةً إن حدّدت خامات.
-- كل الأقسام ممتلئة بمحتوى حقيقي مبني على الصورة.`;
+قواعد إلزامية — أي إخلال بها يُفشل التيك باك:
+1. measurements: 26 نقطة على الأقل، كل pom معه وصف كامل بين قوسين، ولكل نقطة view. مفاتيح sizes هي "2","4","6","8","10","12" حصراً وقيمها أرقام (وليست نصوصاً). مقاس العيّنة 6 هو المرجع الأوسط.
+2. materials: 14 عنصراً بالضبط وبهذا الترتيب الوظيفي: الأقمشة الرئيسية أولاً (قماش أساسي، طبقات، بطانة، أقمشة زخرفية)، ثم الدعم البنيوي (boning، شريط قنوات)، ثم الإغلاق (سحاب، hook-and-eye)، ثم التثبيت (حشوة لاصقة، stay tape)، ثم الزخارف، ثم الليبلات، ثم الخيوط، ثم التغليف. هذه القائمة نفسها هي الـ BOM — ترقيمها من 1 إلى 14 حسب ترتيبها، فلا تكرّري ولا تفصلي قائمتين. لكل عنصر photoPrompt خاص به.
+3. إن حدّدت المصممة خامات، فلا تضيفي أي قماش لم تذكره — أكملي فقط التريمات المنطقية اللازمة للتصنيع.
+4. calloutMap: 5 إلى 6 عناصر، num هو رقم العنصر في materials (ترتيبه من 1)، موزّعة بين front وback، تغطي القماش الرئيسي والطبقات والزخرفة والإغلاق.
+5. specSheetLabels: أسماء كبيرة قصيرة (4 كلمات كحد أقصى)، 6-8 للأمامي و4-5 للخلفي، مطابقة لنقاط قياس فعلية من الجدول (استخدمي الاختصارات CFL, CBL, BP-BP, HFS, HBS حيث تنطبق).
+6. sewingDetailLabels: 6-8 تسميات، كل واحدة 4 كلمات كحد أقصى.
+7. colorway: 4-8 ألوان بأكواد hex دقيقة من الصورة الفعلية.
+8. construction: 12 صفاً. detailViews: 4-6. artwork: 2-4. sewingSteps: 16 على الأقل.
+9. كل النصوص التقنية بالإنجليزية حصراً (لغة المصانع). العربية فقط في garmentNameAr وdescription.`;
 
     const payload = {
       model: MODEL,
-      max_tokens: 14000,
+      max_tokens: 16000,
       stream: true,
       messages: [{
         role: 'user',
@@ -329,10 +188,9 @@ ${INDUSTRY_RULES}
       }],
     };
 
-    // مهلة "خمول" لا مهلة ثابتة: طالما النص يتدفّق، لا نقطع أبداً.
-    // نقطع فقط إذا توقّف الوصول 30 ثانية، أو عند سقف مطلق 175 ثانية.
+    // مهلة خمول لا مهلة ثابتة: طالما النص يتدفّق لا نقطع.
     const IDLE_MS = 30000;
-    const HARD_MS = 185000;
+    const HARD_MS = 240000;
     const claudeController = new AbortController();
     let idleTimer = null;
     const resetIdle = () => {
@@ -362,14 +220,11 @@ ${INDUSTRY_RULES}
       return res.status(500).json({ error: 'فشل تحليل التصميم: ' + errText.slice(0, 200) });
     }
 
-    // قراءة تدفّق الأحداث (SSE) وتجميع نص الرد.
-    // ندعم نوعَي التدفّق: Web ReadableStream (getReader) و Node Readable (async iterator)
-    // حتى لا يفشل الاستلام حسب بيئة التشغيل.
     let raw = '';
     const decoder = new TextDecoder();
     let buffer = '';
     const consumeChunk = (chunk) => {
-      resetIdle(); // وصلت بيانات ⇒ نُصفّر مؤقّت الخمول فلا يُقطع تحليل شغّال
+      resetIdle();
       buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -399,12 +254,11 @@ ${INDUSTRY_RULES}
       } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
         for await (const chunk of body) consumeChunk(chunk);
       } else {
-        // لا تدفّق متاح — نقرأ الرد كاملاً كنص
         const full = await response.text();
         full.split('\n').forEach((l) => consumeChunk(l + '\n'));
       }
     } catch (e) {
-      // انقطاع أثناء الاستلام: لا نُهدر ما وصل — نكمل بما جُمِّع ونصلحه لاحقاً
+      // انقطاع أثناء الاستلام — نكمل بما جُمِّع ويُصلَح لاحقاً
     }
     clearClaudeTimers();
 
@@ -423,9 +277,9 @@ ${INDUSTRY_RULES}
 
     techpack.brandName = brandName;
     techpack.generatedAt = new Date().toISOString();
+    if (!techpack.sampleSize) techpack.sampleSize = '6';
+    if (!techpack.sizeRange) techpack.sizeRange = '2 - 12';
 
-    // الصور تُولَّد في نقطة نهاية منفصلة (/api/techpack-images) لكي يحصل كل
-    // طور على سقف 5 دقائق مستقل — فلا يزاحم التحليلُ الصورَ على وقت واحد.
     return res.status(200).json(techpack);
   } catch (error) {
     return res.status(500).json({ error: 'خطأ في الخادم: ' + (error.message || 'غير معروف') });
