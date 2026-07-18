@@ -929,6 +929,9 @@ function TechpackView({ tp, preview }) {
   const mat1 = materials.slice(0, 8);
   const mat2 = materials.slice(8);
   const colorway = tp.colorway || [];
+  const specLabels = tp.specSheetLabels || {};
+  const calloutMap = tp.calloutMap || [];
+  const sewLabels = tp.sewingDetailLabels || [];
   const detailViews = tp.detailViews || [];
   const artwork = tp.artwork || [];
   const construction = tp.construction || [];
@@ -1001,7 +1004,12 @@ function TechpackView({ tp, preview }) {
     </div>
   )]);
 
-  pages.push(['SAMPLE MEASUREMENTS', pageImage(tp.specSheetImage, 'garment spec sheet', '3/2')]);
+  pages.push(['SAMPLE MEASUREMENTS', (
+    <>
+      <AnnotatedFlat image={tp.flatImage} mode="measure" front={specLabels.front || []} back={specLabels.back || []} />
+      <div className="tp-anno-caption">Garment Details: BLACK &nbsp;·&nbsp; Measurement Lines and Labels: DARK RED</div>
+    </>
+  )]);
 
   pages.push(['SIZE GRADING CHART', gradeTable(grade1, grade2.length > 0)]);
   if (grade2.length > 0) pages.push(['SIZE GRADING CHART (CONTINUED)', gradeTable(grade2, false)]);
@@ -1009,7 +1017,14 @@ function TechpackView({ tp, preview }) {
   pages.push(['MATERIALS', matCards(mat1, 0)]);
   if (mat2.length > 0) pages.push(['MATERIALS (CONTINUED)', matCards(mat2, 8)]);
 
-  pages.push(['MATERIALS CALLOUT', pageImage(tp.calloutImage, 'materials callout', '3/2')]);
+  pages.push(['MATERIALS CALLOUT', (
+    <AnnotatedFlat
+      image={tp.flatImage}
+      mode="callout"
+      front={calloutMap.filter((c) => (c.view || 'front') !== 'back')}
+      back={calloutMap.filter((c) => c.view === 'back')}
+    />
+  )]);
 
   pages.push(['BILL OF MATERIALS', (
     <table className="tp-table tp-bom">
@@ -1034,7 +1049,14 @@ function TechpackView({ tp, preview }) {
     </table>
   )]);
 
-  pages.push(['SEWING DETAILS', pageImage(tp.sewingDetailImage, 'sewing details', '3/2')]);
+  pages.push(['SEWING DETAILS', (
+    <AnnotatedFlat
+      image={tp.flatImage}
+      mode="sewing"
+      front={sewLabels.filter((s) => (s.view || 'front') !== 'back')}
+      back={sewLabels.filter((s) => s.view === 'back')}
+    />
+  )]);
 
   pages.push(['COLORWAYS & PANTONE', (
     <div className="tp-colorways">
@@ -1156,6 +1178,100 @@ function TechpackView({ tp, preview }) {
         <div className="tp-foot">{tp.brandName} · Technical Package</div>
       </div>
     </TpMetaContext.Provider>
+  );
+}
+
+// ============================================================================
+// ===== طبقة الشرح المرسومة بالكود فوق الرسمة التقنية النظيفة =====
+// النص والأرقام تُرسم كـ HTML حاد (لا نطلب من نماذج الصور كتابة نصوص).
+// الأمامي = النصف الأيسر من الرسمة، الخلفي = النصف الأيمن.
+// ============================================================================
+const ANCHOR_KEYWORDS = [
+  ['STAY', 13], ['HOOK', 14], ['NECK', 12], ['SHOULDER', 10], ['TOP EDGE', 13],
+  ['CUP', 21], ['BP', 24], ['BUST', 25], ['EMBROID', 27], ['TULLE', 26],
+  ['UNDERBUST', 31], ['BODICE', 29], ['BONING', 30], ['SIDE', 35], ['SEAM', 40],
+  ['WAIST', 38], ['LABEL', 34], ['ZIP', 45], ['CLOSURE', 45],
+  ['HIGH HIP', 46], ['LOW HIP', 53], ['HIP', 50], ['SATIN', 42],
+  ['THIGH', 58], ['OVERLAY', 56], ['CHIFFON', 60], ['LINING', 62],
+  ['KNEE', 66], ['FLARE', 65], ['CRYSTAL', 72], ['STAR', 72], ['BEAD', 70],
+  ['TRAIN', 85], ['SWEEP', 90], ['HFS', 90], ['HBS', 88], ['HEM', 90],
+];
+
+function anchorTop(text, i, n) {
+  const t = (text || '').toUpperCase();
+  for (let k = 0; k < ANCHOR_KEYWORDS.length; k++) {
+    if (t.includes(ANCHOR_KEYWORDS[k][0])) return ANCHOR_KEYWORDS[k][1];
+  }
+  return 14 + (72 * (i + 1)) / (n + 1);
+}
+
+// ترتيب وتباعد يمنع تراكب الأسطر
+function layoutRows(items) {
+  const rows = items.map((it, i) => ({ ...it, top: anchorTop(it.text, i, items.length) }));
+  rows.sort((a, b) => a.top - b.top);
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i].top - rows[i - 1].top < 7.5) rows[i].top = rows[i - 1].top + 7.5;
+  }
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].top > 92) rows[i].top = 92 - (rows.length - 1 - i) * 7.5;
+  }
+  return rows;
+}
+
+const isVerticalPom = (t) => /CFL|CBL|LENGTH|ZIPPER/i.test(t || '');
+
+function AnnotatedFlat({ image, mode, front, back }) {
+  if (!image) {
+    return <div className="tp-img-frame"><div className="tp-img-ph" style={{ aspectRatio: '3/2' }}></div></div>;
+  }
+
+  const toItems = (list) => (list || []).map((x) => {
+    if (typeof x === 'string') return { text: x };
+    return { text: x.label || x.target || '', num: x.num };
+  });
+
+  const buildSide = (list) => {
+    const items = toItems(list);
+    const vertical = mode === 'measure' ? items.filter((x) => isVerticalPom(x.text)) : [];
+    const horizontal = mode === 'measure' ? items.filter((x) => !isVerticalPom(x.text)) : items;
+    return { rows: layoutRows(horizontal), vertical: vertical.slice(0, 2) };
+  };
+
+  const L = buildSide(front);
+  const R = buildSide(back);
+  const lineCls = 'tp-anno-line' + (mode === 'measure' ? ' red' : '');
+
+  const renderLabel = (r) => {
+    if (mode === 'callout') return <span className="tp-anno-circle">{r.num}</span>;
+    return <span className={'tp-anno-text' + (mode === 'measure' ? ' red' : '')}>{r.text}</span>;
+  };
+
+  return (
+    <div className="tp-img-frame">
+      <div className="tp-anno">
+        <img src={image} alt="technical flat" crossOrigin="anonymous" />
+        {L.rows.map((r, i) => (
+          <div className="tp-anno-row left" key={'l' + i} style={{ top: r.top + '%' }}>
+            {renderLabel(r)}<i className={lineCls}></i>
+          </div>
+        ))}
+        {R.rows.map((r, i) => (
+          <div className="tp-anno-row right" key={'r' + i} style={{ top: r.top + '%' }}>
+            <i className={lineCls}></i>{renderLabel(r)}
+          </div>
+        ))}
+        {L.vertical.map((v, i) => (
+          <div className="tp-anno-vert left" key={'lv' + i} style={{ left: (3 + i * 4) + '%' }}>
+            <span className="tp-anno-text red vert">{v.text}</span>
+          </div>
+        ))}
+        {R.vertical.map((v, i) => (
+          <div className="tp-anno-vert right" key={'rv' + i} style={{ right: (3 + i * 4) + '%' }}>
+            <span className="tp-anno-text red vert">{v.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1457,6 +1573,30 @@ function StyleBlock() {
       .tp-img-frame { border: 1px solid #e5e5e5; border-radius: 8px; background: #fafafa; padding: 0.8rem; }
       .tp-img-frame img { width: 100%; display: block; border-radius: 4px; }
       .tp-img-ph { width: 100%; background: #f0f0f0; border-radius: 4px; }
+
+      /* طبقة الشرح المرسومة بالكود فوق الرسمة النظيفة */
+      .tp-anno { position: relative; direction: ltr; }
+      .tp-anno img { width: 100%; display: block; border-radius: 4px; }
+      .tp-anno-row { position: absolute; display: flex; align-items: center; gap: 4px; width: 30%; }
+      .tp-anno-row.left { left: 0.5%; }
+      .tp-anno-row.right { right: 0.5%; justify-content: flex-end; }
+      .tp-anno-line { flex: 1; border-top: 1.5px dashed #444; position: relative; min-width: 18px; }
+      .tp-anno-line.red { border-top-color: #a3271c; }
+      .tp-anno-row.left .tp-anno-line:after,
+      .tp-anno-row.right .tp-anno-line:before {
+        content: ''; position: absolute; top: -3px; width: 5px; height: 5px; border-radius: 50%; background: #444;
+      }
+      .tp-anno-row.left .tp-anno-line:after { right: -2px; }
+      .tp-anno-row.right .tp-anno-line:before { left: -2px; }
+      .tp-anno-row .tp-anno-line.red:after, .tp-anno-row .tp-anno-line.red:before { background: #a3271c; }
+      .tp-anno-text { font-size: 0.56rem; font-weight: 700; color: #222; letter-spacing: 0.3px; text-transform: uppercase; background: rgba(255,255,255,0.88); padding: 1px 3px; border-radius: 2px; line-height: 1.25; max-width: 130px; }
+      .tp-anno-text.red { color: #a3271c; }
+      .tp-anno-circle { width: 22px; height: 22px; border: 1.5px solid #111; border-radius: 50%; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 0.68rem; font-weight: 800; color: #111; flex-shrink: 0; }
+      .tp-anno-vert { position: absolute; top: 12%; bottom: 10%; border-left: 1.5px dashed #a3271c; }
+      .tp-anno-vert .tp-anno-text.vert { position: absolute; top: 40%; white-space: nowrap; transform: rotate(-90deg); transform-origin: left top; }
+      .tp-anno-vert.left .tp-anno-text.vert { left: -4px; }
+      .tp-anno-vert.right .tp-anno-text.vert { left: 10px; }
+      .tp-anno-caption { text-align: center; font-size: 0.66rem; color: #999; margin-top: 0.55rem; direction: ltr; }
 
       /* الجداول */
       .tp-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; direction: ltr; }
