@@ -177,7 +177,10 @@ ${INDUSTRY_RULES}
 
     const payload = {
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: 24000,
+      // claude-sonnet-5: التفكير التكيفي مفعّل افتراضياً ويستهلك max_tokens والوقت
+      // قبل أي نص — نطفئه لأن المطلوب استخراج JSON مباشر
+      thinking: { type: 'disabled' },
       stream: true,
       messages: [{
         role: 'user',
@@ -221,6 +224,8 @@ ${INDUSTRY_RULES}
     }
 
     let raw = '';
+    let streamError = '';
+    let stopReason = '';
     const decoder = new TextDecoder();
     let buffer = '';
     const consumeChunk = (chunk) => {
@@ -237,6 +242,10 @@ ${INDUSTRY_RULES}
           const evt = JSON.parse(payloadStr);
           if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
             raw += evt.delta.text;
+          } else if (evt.type === 'error' && evt.error) {
+            streamError = evt.error.message || evt.error.type || 'stream error';
+          } else if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) {
+            stopReason = evt.delta.stop_reason;
           }
         } catch (e) { /* سطر غير مكتمل — يُكمَّل في الدفعة التالية */ }
       }
@@ -263,7 +272,10 @@ ${INDUSTRY_RULES}
     clearClaudeTimers();
 
     if (!raw || raw.trim().length < 40) {
-      return res.status(500).json({ error: 'انقطع تحليل التصميم أثناء الاستلام، حاولي مرة ثانية' });
+      const reason = streamError || (stopReason ? 'stop_reason: ' + stopReason : '');
+      return res.status(500).json({
+        error: 'انقطع تحليل التصميم أثناء الاستلام' + (reason ? ' — السبب: ' + reason.slice(0, 180) : '') + '، حاولي مرة ثانية',
+      });
     }
 
     let techpack;
