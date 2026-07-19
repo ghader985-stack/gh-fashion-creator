@@ -9,7 +9,7 @@
 // نولّد رسمة تقنية نظيفة واحدة، والواجهة ترسم فوقها خطوط القياس والأرقام
 // والتسميات ككود (نص حاد 100%). هذا يقلّص Kontext من 5 إلى 3 استدعاءات.
 //
-// المخرجات: { flatImage, coloredMockupImage, detailsPageImage, materialPhotos: [...] }
+// المخرجات: { flatFrontImage, flatBackImage, coloredFrontImage, coloredBackImage, materialPhotos: [...] }
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -168,41 +168,52 @@ export default async function handler(req, res) {
     // ------------------------------------------------------------------
     // البرومبتات — بدون أي طلب لرسم نصوص أو أرقام داخل الصورة
     // ------------------------------------------------------------------
+    const facts = typeof meta.garmentFacts === 'string' && meta.garmentFacts.length > 10
+      ? 'LOCKED DESIGN FACTS — every drawing must match ALL of these exactly: ' + meta.garmentFacts + ' '
+      : '';
+
     const NO_INVENT =
       'CRITICAL: reproduce the garment EXACTLY as in the reference image. ' +
+      facts +
       'Do NOT add, remove or alter any design element. ' +
-      'Do NOT add sheer panels, mesh, chiffon yokes, illusion necklines, straps, sleeves, collars or any fabric that is not in the reference. ' +
-      'Keep the exact neckline shape and the exact strap/strapless configuration. ' +
+      'Do NOT add shoulder straps, sleeves, collars, sheer panels, mesh, chiffon yokes, illusion necklines or any element that is not in the reference; if the reference is strapless it stays strapless. ' +
+      'Keep the exact neckline shape and the exact silhouette. ' +
       'Preserve and reproduce ALL embroidery motifs, beading, crystals and embellishments in their exact locations, shapes and density. ';
 
     const NO_PERSON =
       'Do NOT include any person, model, mannequin, dress form, body, skin, face, head, hair, arms, hands or legs anywhere in the image — the garment only. ';
 
-    // 1) رسمة تقنية نظيفة واحدة (أمامي + خلفي) — الواجهة ترسم فوقها القياسات والأرقام والتسميات
-    const flatPrompt =
-      'Create a professional fashion technical flat drawing from this reference garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with generous empty margins on the left and right sides. ' +
-      NO_INVENT + NO_PERSON +
+    // منظر واحد لكل استدعاء: التحويلات أحادية المنظر أوفى بكثير للتصميم
+    // من طلب منظرين بصورة واحدة (الذي كان يدفع النموذج لاختراع عناصر).
+    const SINGLE_VIEW_STYLE =
+      'One single view only, centered, the complete garment fully visible from top edge to hem/train with generous margins, nothing cropped. ' +
       'Flat technical CAD drawing style with thin uniform BLACK outlines on a pure white background, no color, no shading, no fill. ' +
-      'Draw the embroidery and embellishment as fine outlined detail. Show the seams, darts, princess lines, the center-back zipper and the back neckline on the back view. ' +
-      'Absolutely NO text, NO letters, NO numbers, NO labels, NO arrows, NO measurement lines, NO watermark — a completely clean drawing. Precise vector-style apparel production drawing.';
+      'Draw every embroidery motif, beaded area and embellishment as fine outlined detail exactly where it appears. ' +
+      'Absolutely NO text, NO letters, NO numbers, NO labels, NO arrows, NO measurement lines, NO watermark.';
 
-    // 2) موك أب ملوّن أمامي + خلفي بدون جسم (صفحة الألوان)
-    const coloredMockupPrompt =
-      'Create two colored flat product drawings of this garment: the FRONT view on the left and the BACK view on the right, both complete and fully visible, side by side on one wide white sheet, same scale and height, both fully inside the frame with margins. ' +
+    const flatFrontPrompt =
+      'Convert this reference photo into a professional fashion technical flat drawing of the FRONT view of the garment. ' +
+      NO_INVENT + NO_PERSON + SINGLE_VIEW_STYLE;
+
+    const flatBackPrompt =
+      'Draw the BACK view of this exact garment as a professional fashion technical flat drawing. ' +
       NO_INVENT + NO_PERSON +
-      'Show only the garment laid flat as a ghost-mannequin style product illustration. ' +
-      'Keep the exact same colors, fabrics, embroidery and train as the reference. The back view must show the center-back zipper and back neckline. ' +
+      'The back view shows the center-back closure seam and the back neckline edge, and continues the exact same silhouette, seams and hem/train as the reference. ' +
+      SINGLE_VIEW_STYLE;
+
+    const coloredFrontPrompt =
+      'Convert this reference photo into a colored flat product illustration of the FRONT view of the garment, ghost-mannequin style. ' +
+      NO_INVENT + NO_PERSON +
+      'One single front view, centered, complete with margins. Keep the exact same colors, fabrics, embroidery, beading and train as the reference. ' +
       paletteHint +
       'Even soft studio lighting, pure white background. No text, no labels, no arrows, no watermark.';
 
-    // 3) شبكة لقطات ماكرو للتفاصيل — قماش القطعة فقط، بدون أي جسم
-    const detailsPrompt =
-      'Create a page of extreme close-up macro photographs of THIS EXACT garment, arranged as a neat aligned grid of six detail shots on a white background. ' +
+    const coloredBackPrompt =
+      'Draw the BACK view of this exact garment as a colored flat product illustration, ghost-mannequin style. ' +
       NO_INVENT + NO_PERSON +
-      'Each shot is a tight macro crop of the garment fabric surface only: ' + (areaList || 'neckline edge, bust embroidery, center-back zipper, waist seam, hem edge, embellishment detail') + '. ' +
-      'Every close-up must use the exact same fabric colors, embroidery, beading and materials as the reference garment. ' +
+      'One single back view, centered, complete with margins, showing the center-back closure and back neckline, with the exact same colors, fabrics, embroidery and train as the reference. ' +
       paletteHint +
-      'Studio macro photography, soft even lighting, high detail. No text, no labels, no watermark.';
+      'Even soft studio lighting, pure white background. No text, no labels, no arrows, no watermark.';
 
     // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
     const materialPrompt = (m) => {
@@ -229,9 +240,10 @@ export default async function handler(req, res) {
     const safeRun = makeSafe(deadline);
 
     const tasks = [];
-    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, flatPrompt, replicateToken, '3:2'), 110000) : Promise.resolve(null));
-    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, coloredMockupPrompt, replicateToken, '3:2'), 110000) : Promise.resolve(null));
-    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, detailsPrompt, replicateToken, '4:3'), 110000) : Promise.resolve(null));
+    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, flatFrontPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null));
+    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, flatBackPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null));
+    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null));
+    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, coloredBackPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null));
     for (const m of materials) {
       tasks.push(() => safeRun(() => generateImage(materialPrompt(m), '1:1', replicateToken), 70000));
     }
@@ -239,10 +251,11 @@ export default async function handler(req, res) {
     const results = await runPool(tasks, CONCURRENCY);
 
     return res.status(200).json({
-      flatImage: results[0] || null,
-      coloredMockupImage: results[1] || null,
-      detailsPageImage: results[2] || null,
-      materialPhotos: results.slice(3).map((u) => u || null),
+      flatFrontImage: results[0] || null,
+      flatBackImage: results[1] || null,
+      coloredFrontImage: results[2] || null,
+      coloredBackImage: results[3] || null,
+      materialPhotos: results.slice(4).map((u) => u || null),
     });
   } catch (error) {
     return res.status(500).json({ error: 'خطأ في توليد الصور: ' + (error.message || 'غير معروف') });
