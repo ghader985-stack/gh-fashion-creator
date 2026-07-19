@@ -1207,13 +1207,16 @@ function anchorTop(text, i, n) {
   return 5 + (88 * (i + 1)) / (n + 1);
 }
 
-function layoutRows(rows) {
+function layoutRows(rows, minTop, maxTop) {
+  const lo = typeof minTop === 'number' ? minTop : 3;
+  const hi = typeof maxTop === 'number' ? maxTop : 95;
   rows.sort((a, b) => a.top - b.top);
+  for (const r of rows) { if (r.top < lo) r.top = lo; }
   for (let i = 1; i < rows.length; i++) {
     if (rows[i].top - rows[i - 1].top < 7) rows[i].top = rows[i - 1].top + 7;
   }
   for (let i = rows.length - 1; i >= 0; i--) {
-    if (rows[i].top > 95) rows[i].top = 95 - (rows.length - 1 - i) * 7;
+    if (rows[i].top > hi) rows[i].top = hi - (rows.length - 1 - i) * 7;
   }
   return rows;
 }
@@ -1280,7 +1283,7 @@ function AnnotatedView({ image, mode, items, caption, labelSide }) {
   const rows = layoutRows(horizontal.map((it, i) => ({
     ...it,
     top: box.top + (anchorTop(it.text, i, horizontal.length) / 100) * (box.bottom - box.top),
-  })));
+  })), box.top + 1, box.bottom - 1);
 
   const bw = Math.max(box.right - box.left, 20);
 
@@ -1303,9 +1306,10 @@ function AnnotatedView({ image, mode, items, caption, labelSide }) {
         ))}
 
         {mode !== 'measure' && rows.map((r, i) => {
+          // التسمية تلاصق حافة القطعة والخط يلمس القطعة نفسها — لا تسميات عائمة بالفراغ
           const style = labelSide === 'right'
-            ? { top: r.top + '%', right: '1%', width: Math.max(100 - box.right - 2, 12) + '%' }
-            : { top: r.top + '%', left: '1%', width: Math.max(box.left - 2, 12) + '%' };
+            ? { top: r.top + '%', left: (box.right - 2) + '%', width: Math.min(24, 100 - box.right + 1.5) + '%' }
+            : { top: r.top + '%', left: Math.max(box.left - 22, 0.5) + '%', width: (box.left + 2 - Math.max(box.left - 22, 0.5)) + '%' };
           return (
             <div className={'tp-anno-row ' + (labelSide === 'right' ? 'right' : 'left')} key={'c' + i} style={style}>
               {labelSide === 'right' ? <><i className="tp-anno-line"></i>{mode === 'callout' ? <span className="tp-anno-circle">{r.num}</span> : <span className="tp-anno-text">{r.text}</span>}</>
