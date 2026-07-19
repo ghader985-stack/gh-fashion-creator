@@ -142,6 +142,7 @@ ${INDUSTRY_RULES}
   "sizeRange": "2 - 12",
   "sampleSize": "6",
   "fabricSummary": "سطر إنجليزي واحد يلخّص الأقمشة الرئيسية للهيدر مثل: Emerald duchess satin with lightweight silk chiffon train overlay",
+  "garmentFacts": "3-5 جمل إنجليزية قصيرة تقفل حقائق التصميم التي يُمنع تغييرها في أي رسمة، مثل: Strapless sweetheart neckline with NO straps and NO sleeves. Fitted mermaid silhouette flaring below the knee. Embroidered tulle bust panel with beading. Invisible center-back zipper. Long chiffon train. Emerald green.",
   "description": "وصف دقيق للقطعة بالعربية، سطران",
   "garmentInfo": { "type": "بالإنجليزية مثل Strapless formal evening gown", "silhouette": "بالإنجليزية", "construction": "بالإنجليزية" },
   "measurements": [
@@ -152,7 +153,7 @@ ${INDUSTRY_RULES}
     "back": ["BACK NECKLINE DROP", "CB ZIPPER LENGTH", "CBL", "TRAIN LENGTH", "HBS WIDTH incl. TRAIN"]
   },
   "materials": [
-    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark." }
+    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark. قاعدة صارمة: صفي العنصر المادي الواحد فقط باسمه الدقيق ولونه الدقيق (بكود Pantone) وخامته وشكله — invisible zipper بلون القماش، metal hook-and-eye bar closure، spool of polyester thread، rigilene boning strips، woven satin brand label — وممنوع ذكر الفستان أو شخص أو أكثر من عنصر واحد." }
   ],
   "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back" } ],
   "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back" } ],
