@@ -273,6 +273,7 @@ export default function Home() {
         const fd2 = new FormData();
         fd2.append('image', tpImage);
         fd2.append('meta', JSON.stringify({
+          garmentFacts: d.garmentFacts || '',
           specSheetLabels: d.specSheetLabels || {},
           calloutMap: d.calloutMap || [],
           sewingDetailLabels: d.sewingDetailLabels || [],
@@ -1006,7 +1007,8 @@ function TechpackView({ tp, preview }) {
 
   pages.push(['SAMPLE MEASUREMENTS', (
     <>
-      <AnnotatedFlat image={tp.flatImage} mode="measure" front={specLabels.front || []} back={specLabels.back || []} />
+      <AnnotatedPair frontImage={tp.flatFrontImage} backImage={tp.flatBackImage} mode="measure"
+        front={specLabels.front || []} back={specLabels.back || []} />
       <div className="tp-anno-caption">Garment Details: BLACK &nbsp;·&nbsp; Measurement Lines and Labels: DARK RED</div>
     </>
   )]);
@@ -1018,12 +1020,9 @@ function TechpackView({ tp, preview }) {
   if (mat2.length > 0) pages.push(['MATERIALS (CONTINUED)', matCards(mat2, 8)]);
 
   pages.push(['MATERIALS CALLOUT', (
-    <AnnotatedFlat
-      image={tp.flatImage}
-      mode="callout"
+    <AnnotatedPair frontImage={tp.flatFrontImage} backImage={tp.flatBackImage} mode="callout"
       front={calloutMap.filter((c) => (c.view || 'front') !== 'back')}
-      back={calloutMap.filter((c) => c.view === 'back')}
-    />
+      back={calloutMap.filter((c) => c.view === 'back')} />
   )]);
 
   pages.push(['BILL OF MATERIALS', (
@@ -1050,17 +1049,19 @@ function TechpackView({ tp, preview }) {
   )]);
 
   pages.push(['SEWING DETAILS', (
-    <AnnotatedFlat
-      image={tp.flatImage}
-      mode="sewing"
+    <AnnotatedPair frontImage={tp.flatFrontImage} backImage={tp.flatBackImage} mode="sewing"
       front={sewLabels.filter((s) => (s.view || 'front') !== 'back')}
-      back={sewLabels.filter((s) => s.view === 'back')}
-    />
+      back={sewLabels.filter((s) => s.view === 'back')} />
   )]);
 
   pages.push(['COLORWAYS & PANTONE', (
     <div className="tp-colorways">
-      <div>{pageImage(tp.coloredMockupImage, 'colored mockup', '3/2')}</div>
+      <div className="tp-img-frame">
+        <div className="tp-pair">
+          <div className="tp-view">{tp.coloredFrontImage ? <img src={tp.coloredFrontImage} alt="front colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">FRONT</div></div>
+          <div className="tp-view">{tp.coloredBackImage ? <img src={tp.coloredBackImage} alt="back colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">BACK</div></div>
+        </div>
+      </div>
       <div>
         <div className="tp-pantone-title">Pantone Color Palette</div>
         {colorway.map((c, i) => (
@@ -1078,7 +1079,7 @@ function TechpackView({ tp, preview }) {
 
   pages.push(['DETAILED VIEWS', (
     <>
-      {pageImage(tp.detailsPageImage, 'detailed views', '4/3')}
+      <RefCrops image={preview} areas={detailViews.map((d) => d.area)} />
       {detailViews.length > 0 && (
         <table className="tp-table" style={{ marginTop: '1rem' }}>
           <thead><tr><th className="ltr left-h">AREA</th><th className="ltr left-h">DETAIL</th><th className="ltr left-h">SPEC</th></tr></thead>
@@ -1182,98 +1183,188 @@ function TechpackView({ tp, preview }) {
 }
 
 // ============================================================================
-// ===== طبقة الشرح المرسومة بالكود فوق الرسمة التقنية النظيفة =====
+// ===== طبقة الشرح المرسومة بالكود فوق الرسمات =====
 // النص والأرقام تُرسم كـ HTML حاد (لا نطلب من نماذج الصور كتابة نصوص).
-// الأمامي = النصف الأيسر من الرسمة، الخلفي = النصف الأيمن.
+// كل منظر (أمامي/خلفي) صورة مستقلة، وخطوط القياس تمتد عبر جسم القطعة نفسه.
 // ============================================================================
 const ANCHOR_KEYWORDS = [
-  ['STAY', 13], ['HOOK', 14], ['NECK', 12], ['SHOULDER', 10], ['TOP EDGE', 13],
-  ['CUP', 21], ['BP', 24], ['BUST', 25], ['EMBROID', 27], ['TULLE', 26],
-  ['UNDERBUST', 31], ['BODICE', 29], ['BONING', 30], ['SIDE', 35], ['SEAM', 40],
-  ['WAIST', 38], ['LABEL', 34], ['ZIP', 45], ['CLOSURE', 45],
-  ['HIGH HIP', 46], ['LOW HIP', 53], ['HIP', 50], ['SATIN', 42],
-  ['THIGH', 58], ['OVERLAY', 56], ['CHIFFON', 60], ['LINING', 62],
-  ['KNEE', 66], ['FLARE', 65], ['CRYSTAL', 72], ['STAR', 72], ['BEAD', 70],
-  ['TRAIN', 85], ['SWEEP', 90], ['HFS', 90], ['HBS', 88], ['HEM', 90],
+  ['SHOULDER', 1], ['TOP EDGE', 2], ['NECK', 3], ['STAY', 6], ['HOOK', 8],
+  ['CUP', 12], ['BP', 16], ['BUST', 17], ['TULLE', 18], ['EMBROID', 20],
+  ['BODICE', 22], ['BONING', 22], ['UNDERBUST', 24], ['LABEL', 26], ['SIDE', 28],
+  ['ZIP', 30], ['CLOSURE', 30], ['WAIST', 32], ['SEAM', 33], ['SATIN', 38],
+  ['HIGH HIP', 40], ['HIP', 45], ['LOW HIP', 48], ['OVERLAY', 52], ['THIGH', 55],
+  ['CHIFFON', 58], ['LINING', 60], ['FLARE', 64], ['KNEE', 66],
+  ['BEAD', 70], ['CRYSTAL', 72], ['STAR', 72],
+  ['TRAIN', 88], ['HBS', 95], ['HEM', 96], ['SWEEP', 97], ['HFS', 97],
 ];
 
+// النسب أعلاه نسبةً إلى جسم القطعة نفسها (0 = أعلى القطعة، 100 = أسفلها)
 function anchorTop(text, i, n) {
   const t = (text || '').toUpperCase();
   for (let k = 0; k < ANCHOR_KEYWORDS.length; k++) {
     if (t.includes(ANCHOR_KEYWORDS[k][0])) return ANCHOR_KEYWORDS[k][1];
   }
-  return 14 + (72 * (i + 1)) / (n + 1);
+  return 5 + (88 * (i + 1)) / (n + 1);
 }
 
-// ترتيب وتباعد يمنع تراكب الأسطر
-function layoutRows(items) {
-  const rows = items.map((it, i) => ({ ...it, top: anchorTop(it.text, i, items.length) }));
+function layoutRows(rows) {
   rows.sort((a, b) => a.top - b.top);
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i].top - rows[i - 1].top < 7.5) rows[i].top = rows[i - 1].top + 7.5;
+    if (rows[i].top - rows[i - 1].top < 7) rows[i].top = rows[i - 1].top + 7;
   }
   for (let i = rows.length - 1; i >= 0; i--) {
-    if (rows[i].top > 92) rows[i].top = 92 - (rows.length - 1 - i) * 7.5;
+    if (rows[i].top > 95) rows[i].top = 95 - (rows.length - 1 - i) * 7;
   }
   return rows;
 }
 
 const isVerticalPom = (t) => /CFL|CBL|LENGTH|ZIPPER/i.test(t || '');
 
-function AnnotatedFlat({ image, mode, front, back }) {
+// كشف الصندوق المحيط للقطعة في صورة منظر واحد (خطوط داكنة على أبيض).
+// يعمل محلياً على كانفاس — بلا أي استدعاء API وبلا أي كلفة.
+function useImgBox(image) {
+  const [box, setBox] = useState(null);
+  useEffect(() => {
+    if (!image) { setBox(null); return; }
+    let cancelled = false;
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const W = 140;
+        const H = Math.max(60, Math.round((img.height / img.width) * W));
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, W, H);
+        const data = ctx.getImageData(0, 0, W, H).data;
+        let top = H, bot = -1, left = W, right = -1;
+        for (let y = 1; y < H - 1; y++) {
+          for (let x = 1; x < W - 1; x++) {
+            const p = (y * W + x) * 4;
+            if ((data[p] + data[p + 1] + data[p + 2]) / 3 < 150) {
+              if (y < top) top = y;
+              if (y > bot) bot = y;
+              if (x < left) left = x;
+              if (x > right) right = x;
+            }
+          }
+        }
+        const found = bot > 0 && bot - top > H * 0.2;
+        if (!cancelled) setBox(found ? {
+          top: (top / H) * 100, bottom: (bot / H) * 100,
+          left: (left / W) * 100, right: (right / W) * 100,
+        } : null);
+      } catch (e) { if (!cancelled) setBox(null); }
+    };
+    img.onerror = () => { if (!cancelled) setBox(null); };
+    img.src = image;
+    return () => { cancelled = true; };
+  }, [image]);
+  return box;
+}
+
+const DEFAULT_VIEW_BOX = { top: 6, bottom: 95, left: 22, right: 78 };
+
+// منظر واحد مشروح: خطوط القياس تعبر جسم القطعة، والدوائر/التسميات على جهة labelSide
+function AnnotatedView({ image, mode, items, caption, labelSide }) {
+  const detected = useImgBox(image);
   if (!image) {
-    return <div className="tp-img-frame"><div className="tp-img-ph" style={{ aspectRatio: '3/2' }}></div></div>;
+    return <div className="tp-view"><div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div><div className="tp-view-cap">{caption}</div></div>;
   }
+  const box = detected || DEFAULT_VIEW_BOX;
 
-  const toItems = (list) => (list || []).map((x) => {
-    if (typeof x === 'string') return { text: x };
-    return { text: x.label || x.target || '', num: x.num };
-  });
+  const all = (items || []).map((x) => (typeof x === 'string' ? { text: x } : { text: x.label || x.target || '', num: x.num }));
+  const vertical = mode === 'measure' ? all.filter((x) => isVerticalPom(x.text)) : [];
+  const horizontal = mode === 'measure' ? all.filter((x) => !isVerticalPom(x.text)) : all;
+  const rows = layoutRows(horizontal.map((it, i) => ({
+    ...it,
+    top: box.top + (anchorTop(it.text, i, horizontal.length) / 100) * (box.bottom - box.top),
+  })));
 
-  const buildSide = (list) => {
-    const items = toItems(list);
-    const vertical = mode === 'measure' ? items.filter((x) => isVerticalPom(x.text)) : [];
-    const horizontal = mode === 'measure' ? items.filter((x) => !isVerticalPom(x.text)) : items;
-    return { rows: layoutRows(horizontal), vertical: vertical.slice(0, 2) };
-  };
-
-  const L = buildSide(front);
-  const R = buildSide(back);
-  const lineCls = 'tp-anno-line' + (mode === 'measure' ? ' red' : '');
-
-  const renderLabel = (r) => {
-    if (mode === 'callout') return <span className="tp-anno-circle">{r.num}</span>;
-    return <span className={'tp-anno-text' + (mode === 'measure' ? ' red' : '')}>{r.text}</span>;
-  };
+  const bw = Math.max(box.right - box.left, 20);
 
   return (
-    <div className="tp-img-frame">
+    <div className="tp-view">
       <div className="tp-anno">
-        <img src={image} alt="technical flat" crossOrigin="anonymous" />
-        {L.rows.map((r, i) => (
-          <div className="tp-anno-row left" key={'l' + i} style={{ top: r.top + '%' }}>
-            {renderLabel(r)}<i className={lineCls}></i>
+        <img src={image} alt={caption} crossOrigin="anonymous" />
+
+        {mode === 'measure' && rows.map((r, i) => (
+          <div className="tp-m-wrap" key={'m' + i} style={{ top: r.top + '%', left: box.left + '%', width: bw + '%' }}>
+            <span className="tp-m-label">{r.text}</span>
+            <i className="tp-m-line"></i>
           </div>
         ))}
-        {R.rows.map((r, i) => (
-          <div className="tp-anno-row right" key={'r' + i} style={{ top: r.top + '%' }}>
-            <i className={lineCls}></i>{renderLabel(r)}
+        {mode === 'measure' && vertical.slice(0, 2).map((v, i) => (
+          <div className="tp-anno-vert" key={'v' + i}
+            style={{ left: Math.min(box.right + 3 + i * 4, 96) + '%', top: box.top + '%', bottom: (100 - box.bottom) + '%' }}>
+            <span className="tp-m-label vert">{v.text}</span>
           </div>
         ))}
-        {L.vertical.map((v, i) => (
-          <div className="tp-anno-vert left" key={'lv' + i} style={{ left: (3 + i * 4) + '%' }}>
-            <span className="tp-anno-text red vert">{v.text}</span>
-          </div>
-        ))}
-        {R.vertical.map((v, i) => (
-          <div className="tp-anno-vert right" key={'rv' + i} style={{ right: (3 + i * 4) + '%' }}>
-            <span className="tp-anno-text red vert">{v.text}</span>
-          </div>
-        ))}
+
+        {mode !== 'measure' && rows.map((r, i) => {
+          const style = labelSide === 'right'
+            ? { top: r.top + '%', right: '1%', width: Math.max(100 - box.right - 2, 12) + '%' }
+            : { top: r.top + '%', left: '1%', width: Math.max(box.left - 2, 12) + '%' };
+          return (
+            <div className={'tp-anno-row ' + (labelSide === 'right' ? 'right' : 'left')} key={'c' + i} style={style}>
+              {labelSide === 'right' ? <><i className="tp-anno-line"></i>{mode === 'callout' ? <span className="tp-anno-circle">{r.num}</span> : <span className="tp-anno-text">{r.text}</span>}</>
+                : <>{mode === 'callout' ? <span className="tp-anno-circle">{r.num}</span> : <span className="tp-anno-text">{r.text}</span>}<i className="tp-anno-line"></i></>}
+            </div>
+          );
+        })}
+      </div>
+      <div className="tp-view-cap">{caption}</div>
+    </div>
+  );
+}
+
+// زوج المنظرين الأمامي والخلفي جنباً إلى جنب
+function AnnotatedPair({ frontImage, backImage, mode, front, back }) {
+  return (
+    <div className="tp-img-frame">
+      <div className="tp-pair">
+        <AnnotatedView image={frontImage} mode={mode} items={front} caption="FRONT" labelSide="left" />
+        <AnnotatedView image={backImage} mode={mode} items={back} caption="BACK" labelSide="right" />
       </div>
     </div>
   );
 }
+
+// صفحة DETAILED VIEWS: لقطات مقرّبة مقصوصة من صورة التصميم المرجعية نفسها —
+// حتمية 100% وبلا أي توليد أو كلفة، فلا يمكن أن تخالف التصميم.
+const CROP_POSITIONS = [
+  ['NECK', '50% 10%'], ['SHOULDER', '50% 8%'], ['BUST', '50% 20%'], ['TULLE', '50% 20%'],
+  ['EMBROID', '50% 24%'], ['BEAD', '48% 26%'], ['CRYSTAL', '55% 55%'], ['STAR', '55% 60%'],
+  ['BODICE', '50% 25%'], ['WAIST', '50% 36%'], ['ZIP', '50% 32%'], ['HIP', '50% 46%'],
+  ['SKIRT', '50% 62%'], ['FLARE', '50% 68%'], ['KNEE', '50% 66%'], ['CHIFFON', '55% 80%'],
+  ['TRAIN', '50% 88%'], ['HEM', '50% 84%'],
+];
+const DEFAULT_CROPS = ['50% 12%', '50% 26%', '50% 40%', '50% 58%', '50% 74%', '50% 90%'];
+
+function RefCrops({ image, areas }) {
+  if (!image) return <div className="tp-img-ph" style={{ aspectRatio: '4/3' }}></div>;
+  const list = (areas && areas.length ? areas : []).slice(0, 6);
+  while (list.length < 6) list.push('');
+  const posFor = (name, i) => {
+    const t = (name || '').toUpperCase();
+    for (let k = 0; k < CROP_POSITIONS.length; k++) {
+      if (t.includes(CROP_POSITIONS[k][0])) return CROP_POSITIONS[k][1];
+    }
+    return DEFAULT_CROPS[i % DEFAULT_CROPS.length];
+  };
+  return (
+    <div className="tp-crops">
+      {list.map((name, i) => (
+        <div className="tp-crop" key={i}>
+          <div className="tp-crop-img" style={{ backgroundImage: 'url(' + image + ')', backgroundPosition: posFor(name, i) }}></div>
+          {name ? <div className="tp-crop-cap">{name}</div> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 // هيدر الصفحة — مطابق لهيدر النموذج:
 // يسار: صورة مصغّرة + كود الستايل + الاسم + الموسم + المورّد
@@ -1577,7 +1668,7 @@ function StyleBlock() {
       /* طبقة الشرح المرسومة بالكود فوق الرسمة النظيفة */
       .tp-anno { position: relative; direction: ltr; }
       .tp-anno img { width: 100%; display: block; border-radius: 4px; }
-      .tp-anno-row { position: absolute; display: flex; align-items: center; gap: 4px; width: 30%; }
+      .tp-anno-row { position: absolute; display: flex; align-items: center; gap: 4px; }
       .tp-anno-row.left { left: 0.5%; }
       .tp-anno-row.right { right: 0.5%; justify-content: flex-end; }
       .tp-anno-line { flex: 1; border-top: 1.5px dashed #444; position: relative; min-width: 18px; }
@@ -1597,6 +1688,27 @@ function StyleBlock() {
       .tp-anno-vert.left .tp-anno-text.vert { left: -4px; }
       .tp-anno-vert.right .tp-anno-text.vert { left: 10px; }
       .tp-anno-caption { text-align: center; font-size: 0.66rem; color: #999; margin-top: 0.55rem; direction: ltr; }
+
+      /* زوج المنظرين + خطوط القياس العابرة لجسم القطعة */
+      .tp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; direction: ltr; }
+      @media (max-width: 600px) { .tp-pair { grid-template-columns: 1fr; } }
+      .tp-view { min-width: 0; }
+      .tp-view > img { width: 100%; display: block; border-radius: 4px; }
+      .tp-view-cap { text-align: center; font-size: 0.64rem; font-weight: 800; letter-spacing: 1.5px; color: #555; margin-top: 0.4rem; direction: ltr; }
+      .tp-m-wrap { position: absolute; display: flex; flex-direction: column; align-items: center; }
+      .tp-m-line { display: block; width: 100%; border-top: 1.5px solid #a3271c; position: relative; }
+      .tp-m-line:before, .tp-m-line:after { content: ''; position: absolute; top: -4px; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; }
+      .tp-m-line:before { left: 0; border-right: 6px solid #a3271c; }
+      .tp-m-line:after { right: 0; border-left: 6px solid #a3271c; }
+      .tp-m-label { font-size: 0.5rem; font-weight: 800; color: #a3271c; letter-spacing: 0.3px; text-transform: uppercase; background: rgba(255,255,255,0.85); padding: 0 3px; border-radius: 2px; line-height: 1.2; margin-bottom: 1px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+      .tp-m-label.vert { position: absolute; top: 45%; left: 4px; transform: rotate(-90deg); transform-origin: left top; margin: 0; }
+
+      /* لقطات التفاصيل المقصوصة من الصورة المرجعية */
+      .tp-crops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; direction: ltr; }
+      @media (max-width: 600px) { .tp-crops { grid-template-columns: repeat(2, 1fr); } }
+      .tp-crop { border: 1px solid #e5e5e5; border-radius: 6px; overflow: hidden; background: #fff; }
+      .tp-crop-img { width: 100%; aspect-ratio: 1; background-size: 340%; background-repeat: no-repeat; }
+      .tp-crop-cap { text-align: center; font-size: 0.62rem; font-weight: 700; color: #333; padding: 0.35rem 0.3rem; direction: ltr; border-top: 1px solid #eee; }
 
       /* الجداول */
       .tp-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; direction: ltr; }
