@@ -112,11 +112,12 @@ const generateImage = (prompt, aspectRatio, token) =>
 
 // محاولة + إعادة محاولة واحدة، مع احترام الموعد النهائي للدالة
 function makeSafe(deadline) {
-  return async function safeRun(fn, capMs) {
-    if (Date.now() > deadline - 15000) return null;
-    let u = await withTimeout(fn().catch(() => null), Math.min(capMs, deadline - Date.now()));
-    if (!u && Date.now() < deadline - 20000) {
-      await new Promise((r) => setTimeout(r, 2000));
+  return async function safeRun(fn, capMs, attempts) {
+    const maxAttempts = attempts || 3;
+    let u = null;
+    for (let attempt = 0; attempt < maxAttempts && !u; attempt++) {
+      if (Date.now() > deadline - 15000) break;
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
       u = await withTimeout(fn().catch(() => null), Math.min(capMs, deadline - Date.now()));
     }
     return u;
@@ -183,47 +184,57 @@ export default async function handler(req, res) {
     const NO_PERSON =
       'Do NOT include any person, model, mannequin, dress form, body, skin, face, head, hair, arms, hands or legs anywhere in the image — the garment only. ';
 
-    // منظر واحد لكل استدعاء: التحويلات أحادية المنظر أوفى بكثير للتصميم
-    // من طلب منظرين بصورة واحدة (الذي كان يدفع النموذج لاختراع عناصر).
+    // درس التوليدة الأخيرة: توليد "المنظر الخلفي" مباشرة من الصورة الفوتوغرافية
+    // خلّى Kontext يرجّع صورة ملونة مع موديل بدل رسمة تقنية. الحل البنيوي:
+    // سلسلة مشتقة — كل الصور تتولد من الرسمة الأمامية الأبيض/أسود نفسها،
+    // فمدخل الخلفي والملونات ما فيه لا لون ولا شخص أصلاً.
     const SINGLE_VIEW_STYLE =
       'One single view only, centered, the complete garment fully visible from top edge to hem/train with generous margins, nothing cropped. ' +
+      'The garment is drawn COMPLETELY FLAT as if laid on a table: NO mannequin, NO ghost-mannequin volume, NO dress form, NO body outline, NO neck shape, NO shoulders, NO hanger. ' +
       'Flat technical CAD drawing style with thin uniform BLACK outlines on a pure white background, no color, no shading, no fill. ' +
       'Draw every embroidery motif, beaded area and embellishment as fine outlined detail exactly where it appears. ' +
       'Absolutely NO text, NO letters, NO numbers, NO labels, NO arrows, NO measurement lines, NO watermark.';
 
+    // المرحلة A: الرسمة الأمامية من الصورة المرجعية (العملية المثبت نجاحها بكل التوليدات)
     const flatFrontPrompt =
       'Convert this reference photo into a professional fashion technical flat drawing of the FRONT view of the garment. ' +
       NO_INVENT + NO_PERSON + SINGLE_VIEW_STYLE;
 
-    const flatBackPrompt =
-      'Draw the BACK view of this exact garment as a professional fashion technical flat drawing. ' +
-      NO_INVENT + NO_PERSON +
-      'The back view shows the center-back closure seam and the back neckline edge, and continues the exact same silhouette, seams and hem/train as the reference. ' +
-      SINGLE_VIEW_STYLE;
+    // المرحلة B: الخلفي من الرسمة الأمامية — المدخل رسمة خطية، فالستايل ينحفظ قسراً
+    const backFromFrontPrompt =
+      'This image is a black-and-white technical flat line drawing of the FRONT of a garment. ' +
+      'Draw the SAME garment seen from the BACK, in the IDENTICAL black-and-white technical line art style: ' +
+      'same silhouette, same scale, same proportions, same hem and train length, thin uniform black outlines on a pure white background. ' +
+      'The back view shows the center-back closure seam and the back neckline edge. ' +
+      facts +
+      'STRICTLY black-and-white line art only — NO color, NO shading, NO photograph, NO person, NO mannequin, NO text, NO watermark.';
 
-    const coloredFrontPrompt =
-      'Convert this reference photo into a colored flat product illustration of the FRONT view of the garment, ghost-mannequin style. ' +
-      NO_INVENT + NO_PERSON +
-      'One single front view, centered, complete with margins. Keep the exact same colors, fabrics, embroidery, beading and train as the reference. ' +
-      paletteHint +
-      'Even soft studio lighting, pure white background. No text, no labels, no arrows, no watermark.';
+    // المرحلة C: تلوين الرسمة الأمامية (المدخل بلا شخص، فمستحيل يظهر شخص)
+    const colorizeFrontPrompt =
+      'Color this black-and-white technical fashion drawing into a colored flat product illustration of the exact same garment. ' +
+      'Keep every line, proportion, seam and detail EXACTLY as drawn — change nothing about the design, only add color and fabric rendering. ' +
+      facts + paletteHint +
+      'Realistic fabric sheen, pure white background, the garment stays COMPLETELY FLAT exactly as drawn — NO mannequin, NO body volume, NO person, NO photograph background, NO text, NO watermark.';
 
-    const coloredBackPrompt =
-      'Draw the BACK view of this exact garment as a colored flat product illustration, ghost-mannequin style. ' +
-      NO_INVENT + NO_PERSON +
-      'One single back view, centered, complete with margins, showing the center-back closure and back neckline, with the exact same colors, fabrics, embroidery and train as the reference. ' +
-      paletteHint +
-      'Even soft studio lighting, pure white background. No text, no labels, no arrows, no watermark.';
+    // المرحلة D: تلوين الرسمة الخلفية بنفس الباليت
+    const colorizeBackPrompt =
+      'Color this black-and-white technical fashion drawing of the BACK of a garment into a colored flat product illustration. ' +
+      'Keep every line, proportion, seam and detail EXACTLY as drawn — change nothing about the design, only add color and fabric rendering. ' +
+      facts + paletteHint +
+      'Realistic fabric sheen, pure white background, the garment stays COMPLETELY FLAT exactly as drawn — NO mannequin, NO body volume, NO person, NO photograph background, NO text, NO watermark.';
 
     // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
-    const materialPrompt = (m) => {
-      const p = (m && m.photoPrompt) || '';
-      if (p && p.length > 30) return p + ' No text, no letters, no watermark.';
+    const materialFallbackPrompt = (m) => {
       const name = (m && m.name) || 'fabric sample';
       const pantone = m && m.pantone ? ' color PANTONE ' + m.pantone + ',' : '';
       return 'Professional studio product photograph of a single ' + name + ' sample,' + pantone +
-        ' shown alone with visible texture and material detail, soft natural folds if it is a textile, on a plain neutral background. ' +
+        ' exactly one item only, centered, shown alone with visible texture and material detail, soft natural folds if it is a textile, on a plain neutral background. ' +
         'Macro product photography, soft even studio lighting, photorealistic, high detail. No text, no letters, no watermark.';
+    };
+    const materialPrompt = (m) => {
+      const p = (m && m.photoPrompt) || '';
+      if (p && p.length > 30) return p + ' Exactly one item only, centered. No text, no letters, no watermark.';
+      return materialFallbackPrompt(m);
     };
 
     // ------------------------------------------------------------------
@@ -239,23 +250,36 @@ export default async function handler(req, res) {
     const deadline = Date.now() + DEADLINE_MS;
     const safeRun = makeSafe(deadline);
 
-    const tasks = [];
-    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, flatFrontPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null));
-    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, flatBackPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null));
-    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null));
-    tasks.push(() => uploadedUrl ? safeRun(() => generateFlatKontext(uploadedUrl, coloredBackPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null));
-    for (const m of materials) {
-      tasks.push(() => safeRun(() => generateImage(materialPrompt(m), '1:1', replicateToken), 70000));
-    }
+    // سلسلة الرسمات (تشغل حدا أقصى سلوتين) بالتوازي مع مجمع الخامات (3 سلوتات)
+    const chainPromise = (async () => {
+      if (!uploadedUrl) return { f: null, b: null, cf: null, cb: null };
+      const f = await safeRun(() => generateFlatKontext(uploadedUrl, flatFrontPrompt, replicateToken, '2:3'), 110000);
+      if (!f) return { f: null, b: null, cf: null, cb: null };
+      const [b, cf] = await Promise.all([
+        safeRun(() => generateFlatKontext(f, backFromFrontPrompt, replicateToken, '2:3'), 110000),
+        safeRun(() => generateFlatKontext(f, colorizeFrontPrompt, replicateToken, '2:3'), 110000),
+      ]);
+      const cb = b
+        ? await safeRun(() => generateFlatKontext(b, colorizeBackPrompt, replicateToken, '2:3'), 100000)
+        : null;
+      return { f, b, cf, cb };
+    })();
 
-    const results = await runPool(tasks, CONCURRENCY);
+    const materialTasks = materials.map((m) => async () => {
+      let u = await safeRun(() => generateImage(materialPrompt(m), '1:1', replicateToken), 70000, 2);
+      if (!u) u = await safeRun(() => generateImage(materialFallbackPrompt(m), '1:1', replicateToken), 70000, 1);
+      return u;
+    });
+    const materialsPromise = runPool(materialTasks, 3);
+
+    const [chain, materialPhotos] = await Promise.all([chainPromise, materialsPromise]);
 
     return res.status(200).json({
-      flatFrontImage: results[0] || null,
-      flatBackImage: results[1] || null,
-      coloredFrontImage: results[2] || null,
-      coloredBackImage: results[3] || null,
-      materialPhotos: results.slice(4).map((u) => u || null),
+      flatFrontImage: chain.f || null,
+      flatBackImage: chain.b || null,
+      coloredFrontImage: chain.cf || null,
+      coloredBackImage: chain.cb || null,
+      materialPhotos: materialPhotos.map((u) => u || null),
     });
   } catch (error) {
     return res.status(500).json({ error: 'خطأ في توليد الصور: ' + (error.message || 'غير معروف') });
