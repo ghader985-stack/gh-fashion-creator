@@ -22,9 +22,6 @@ export const config = {
 const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
 const REPLICATE_FLUX_URL = 'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
 
-const KONTEXT_MODEL = 'black-forest-labs/flux-kontext-pro';
-const REPLICATE_KONTEXT_URL = 'https://api.replicate.com/v1/models/' + KONTEXT_MODEL + '/predictions';
-
 const CONCURRENCY = 4;      // تحت سقف التزامن عند Replicate
 const DEADLINE_MS = 240000; // نتوقف عن بدء محاولات جديدة قبل انتهاء مهلة الدالة
 
@@ -100,23 +97,19 @@ async function createPrediction(url, input, token, attempt = 0) {
   return pollPrediction(prediction, token, 70);
 }
 
-const generateFlatKontext = (imageUrl, prompt, token, aspect) =>
-  createPrediction(REPLICATE_KONTEXT_URL, {
-    prompt, input_image: imageUrl, output_format: 'jpg', aspect_ratio: aspect, safety_tolerance: 2,
-  }, token);
+// محرّر صور يتبع التعليمات النصية بدقة (Gemini 3 Pro Image).
+// السبب: Kontext كان يتجاهل أمر "احذف الموديل" ويعيد الرسم بالموديل والحجاب،
+// ومستخرِج الخطوط كان يفشل فيسقط العرض للصورة الملونة بالموديل.
+// هذا المحرّر يلتزم بالتعليمات فيُنتج الرسمة المسطحة الأبيض/أسود مباشرة.
+const EDIT_MODEL = 'google/nano-banana-pro';
+const REPLICATE_EDIT_URL = 'https://api.replicate.com/v1/models/' + EDIT_MODEL + '/predictions';
 
-// مستخرِج الخطوط: يحوّل الصورة إلى رسمة خطية نظيفة.
-// ليس نموذج توليد — محكوم بالصورة المدخلة فلا يستطيع إضافة مانيكان أو تغيير التصميم.
-const LINEART_MODEL = 'fofr/controlnet-preprocessors';
-const REPLICATE_LINEART_URL = 'https://api.replicate.com/v1/models/' + LINEART_MODEL + '/predictions';
-
-const extractLineart = (imageUrl, token) =>
-  createPrediction(REPLICATE_LINEART_URL, {
-    image: imageUrl,
-    lineart: true,
-    canny: false, content: false, face_detector: false, hed: false, midas: false,
-    mlsd: false, open_pose: false, pidi: false, normal_bae: false,
-    lineart_anime: false, sam: false, leres: false,
+const editImage = (imageUrls, prompt, token, aspect) =>
+  createPrediction(REPLICATE_EDIT_URL, {
+    prompt,
+    image_input: Array.isArray(imageUrls) ? imageUrls : [imageUrls],
+    aspect_ratio: aspect,
+    output_format: 'jpg',
   }, token);
 
 const generateImage = (prompt, aspectRatio, token) =>
@@ -198,27 +191,39 @@ export default async function handler(req, res) {
     const NO_PERSON =
       'Do NOT include any person, model, mannequin, dress form, body, skin, face, head, hair, arms, hands or legs anywhere in the image — the garment only. ';
 
-    // الرسم الخطي عبر النموذج التوليدي غير حتمي (مرة يطلع أبيض/أسود ومرة ملون).
-    // القرار البنيوي: النموذج يولد فقط المنظرين الملونين المسطحين — العملية
-    // المثبت نجاحها — والرسمة الخطية الأبيض/أسود تشتقها الواجهة بالكود
-    // (كشف حواف حتمي على كانفاس)، فتطلع خطية 100% بكل توليدة بلا استثناء.
-    const FLAT_LOCK =
-      'Style: a colored TECHNICAL FASHION FLAT SKETCH, 2D vector illustration exactly like factory tech pack flats — the garment drawn flat as if laid on a table, symmetrical, NOT worn. ' +
-      'NO person, NO model, NO mannequin, NO invisible/ghost-mannequin volume, NO dress form, NO 3D worn shape, NO body volume inside the garment, NO skin, NO head, NO face, NO hijab, NO headscarf, NO neck, NO arms, NO hands, NO legs, NO shoes, NO hanger. ' +
-      'Zoom out so the ENTIRE garment fits inside the frame — from the top edge to the very end of the hem and the full train — with clear empty margins on all four sides; NEVER crop any part of the garment. ' +
-      'Pure white background, no scene, no props, no body shadows. Absolutely NO text, NO letters, NO numbers, NO labels, NO arrows, NO watermark.';
+    // القطعة تُرسم مسطحة بلا أي جسم، والرسمة التقنية أبيض/أسود تُنتَج مباشرة.
+    const NO_BODY =
+      'Remove the person completely. There must be NO model, NO face, NO head, NO hijab, NO headscarf, NO hair, NO neck, NO skin, NO hands, NO arms, NO legs, NO feet, NO shoes, NO mannequin, NO dress form, NO hanger, and NO body volume inside the garment. ';
+    const FIT_FRAME =
+      'Show the complete garment from the top edge down to the very end of the hem, centred, with empty margins on all four sides. Never crop any part of the garment. ';
+    const NO_ADD =
+      'Do NOT add anything that is not in the reference: no belt, no waistband, no waist seam, no tie, no closure, no buttons, no embroidery, no beading. ';
+
+    const flatFrontPrompt =
+      'Redraw this garment as a professional BLACK AND WHITE fashion technical flat drawing (CAD flat sketch) of the FRONT view, exactly like the flats in a factory tech pack. ' +
+      NO_BODY + NO_ADD + FIT_FRAME + facts +
+      'Draw the garment laid completely flat and symmetrical, as if placed on a table. ' +
+      'Use only thin, uniform, solid BLACK outlines on a pure WHITE background. Absolutely no colour, no grey fill, no shading, no gradients, no fabric texture, no photographic rendering. ' +
+      'Draw all construction lines as thin black lines: panel seams, trim band edges, sleeve seams, cuff band lines, hem edge, collar edge. Show topstitching as fine dashed lines. ' +
+      'No text, no letters, no numbers, no labels, no arrows, no measurement lines, no watermark.';
+
+    const flatBackPrompt =
+      'This image is a black and white technical flat drawing of the FRONT of a garment. Draw the SAME garment seen from the BACK, in the IDENTICAL black and white technical flat style. ' +
+      'Same silhouette, same scale, same proportions, same panel seams, same trim band placement, same sleeve and cuff shapes, same hem length. ' +
+      'The back view shows the centre-back seam and the back neckline edge. ' +
+      NO_BODY + NO_ADD + FIT_FRAME + facts +
+      'Only thin uniform BLACK outlines on a pure WHITE background — no colour, no shading, no photograph. No text, no labels, no arrows, no watermark.';
 
     const coloredFrontPrompt =
-      'Convert this reference photo into a colored flat product illustration of the FRONT view of the garment. ' +
-      NO_INVENT + NO_PERSON + FLAT_LOCK +
-      ' Keep the exact same colors, fabrics, embroidery, beading and train as the reference. ' +
-      paletteHint;
+      'Redraw this garment as a colored flat product illustration of the FRONT view, laid completely flat and symmetrical as if placed on a table. ' +
+      NO_BODY + NO_ADD + FIT_FRAME +
+      'Keep the exact same colours, fabrics, trim bands and proportions as the reference. ' + paletteHint +
+      'Pure white background, soft even lighting. No text, no labels, no arrows, no watermark.';
 
     const coloredBackPrompt =
-      'This image is a colored flat product illustration of the FRONT of a garment. ' +
-      'Draw the SAME garment seen from the BACK in the IDENTICAL flat illustration style: same silhouette, same scale, same colors, same fabrics, same hem and train length. ' +
-      'The back view shows the center-back closure seam and the back neckline edge. ' +
-      facts + NO_PERSON + FLAT_LOCK;
+      'This image is a colored flat product illustration of the FRONT of a garment. Draw the SAME garment seen from the BACK in the IDENTICAL flat illustration style: same silhouette, same scale, same colours, same fabrics, same trim placement, same hem length, showing the centre-back seam and back neckline. ' +
+      NO_BODY + NO_ADD + FIT_FRAME + facts + paletteHint +
+      'Pure white background. No text, no labels, no arrows, no watermark.';
 
     // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
     const materialFallbackPrompt = (m) => {
@@ -227,14 +232,14 @@ export default async function handler(req, res) {
       const desc = m && m.description ? ' ' + String(m.description).slice(0, 180) : '';
       return 'Professional studio product photograph of a single ' + name + ',' + pantone +
         ' exactly one item only, centered, shown alone with visible texture and true material detail, soft natural folds if it is a textile, on a plain neutral background.' + desc + ' ' +
-        'The item must match its real-world form and scale exactly (a garment bag is large enough for a floor-length gown, a label is a small woven tag, a zipper is a coil zipper). ' +
+        'The item must match its real-world form and scale exactly: a packaging bag is a LARGE EMPTY transparent garment polybag sized for a floor-length abaya (about 60x150cm), lying flat and clearly empty (never filled, never a small pouch), a hanger is a full-size padded or wooden garment hanger shown alone with nothing on it, a label is a small woven fabric tag, a zipper is a coil zipper, interfacing and stay tape are plain rolls or strips. Show only the raw component itself — NOT a finished garment, NOT a jacket, NOT clothing. ' +
         'Macro product photography, soft even studio lighting, photorealistic, high detail. No garment worn, no person, no text, no letters, no watermark.';
     };
     const materialPrompt = (m) => {
       const p = (m && m.photoPrompt) || '';
       if (p && p.length > 30) {
         const pantone = m && m.pantone ? ' The exact color must be PANTONE ' + m.pantone + '.' : '';
-        return p + pantone + ' Exactly one item only, centered, at its true real-world form and scale. No person, no text, no letters, no watermark.';
+        return p + pantone + ' Exactly one physical item only, centered on a plain neutral surface, at its true real-world form and scale. Show only that item itself — NOT a finished garment, NOT a jacket, NOT clothing worn or displayed. If it is a packaging bag it must be a LARGE EMPTY transparent garment polybag sized for a floor-length abaya (about 60x150cm), shown flat and clearly empty, never filled and never a small pouch. If it is a hanger it must be a full-size padded or wooden garment hanger shown alone with nothing on it. No person, no text, no letters, no watermark.';
       }
       return materialFallbackPrompt(m);
     };
@@ -252,17 +257,16 @@ export default async function handler(req, res) {
     const deadline = Date.now() + DEADLINE_MS;
     const safeRun = makeSafe(deadline);
 
-    // السلسلة: عزل القطعة عن الموديل (أمامي ثم خلفي) ثم استخراج الخطوط من كل منهما
+    // السلسلة: رسمة تقنية أمامية → (خلفية تقنية ∥ ملونة أمامية) → ملونة خلفية
     const chainPromise = (async () => {
-      if (!uploadedUrl) return { cf: null, cb: null, lf: null, lb: null };
-      const cf = await safeRun(() => generateFlatKontext(uploadedUrl, coloredFrontPrompt, replicateToken, '9:16'), 110000);
-      if (!cf) return { cf: null, cb: null, lf: null, lb: null };
-      const [cb, lf] = await Promise.all([
-        safeRun(() => generateFlatKontext(cf, coloredBackPrompt, replicateToken, '9:16'), 110000),
-        safeRun(() => extractLineart(cf, replicateToken), 70000),
+      if (!uploadedUrl) return { lf: null, lb: null, cf: null, cb: null };
+      const lf = await safeRun(() => editImage(uploadedUrl, flatFrontPrompt, replicateToken, '2:3'), 110000);
+      const [lb, cf] = await Promise.all([
+        lf ? safeRun(() => editImage(lf, flatBackPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null),
+        safeRun(() => editImage(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 110000),
       ]);
-      const lb = cb ? await safeRun(() => extractLineart(cb, replicateToken), 70000) : null;
-      return { cf, cb, lf, lb };
+      const cb = cf ? await safeRun(() => editImage(cf, coloredBackPrompt, replicateToken, '2:3'), 100000) : null;
+      return { lf, lb, cf, cb };
     })();
 
     const materialTasks = materials.map((m) => async () => {
