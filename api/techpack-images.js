@@ -9,7 +9,7 @@
 // نولّد رسمة تقنية نظيفة واحدة، والواجهة ترسم فوقها خطوط القياس والأرقام
 // والتسميات ككود (نص حاد 100%). هذا يقلّص Kontext من 5 إلى 3 استدعاءات.
 //
-// المخرجات: { flatFrontImage, flatBackImage, coloredFrontImage, coloredBackImage, materialPhotos: [...] }
+// المخرجات: { coloredFrontImage, coloredBackImage, materialPhotos: [...] }
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -184,44 +184,27 @@ export default async function handler(req, res) {
     const NO_PERSON =
       'Do NOT include any person, model, mannequin, dress form, body, skin, face, head, hair, arms, hands or legs anywhere in the image — the garment only. ';
 
-    // درس التوليدة الأخيرة: توليد "المنظر الخلفي" مباشرة من الصورة الفوتوغرافية
-    // خلّى Kontext يرجّع صورة ملونة مع موديل بدل رسمة تقنية. الحل البنيوي:
-    // سلسلة مشتقة — كل الصور تتولد من الرسمة الأمامية الأبيض/أسود نفسها،
-    // فمدخل الخلفي والملونات ما فيه لا لون ولا شخص أصلاً.
-    const SINGLE_VIEW_STYLE =
-      'One single view only, centered, the complete garment fully visible from top edge to hem/train with generous margins, nothing cropped. ' +
-      'The garment is drawn COMPLETELY FLAT as if laid on a table: NO mannequin, NO ghost-mannequin volume, NO dress form, NO body outline, NO neck shape, NO shoulders, NO hanger. ' +
-      'Flat technical CAD drawing style with thin uniform BLACK outlines on a pure white background, no color, no shading, no fill. ' +
-      'Draw every embroidery motif, beaded area and embellishment as fine outlined detail exactly where it appears. ' +
-      'Absolutely NO text, NO letters, NO numbers, NO labels, NO arrows, NO measurement lines, NO watermark.';
+    // الرسم الخطي عبر النموذج التوليدي غير حتمي (مرة يطلع أبيض/أسود ومرة ملون).
+    // القرار البنيوي: النموذج يولد فقط المنظرين الملونين المسطحين — العملية
+    // المثبت نجاحها — والرسمة الخطية الأبيض/أسود تشتقها الواجهة بالكود
+    // (كشف حواف حتمي على كانفاس)، فتطلع خطية 100% بكل توليدة بلا استثناء.
+    const FLAT_LOCK =
+      'Style: a colored TECHNICAL FASHION FLAT SKETCH, 2D vector illustration exactly like factory tech pack flats — the garment drawn flat as if laid on a table, symmetrical, NOT worn. ' +
+      'NO person, NO model, NO mannequin, NO invisible/ghost-mannequin volume, NO dress form, NO 3D worn shape, NO body volume inside the garment, NO skin, NO head, NO neck, NO arms, NO hanger. ' +
+      'Zoom out so the ENTIRE garment fits inside the frame — from the top edge to the very end of the hem and the full train — with clear empty margins on all four sides; NEVER crop any part of the garment. ' +
+      'Pure white background, no scene, no props, no body shadows. Absolutely NO text, NO letters, NO numbers, NO labels, NO arrows, NO watermark.';
 
-    // المرحلة A: الرسمة الأمامية من الصورة المرجعية (العملية المثبت نجاحها بكل التوليدات)
-    const flatFrontPrompt =
-      'Convert this reference photo into a professional fashion technical flat drawing of the FRONT view of the garment. ' +
-      NO_INVENT + NO_PERSON + SINGLE_VIEW_STYLE;
+    const coloredFrontPrompt =
+      'Convert this reference photo into a colored flat product illustration of the FRONT view of the garment. ' +
+      NO_INVENT + NO_PERSON + FLAT_LOCK +
+      ' Keep the exact same colors, fabrics, embroidery, beading and train as the reference. ' +
+      paletteHint;
 
-    // المرحلة B: الخلفي من الرسمة الأمامية — المدخل رسمة خطية، فالستايل ينحفظ قسراً
-    const backFromFrontPrompt =
-      'This image is a black-and-white technical flat line drawing of the FRONT of a garment. ' +
-      'Draw the SAME garment seen from the BACK, in the IDENTICAL black-and-white technical line art style: ' +
-      'same silhouette, same scale, same proportions, same hem and train length, thin uniform black outlines on a pure white background. ' +
+    const coloredBackPrompt =
+      'This image is a colored flat product illustration of the FRONT of a garment. ' +
+      'Draw the SAME garment seen from the BACK in the IDENTICAL flat illustration style: same silhouette, same scale, same colors, same fabrics, same hem and train length. ' +
       'The back view shows the center-back closure seam and the back neckline edge. ' +
-      facts +
-      'STRICTLY black-and-white line art only — NO color, NO shading, NO photograph, NO person, NO mannequin, NO text, NO watermark.';
-
-    // المرحلة C: تلوين الرسمة الأمامية (المدخل بلا شخص، فمستحيل يظهر شخص)
-    const colorizeFrontPrompt =
-      'Color this black-and-white technical fashion drawing into a colored flat product illustration of the exact same garment. ' +
-      'Keep every line, proportion, seam and detail EXACTLY as drawn — change nothing about the design, only add color and fabric rendering. ' +
-      facts + paletteHint +
-      'Realistic fabric sheen, pure white background, the garment stays COMPLETELY FLAT exactly as drawn — NO mannequin, NO body volume, NO person, NO photograph background, NO text, NO watermark.';
-
-    // المرحلة D: تلوين الرسمة الخلفية بنفس الباليت
-    const colorizeBackPrompt =
-      'Color this black-and-white technical fashion drawing of the BACK of a garment into a colored flat product illustration. ' +
-      'Keep every line, proportion, seam and detail EXACTLY as drawn — change nothing about the design, only add color and fabric rendering. ' +
-      facts + paletteHint +
-      'Realistic fabric sheen, pure white background, the garment stays COMPLETELY FLAT exactly as drawn — NO mannequin, NO body volume, NO person, NO photograph background, NO text, NO watermark.';
+      facts + NO_PERSON + FLAT_LOCK;
 
     // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
     const materialFallbackPrompt = (m) => {
@@ -250,19 +233,13 @@ export default async function handler(req, res) {
     const deadline = Date.now() + DEADLINE_MS;
     const safeRun = makeSafe(deadline);
 
-    // سلسلة الرسمات (تشغل حدا أقصى سلوتين) بالتوازي مع مجمع الخامات (3 سلوتات)
+    // سلسلة من خطوتين: الأمامي الملون من الصورة، والخلفي الملون من الأمامي
     const chainPromise = (async () => {
-      if (!uploadedUrl) return { f: null, b: null, cf: null, cb: null };
-      const f = await safeRun(() => generateFlatKontext(uploadedUrl, flatFrontPrompt, replicateToken, '2:3'), 110000);
-      if (!f) return { f: null, b: null, cf: null, cb: null };
-      const [b, cf] = await Promise.all([
-        safeRun(() => generateFlatKontext(f, backFromFrontPrompt, replicateToken, '2:3'), 110000),
-        safeRun(() => generateFlatKontext(f, colorizeFrontPrompt, replicateToken, '2:3'), 110000),
-      ]);
-      const cb = b
-        ? await safeRun(() => generateFlatKontext(b, colorizeBackPrompt, replicateToken, '2:3'), 100000)
-        : null;
-      return { f, b, cf, cb };
+      if (!uploadedUrl) return { cf: null, cb: null };
+      const cf = await safeRun(() => generateFlatKontext(uploadedUrl, coloredFrontPrompt, replicateToken, '9:16'), 110000);
+      if (!cf) return { cf: null, cb: null };
+      const cb = await safeRun(() => generateFlatKontext(cf, coloredBackPrompt, replicateToken, '9:16'), 110000);
+      return { cf, cb };
     })();
 
     const materialTasks = materials.map((m) => async () => {
@@ -275,8 +252,6 @@ export default async function handler(req, res) {
     const [chain, materialPhotos] = await Promise.all([chainPromise, materialsPromise]);
 
     return res.status(200).json({
-      flatFrontImage: chain.f || null,
-      flatBackImage: chain.b || null,
       coloredFrontImage: chain.cf || null,
       coloredBackImage: chain.cb || null,
       materialPhotos: materialPhotos.map((u) => u || null),
