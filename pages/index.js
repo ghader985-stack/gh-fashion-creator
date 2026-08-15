@@ -1015,7 +1015,7 @@ function TechpackView({ tp, preview }) {
 
   pages.push(['SAMPLE MEASUREMENTS', (
     <>
-      <AnnotatedPair frontImage={proxied(tp.coloredFrontImage)} backImage={proxied(tp.coloredBackImage)} mode="measure"
+      <AnnotatedPair frontImage={proxied(tp.lineFrontImage || tp.coloredFrontImage)} backImage={proxied(tp.lineBackImage || tp.coloredBackImage)} mode="measure"
         front={specLabels.front || []} back={specLabels.back || []} />
       <div className="tp-anno-caption">Garment Details: BLACK &nbsp;·&nbsp; Measurement Lines and Labels: DARK RED</div>
     </>
@@ -1028,7 +1028,7 @@ function TechpackView({ tp, preview }) {
   if (mat2.length > 0) pages.push(['MATERIALS (CONTINUED)', matCards(mat2, 8)]);
 
   pages.push(['MATERIALS CALLOUT', (
-    <AnnotatedPair frontImage={proxied(tp.coloredFrontImage)} backImage={proxied(tp.coloredBackImage)} mode="callout"
+    <AnnotatedPair frontImage={proxied(tp.lineFrontImage || tp.coloredFrontImage)} backImage={proxied(tp.lineBackImage || tp.coloredBackImage)} mode="callout"
       front={calloutMap.filter((c) => (c.view || 'front') !== 'back')}
       back={calloutMap.filter((c) => c.view === 'back')} />
   )]);
@@ -1057,7 +1057,7 @@ function TechpackView({ tp, preview }) {
   )]);
 
   pages.push(['SEWING DETAILS', (
-    <AnnotatedPair frontImage={proxied(tp.coloredFrontImage)} backImage={proxied(tp.coloredBackImage)} mode="sewing"
+    <AnnotatedPair frontImage={proxied(tp.lineFrontImage || tp.coloredFrontImage)} backImage={proxied(tp.lineBackImage || tp.coloredBackImage)} mode="sewing"
       front={sewLabels.filter((s) => (s.view || 'front') !== 'back')}
       back={sewLabels.filter((s) => s.view === 'back')} />
   )]);
@@ -1277,66 +1277,9 @@ function useImgBox(image) {
 
 const DEFAULT_VIEW_BOX = { top: 6, bottom: 95, left: 22, right: 78 };
 
-// اشتقاق رسمة خطية أبيض/أسود من الرسم الملون — كشف حواف Sobel على كانفاس.
-// حتمي 100%: يشتغل بالمتصفح بلا أي API، فالرسمة التقنية تطلع خطية بكل توليدة.
-function useLineArt(image, enabled) {
-  const [url, setUrl] = useState(null);
-  useEffect(() => {
-    if (!image || !enabled) { setUrl(null); return; }
-    let cancelled = false;
-    const img = new window.Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const W = 820;
-        const H = Math.max(200, Math.round((img.height / img.width) * W));
-        const c = document.createElement('canvas');
-        c.width = W; c.height = H;
-        const x = c.getContext('2d');
-        x.drawImage(img, 0, 0, W, H);
-        const d = x.getImageData(0, 0, W, H).data;
-        const g = new Float32Array(W * H);
-        for (let i = 0; i < W * H; i++) {
-          const p = i * 4;
-          g[i] = d[p] * 0.299 + d[p + 1] * 0.587 + d[p + 2] * 0.114;
-        }
-        // تنعيم خفيف 3×3 لتقليل ضجيج نسيج القماش
-        const b = new Float32Array(W * H);
-        for (let y = 1; y < H - 1; y++) {
-          for (let xx = 1; xx < W - 1; xx++) {
-            let s = 0;
-            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) s += g[(y + dy) * W + xx + dx];
-            b[y * W + xx] = s / 9;
-          }
-        }
-        const out = x.createImageData(W, H);
-        out.data.fill(255);
-        for (let y = 1; y < H - 1; y++) {
-          for (let xx = 1; xx < W - 1; xx++) {
-            const i = y * W + xx;
-            const gx = -b[i - W - 1] - 2 * b[i - 1] - b[i + W - 1] + b[i - W + 1] + 2 * b[i + 1] + b[i + W + 1];
-            const gy = -b[i - W - 1] - 2 * b[i - W] - b[i - W + 1] + b[i + W - 1] + 2 * b[i + W] + b[i + W + 1];
-            if (Math.sqrt(gx * gx + gy * gy) > 68) {
-              const p = i * 4;
-              out.data[p] = 40; out.data[p + 1] = 40; out.data[p + 2] = 40;
-            }
-          }
-        }
-        x.putImageData(out, 0, 0);
-        if (!cancelled) setUrl(c.toDataURL('image/png'));
-      } catch (e) { if (!cancelled) setUrl(null); }
-    };
-    img.onerror = () => { if (!cancelled) setUrl(null); };
-    img.src = image;
-    return () => { cancelled = true; };
-  }, [image, enabled]);
-  return url;
-}
-
 // منظر واحد مشروح: خطوط القياس تعبر جسم القطعة، والدوائر/التسميات على جهة labelSide
 function AnnotatedView({ image, mode, items, caption, labelSide }) {
   const detected = useImgBox(image);
-  const lineArt = useLineArt(image, mode !== 'colorway');
   if (!image) {
     return <div className="tp-view"><div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div><div className="tp-view-cap">{caption}</div></div>;
   }
@@ -1358,8 +1301,7 @@ function AnnotatedView({ image, mode, items, caption, labelSide }) {
   return (
     <div className="tp-view">
       <div className="tp-anno">
-        <img src={lineArt || image} alt={caption} crossOrigin="anonymous"
-          style={lineArt ? undefined : { filter: 'grayscale(1) contrast(1.5)' }} />
+        <img src={image} alt={caption} crossOrigin="anonymous" />
 
         {mode === 'measure' && rows.map((r, i) => (
           <div className="tp-m-wrap" key={'m' + i} style={{ top: r.top + '%', left: box.left + '%', width: bw + '%' }}>
