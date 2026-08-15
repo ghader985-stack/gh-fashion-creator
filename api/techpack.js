@@ -59,8 +59,10 @@ function repairJson(text) {
     } else if (c === '"') inStr = true;
   }
   if (inStr) {
+    // القطع وقع داخل نص: نحذف علامة الاقتباس المفتوحة نفسها لا أن نبقيها،
+    // وإلا يبقى النص غير منتهٍ ويفشل التحليل (باگ مكتشف باختبار القطع).
     const lastQuote = s.lastIndexOf('"');
-    if (lastQuote > 0) s = s.slice(0, lastQuote + 1);
+    if (lastQuote > 0) s = s.slice(0, lastQuote);
   }
   let prev;
   do {
@@ -149,14 +151,14 @@ ${INDUSTRY_RULES}
     { "pom": "الاسم بالإنجليزية مع وصف كامل بين قوسين مثل: Center Front Length (top edge of bodice at CF V-point to front hem edge)", "view": "front|back", "tolerance": "+-1.0", "sizes": { "2": 130.0, "4": 131.0, "6": 132, "8": 133.0, "10": 134.0, "12": 135.0 } }
   ],
   "specSheetLabels": {
-    "front": ["FRONT NECKLINE DROP", "BUST WIDTH", "BP-BP", "WAIST WIDTH", "LOW HIP WIDTH", "CFL", "HFS WIDTH"],
-    "back": ["BACK NECKLINE DROP", "CB ZIPPER LENGTH", "CBL", "TRAIN LENGTH", "HBS WIDTH incl. TRAIN"]
+    "front": [ { "label": "BUST WIDTH", "y": 4 }, { "label": "WAIST WIDTH", "y": 18 }, { "label": "LOW HIP WIDTH", "y": 32 }, { "label": "HFS WIDTH", "y": 96 }, { "label": "CFL", "y": 50 } ],
+    "back": [ { "label": "CB ZIPPER LENGTH", "y": 14 }, { "label": "CBL", "y": 50 }, { "label": "TRAIN LENGTH", "y": 88 }, { "label": "HBS WIDTH incl. TRAIN", "y": 97 } ]
   },
   "materials": [
     { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark. قاعدة صارمة: صفي العنصر المادي الواحد فقط باسمه الدقيق ولونه الدقيق (بكود Pantone) وخامته وشكله — invisible zipper بلون القماش، metal hook-and-eye bar closure، spool of polyester thread، rigilene boning strips، woven satin brand label — وممنوع ذكر الفستان أو شخص أو أكثر من عنصر واحد." }
   ],
-  "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back" } ],
-  "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back" } ],
+  "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back", "y": 30 } ],
+  "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back", "y": 12 } ],
   "colorway": [ { "part": "الجزء بالإنجليزية", "pantone": "الكود", "hex": "#XXXXXX" } ],
   "detailViews": [ { "area": "المنطقة بالإنجليزية", "detail": "الوصف بالإنجليزية التقنية", "spec": "المواصفة/القياس بالإنجليزية" } ],
   "artwork": [ { "name": "العنصر بالإنجليزية", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس", "notes": "ملاحظات بالإنجليزية" } ],
@@ -172,6 +174,7 @@ ${INDUSTRY_RULES}
 4. calloutMap: 5 إلى 6 عناصر، num هو رقم العنصر في materials (ترتيبه من 1)، موزّعة بين front وback، تغطي القماش الرئيسي والطبقات والزخرفة والإغلاق.
 5. specSheetLabels: أسماء كبيرة قصيرة (4 كلمات كحد أقصى)، 6-8 للأمامي و4-5 للخلفي، مطابقة لنقاط قياس فعلية من الجدول (استخدمي الاختصارات CFL, CBL, BP-BP, HFS, HBS حيث تنطبق).
 6. sewingDetailLabels: 6-8 تسميات، كل واحدة 4 كلمات كحد أقصى.
+6-ب. حقل y إلزامي لكل عنصر في specSheetLabels وcalloutMap وsewingDetailLabels: انظري لصورة القطعة الفعلية وقدّري الموقع العمودي للنقطة على القطعة نفسها كنسبة من 0 (أعلى حافة بالقطعة) إلى 100 (أدنى نقطة بالذيل/الهيم). انتبهي لنوع القطعة: بفستان سترابلس أعلى الحافة هو خط الصدر نفسه، فيكون BUST قرب 3-6 وWAIST قرب 15-20 وLOW HIP قرب 28-35 — وليس كجسم كامل من الرأس.
 7. colorway: 4-8 ألوان بأكواد hex دقيقة من الصورة الفعلية.
 8. construction: 12 صفاً. detailViews: 4-6. artwork: 2-4. sewingSteps: 16 على الأقل.
 9. كل النصوص التقنية بالإنجليزية حصراً (لغة المصانع). العربية فقط في garmentNameAr وdescription.`;
