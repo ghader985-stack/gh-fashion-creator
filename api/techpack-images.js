@@ -1,9 +1,15 @@
-// api/techpack.js
-// الطور 1: يستقبل صورة تصميم + مواصفات، يحلّلها عبر Claude Vision،
-// ويرجّع تيك باك كامل (JSON) بهيكل مطابق حرفياً لنموذج Adstronaut:
-// مقاسات رقمية 2-12 مع عيّنة 6، أوصاف POM كاملة، 14 خامة مرتّبة = BOM،
-// تسميات صفحة القياسات المشروحة، وخريطة الترقيم لصفحة الـ Callout.
-// الصور تُولَّد في الطور 2 (/api/techpack-images).
+// api/techpack-images.js
+// الطور 2: توليد صور التيك باك.
+//
+// درس التجربة السابقة (من لوغز Vercel): إطلاق 19 توليد بالتوازي اصطدم بسقف
+// التزامن عند Replicate — أول ~10 نجحوا والباقي انرفضوا فوراً (استدعاءات 20ms).
+// الحل: مجمّع تنفيذ (pool) بحد 4 مهام متزامنة، فلا يُرفض أي طلب.
+//
+// وقرار ثانٍ: لا نطلب من نماذج الصور رسم نصوص/أرقام (تطلع مشوّهة) —
+// نولّد رسمة تقنية نظيفة واحدة، والواجهة ترسم فوقها خطوط القياس والأرقام
+// والتسميات ككود (نص حاد 100%). هذا يقلّص Kontext من 5 إلى 3 استدعاءات.
+//
+// المخرجات: { coloredFrontImage, coloredBackImage, lineFrontImage, lineBackImage, materialPhotos: [...] }
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -13,16 +19,22 @@ export const config = {
   maxDuration: 300,
 };
 
-const MODEL = 'claude-sonnet-5';
+const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
+const REPLICATE_FLUX_URL = 'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
+
+const KONTEXT_MODEL = 'black-forest-labs/flux-kontext-pro';
+const REPLICATE_KONTEXT_URL = 'https://api.replicate.com/v1/models/' + KONTEXT_MODEL + '/predictions';
+
+const CONCURRENCY = 4;      // تحت سقف التزامن عند Replicate
+const DEADLINE_MS = 240000; // نتوقف عن بدء محاولات جديدة قبل انتهاء مهلة الدالة
 
 // ============================================================================
-const INDUSTRY_RULES = `
-معايير مرجعية (طبّقيها حسب القطعة الفعلية، لا أرقام عشوائية):
-# نقاط القياس: 26 نقطة على الأقل. للفساتين الطويلة: CF Length, CB Length, Side Seam Length, Bust Width, Top Edge Width Front/Back, Waist Width, Waist Position, High Hip, Low Hip, Thigh, Knee Width at Flare Break, Flare Break Height, Hem Sweep Front, Hem Sweep Back incl. Train, Train Length, Front/Back Neckline Drop, Bodice Side Height, Cup Height, BP to BP, CB Zipper Length, Embellishment Depth, Overlay Start Height, Boning Length, Lining Length CF, Shoulder to Bust. لأنواع أخرى استبدلي بالمناسب (Inseam, Outseam, Rise, Sleeve Length, Across Shoulder, Armhole...).
-# التدرّج بين المقاسات المتتالية: الأبعاد الأفقية ~1.2-1.5 سم، الأطوال ~0.5-1 سم، التفاصيل الصغيرة ~0.3 سم. قياسات ثابتة عبر المقاسات (مثل Train Length) تبقى ثابتة.
-# التفاوتات بصيغة "+-X.X": أفقي كبير +-0.6، أطوال +-1.0 إلى +-2.5، تفاصيل +-0.3 إلى +-0.5.
-# تعليمات الخياطة: تسلسل مصنع منطقي، 16 خطوة على الأقل.
-`;
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
 
 function detectImageType(buffer) {
   if (!buffer || buffer.length < 12) return 'image/jpeg';
@@ -34,274 +46,242 @@ function detectImageType(buffer) {
   return 'image/jpeg';
 }
 
-function safeJsonParse(raw) {
-  let s = (raw || '').trim();
-  s = s.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  const start = s.indexOf('{');
-  if (start === -1) throw new Error('no json object found');
-  s = s.slice(start);
-  const end = s.lastIndexOf('}');
-  let candidate = end > 0 ? s.slice(0, end + 1) : s;
-  try { return JSON.parse(candidate); } catch (e) {}
-  try { return JSON.parse(repairJson(s)); } catch (e) {}
-  return JSON.parse(repairJson(candidate));
+async function uploadToReplicate(buffer, mediaType, token) {
+  const ext = (mediaType.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+  const boundary = '----ghBoundary' + Date.now();
+  const pre = Buffer.from(
+    '--' + boundary + '\r\n' +
+    'Content-Disposition: form-data; name="content"; filename="design.' + ext + '"\r\n' +
+    'Content-Type: ' + mediaType + '\r\n\r\n'
+  );
+  const post = Buffer.from('\r\n--' + boundary + '--\r\n');
+  const body = Buffer.concat([pre, buffer, post]);
+  const res = await fetch('https://api.replicate.com/v1/files', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'multipart/form-data; boundary=' + boundary },
+    body,
+  });
+  if (!res.ok) throw new Error('فشل رفع الصورة (' + res.status + ')');
+  const data = await res.json();
+  return (data.urls && data.urls.get) || null;
 }
 
-function repairJson(text) {
-  let s = text.trim();
-  let inStr = false, esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
+async function pollPrediction(prediction, token, maxTries) {
+  let result = prediction, tries = 0;
+  while (result.status !== 'succeeded' && result.status !== 'failed' && result.status !== 'canceled' && tries < maxTries) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const pollRes = await fetch('https://api.replicate.com/v1/predictions/' + result.id, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    result = await pollRes.json();
+    tries++;
   }
-  if (inStr) {
-    // القطع وقع داخل نص: نحذف علامة الاقتباس المفتوحة نفسها لا أن نبقيها،
-    // وإلا يبقى النص غير منتهٍ ويفشل التحليل (باگ مكتشف باختبار القطع).
-    const lastQuote = s.lastIndexOf('"');
-    if (lastQuote > 0) s = s.slice(0, lastQuote);
+  if (result.status !== 'succeeded') throw new Error('لم يكتمل التوليد');
+  let output = result.output;
+  output = Array.isArray(output) ? output[0] : output;
+  if (typeof output === 'string' && output.startsWith('http')) return output;
+  return null;
+}
+
+async function createPrediction(url, input, token, attempt = 0) {
+  const createRes = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait' },
+    body: JSON.stringify({ input }),
+  });
+  const bodyText = await createRes.text();
+  let prediction;
+  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('رد غير متوقع من Replicate'); }
+  if (createRes.status === 429 && attempt < 4) {
+    await new Promise((r) => setTimeout(r, 5000));
+    return createPrediction(url, input, token, attempt + 1);
   }
-  let prev;
-  do {
-    prev = s;
-    s = s.replace(/,\s*$/, '');
-    s = s.replace(/"[^"]*"\s*:\s*$/, '');
-    s = s.replace(/"[^"]*"\s*:\s*[-\d.]+$/, '');
-    s = s.replace(/,\s*$/, '');
-  } while (s !== prev);
-  const stack = [];
-  inStr = false; esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-      continue;
+  if (!createRes.ok || prediction.error) throw new Error('Replicate (' + createRes.status + ')');
+  return pollPrediction(prediction, token, 70);
+}
+
+const generateFlatKontext = (imageUrl, prompt, token, aspect) =>
+  createPrediction(REPLICATE_KONTEXT_URL, {
+    prompt, input_image: imageUrl, output_format: 'jpg', aspect_ratio: aspect, safety_tolerance: 2,
+  }, token);
+
+// مستخرِج الخطوط: يحوّل الصورة إلى رسمة خطية نظيفة.
+// ليس نموذج توليد — محكوم بالصورة المدخلة فلا يستطيع إضافة مانيكان أو تغيير التصميم.
+const LINEART_MODEL = 'fofr/controlnet-preprocessors';
+const REPLICATE_LINEART_URL = 'https://api.replicate.com/v1/models/' + LINEART_MODEL + '/predictions';
+
+const extractLineart = (imageUrl, token) =>
+  createPrediction(REPLICATE_LINEART_URL, {
+    image: imageUrl,
+    lineart: true,
+    canny: false, content: false, face_detector: false, hed: false, midas: false,
+    mlsd: false, open_pose: false, pidi: false, normal_bae: false,
+    lineart_anime: false, sam: false, leres: false,
+  }, token);
+
+const generateImage = (prompt, aspectRatio, token) =>
+  createPrediction(REPLICATE_FLUX_URL, {
+    prompt, aspect_ratio: aspectRatio, output_format: 'jpg', output_quality: 95, safety_tolerance: 2,
+  }, token);
+
+// محاولة + إعادة محاولة واحدة، مع احترام الموعد النهائي للدالة
+function makeSafe(deadline) {
+  return async function safeRun(fn, capMs, attempts) {
+    const maxAttempts = attempts || 3;
+    let u = null;
+    for (let attempt = 0; attempt < maxAttempts && !u; attempt++) {
+      if (Date.now() > deadline - 15000) break;
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
+      u = await withTimeout(fn().catch(() => null), Math.min(capMs, deadline - Date.now()));
     }
-    if (c === '"') { inStr = true; continue; }
-    if (c === '{' || c === '[') stack.push(c);
-    else if (c === '}' || c === ']') stack.pop();
-  }
-  for (let i = stack.length - 1; i >= 0; i--) {
-    s += stack[i] === '{' ? '}' : ']';
-  }
-  return s;
+    return u;
+  };
 }
 
+// مجمّع تنفيذ بحد أقصى للتزامن — يمنع رفض Replicate الفوري للطلبات الزائدة
+async function runPool(tasks, limit) {
+  const results = new Array(tasks.length).fill(null);
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) {
+      const i = next++;
+      try { results[i] = await tasks[i](); } catch (e) { results[i] = null; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
+function getField(v) { return Array.isArray(v) ? v[0] : v; }
+
+// ============================================================================
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'مفتاح Claude غير مضبوط على الخادم' });
+  const replicateToken = process.env.REPLICATE_API_TOKEN;
+  if (!replicateToken) return res.status(500).json({ error: 'مفتاح Replicate غير مضبوط على الخادم' });
 
   try {
     const form = formidable({ maxFileSize: 12 * 1024 * 1024 });
-    const [fields, files] = await new Promise((resolve, reject) => {
-      form.parse(req, (err, flds, fls) => (err ? reject(err) : resolve([flds, fls])));
-    });
+    const [fields, files] = await form.parse(req);
 
-    const getField = (f) => (Array.isArray(f) ? f[0] : f) || '';
-    const garmentName = getField(fields.garmentName);
-    const fabricInfo = getField(fields.fabricInfo);
-    const brandName = getField(fields.brandName) || 'GH Couture AI';
-    const season = getField(fields.season);
-    const extraNotes = getField(fields.notes);
-
-    const imageFile = files.image ? (Array.isArray(files.image) ? files.image[0] : files.image) : null;
+    const imageFile = Array.isArray(files.image) ? files.image[0] : files.image;
     if (!imageFile) return res.status(400).json({ error: 'لم تُرفع صورة التصميم' });
 
+    let meta = {};
+    try { meta = JSON.parse(getField(fields.meta) || '{}'); } catch (e) { meta = {}; }
+
     const imgBuffer = fs.readFileSync(imageFile.filepath);
-    const base64 = imgBuffer.toString('base64');
     const mediaType = detectImageType(imgBuffer);
 
-    const today = new Date();
-    const yymmdd = today.toISOString().slice(2, 10).replace(/-/g, '');
+    const materials = Array.isArray(meta.materials) ? meta.materials.slice(0, 16) : [];
+    const areaList = Array.isArray(meta.detailAreas) ? meta.detailAreas.filter(Boolean).join(', ') : '';
+    const paletteHint = Array.isArray(meta.colorway) && meta.colorway.length
+      ? 'Garment color palette: ' + meta.colorway.map((c) => (c.part || '') + ' ' + (c.hex || '')).join(', ') + '. '
+      : '';
 
-    const instruction = `أنتِ مصمِّمة تقنية (Technical Designer) خبيرة تبني تيك باك بمعيار منصات المصانع الاحترافية.
+    // ------------------------------------------------------------------
+    // البرومبتات — بدون أي طلب لرسم نصوص أو أرقام داخل الصورة
+    // ------------------------------------------------------------------
+    const facts = typeof meta.garmentFacts === 'string' && meta.garmentFacts.length > 10
+      ? 'LOCKED DESIGN FACTS — every drawing must match ALL of these exactly: ' + meta.garmentFacts + ' '
+      : '';
 
-حلّلي صورة القطعة بدقة عالية جداً واستخرجي خصائصها الفعلية (النوع، القصّة، السيلويت، الرقبة، الطول، الإغلاق، التفاصيل الزخرفية) ثم ابني تيك باك كاملاً:
+    const NO_INVENT =
+      'CRITICAL: reproduce the garment EXACTLY as in the reference image. ' +
+      facts +
+      'Do NOT add, remove or alter any design element. ' +
+      'Do NOT add shoulder straps, sleeves, collars, sheer panels, mesh, chiffon yokes, illusion necklines or any element that is not in the reference; if the reference is strapless it stays strapless. ' +
+      'Keep the exact neckline shape and the exact silhouette. ' +
+      'Preserve and reproduce ALL embroidery motifs, beading, crystals and embellishments in their exact locations, shapes and density. ';
 
-${INDUSTRY_RULES}
+    const NO_PERSON =
+      'Do NOT include any person, model, mannequin, dress form, body, skin, face, head, hair, arms, hands or legs anywhere in the image — the garment only. ';
 
-معلومات المصممة:
-- اسم القطعة: ${garmentName || 'استنتجيه من الصورة'}
-- مواصفات القماش: ${fabricInfo || 'اقترحي خامات منطقية حسب التصميم'}
-- الموسم: ${season || 'استنتجيه'}
-- ملاحظات: ${extraNotes || 'لا يوجد'}
+    // الرسم الخطي عبر النموذج التوليدي غير حتمي (مرة يطلع أبيض/أسود ومرة ملون).
+    // القرار البنيوي: النموذج يولد فقط المنظرين الملونين المسطحين — العملية
+    // المثبت نجاحها — والرسمة الخطية الأبيض/أسود تشتقها الواجهة بالكود
+    // (كشف حواف حتمي على كانفاس)، فتطلع خطية 100% بكل توليدة بلا استثناء.
+    const FLAT_LOCK =
+      'Style: a colored TECHNICAL FASHION FLAT SKETCH, 2D vector illustration exactly like factory tech pack flats — the garment drawn flat as if laid on a table, symmetrical, NOT worn. ' +
+      'NO person, NO model, NO mannequin, NO invisible/ghost-mannequin volume, NO dress form, NO 3D worn shape, NO body volume inside the garment, NO skin, NO head, NO face, NO hijab, NO headscarf, NO neck, NO arms, NO hands, NO legs, NO shoes, NO hanger. ' +
+      'Zoom out so the ENTIRE garment fits inside the frame — from the top edge to the very end of the hem and the full train — with clear empty margins on all four sides; NEVER crop any part of the garment. ' +
+      'Pure white background, no scene, no props, no body shadows. Absolutely NO text, NO letters, NO numbers, NO labels, NO arrows, NO watermark.';
 
-أرجعي JSON فقط (بدون أي نص أو أسوار ماركداون) بهذا الشكل الحرفي:
+    const coloredFrontPrompt =
+      'Convert this reference photo into a colored flat product illustration of the FRONT view of the garment. ' +
+      NO_INVENT + NO_PERSON + FLAT_LOCK +
+      ' Keep the exact same colors, fabrics, embroidery, beading and train as the reference. ' +
+      paletteHint;
 
-{
-  "styleCode": "STY_XXXXXX_${yymmdd}_XXXX",
-  "garmentName": "الاسم الوصفي الكامل بالإنجليزية مثل: Emerald Strapless Sweetheart Mermaid Evening Gown with Embroidered Tulle Bust",
-  "garmentNameAr": "الاسم بالعربية",
-  "category": "الفئة بالإنجليزية مثل Dresses",
-  "season": "الموسم مثل SS26",
-  "sizeRange": "2 - 12",
-  "sampleSize": "6",
-  "fabricSummary": "سطر إنجليزي واحد يلخّص الأقمشة الرئيسية للهيدر مثل: Emerald duchess satin with lightweight silk chiffon train overlay",
-  "garmentFacts": "3-5 جمل إنجليزية قصيرة تقفل حقائق التصميم التي يُمنع تغييرها في أي رسمة، مثل: Strapless sweetheart neckline with NO straps and NO sleeves. Fitted mermaid silhouette flaring below the knee. Embroidered tulle bust panel with beading. Invisible center-back zipper. Long chiffon train. Emerald green.",
-  "description": "وصف دقيق للقطعة بالعربية، سطران",
-  "garmentInfo": { "type": "بالإنجليزية مثل Strapless formal evening gown", "silhouette": "بالإنجليزية", "construction": "بالإنجليزية" },
-  "measurements": [
-    { "pom": "الاسم بالإنجليزية مع وصف كامل بين قوسين مثل: Center Front Length (top edge of bodice at CF V-point to front hem edge)", "view": "front|back", "tolerance": "+-1.0", "sizes": { "2": 130.0, "4": 131.0, "6": 132, "8": 133.0, "10": 134.0, "12": 135.0 } }
-  ],
-  "specSheetLabels": {
-    "front": [ { "label": "BUST WIDTH", "y": 4 }, { "label": "WAIST WIDTH", "y": 18 }, { "label": "LOW HIP WIDTH", "y": 32 }, { "label": "HFS WIDTH", "y": 96 }, { "label": "CFL", "y": 50 } ],
-    "back": [ { "label": "CB ZIPPER LENGTH", "y": 14 }, { "label": "CBL", "y": 50 }, { "label": "TRAIN LENGTH", "y": 88 }, { "label": "HBS WIDTH incl. TRAIN", "y": 97 } ]
-  },
-  "materials": [
-    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark. قاعدة صارمة: صفي العنصر المادي الواحد فقط باسمه الدقيق ولونه الدقيق (بكود Pantone) وخامته وشكله — invisible zipper بلون القماش، metal hook-and-eye bar closure، spool of polyester thread، rigilene boning strips، woven satin brand label — وممنوع ذكر الفستان أو شخص أو أكثر من عنصر واحد." }
-  ],
-  "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back", "y": 30 } ],
-  "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back", "y": 12 } ],
-  "colorway": [ { "part": "الجزء بالإنجليزية", "pantone": "الكود", "hex": "#XXXXXX" } ],
-  "detailViews": [ { "area": "المنطقة بالإنجليزية", "detail": "الوصف بالإنجليزية التقنية", "spec": "المواصفة/القياس بالإنجليزية" } ],
-  "artwork": [ { "name": "العنصر بالإنجليزية", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس", "notes": "ملاحظات بالإنجليزية" } ],
-  "construction": [ { "section": "القسم بالإنجليزية مثل Bodice", "detailType": "نوع التفصيل بالإنجليزية مثل Seam / Closure / Support", "description": "جملة إنجليزية تقنية واحدة" } ],
-  "sewingSteps": [ "خطوات إنجليزية تقنية بصيغة أوامر المصنع، 16 خطوة على الأقل" ],
-  "fitLog": [ { "version": "v0", "date": "${today.toISOString().slice(0, 10)}", "change": "Initial sample tech pack generated", "by": "${brandName}" } ]
-}
+    const coloredBackPrompt =
+      'This image is a colored flat product illustration of the FRONT of a garment. ' +
+      'Draw the SAME garment seen from the BACK in the IDENTICAL flat illustration style: same silhouette, same scale, same colors, same fabrics, same hem and train length. ' +
+      'The back view shows the center-back closure seam and the back neckline edge. ' +
+      facts + NO_PERSON + FLAT_LOCK;
 
-قواعد إلزامية — أي إخلال بها يُفشل التيك باك:
-1. measurements: 26 نقطة على الأقل، كل pom معه وصف كامل بين قوسين، ولكل نقطة view. مفاتيح sizes هي "2","4","6","8","10","12" حصراً وقيمها أرقام (وليست نصوصاً). مقاس العيّنة 6 هو المرجع الأوسط.
-2-أ. تغطية إلزامية: امسحي صورة القطعة لوناً بلون وجزءاً بجزء، وأدرجي بنداً مستقلاً لكل قماش ولون ظاهر فعلياً (كل لون تباين، كل حاشية، كل بطانة، كل قطعة في الطقم). إن كان الطقم قطعتين فلكل قطعة أقمشتها. لا تدمجي لونين مختلفين في بند واحد ولا تتركي أي لون ظاهر بلا بند.
-2-ب. الكميات والأحجام واقعية للمقاس 6 وحسب نوع القطعة: عباية/فستان طويل تحتاج 4-6 م للقماش الرئيسي، الحواف تُحسب بالمتر الطولي حسب طولها الفعلي، وكيس التغليف يجب أن يكون بمقاس الثوب الطويل (مثل 60×90 سم أو 40×60 سم مطوياً) لا كيساً صغيراً. اذكري القياس داخل الوصف.
-2-ج. ليبل المقاس والعناية: يذكر المقاس والتركيب النسيجي الفعلي للأقمشة المستخدمة وتعليمات العناية المناسبة لها (مثلاً: صوف/كريب = Dry clean only)، ويُخاط في الدرزة الجانبية الداخلية.
-2. materials: 14 عنصراً بالضبط وبهذا الترتيب الوظيفي: الأقمشة الرئيسية أولاً (قماش أساسي، طبقات، بطانة، أقمشة زخرفية)، ثم الدعم البنيوي (boning، شريط قنوات)، ثم الإغلاق (سحاب، hook-and-eye)، ثم التثبيت (حشوة لاصقة، stay tape)، ثم الزخارف، ثم الليبلات، ثم الخيوط، ثم التغليف. هذه القائمة نفسها هي الـ BOM — ترقيمها من 1 إلى 14 حسب ترتيبها، فلا تكرّري ولا تفصلي قائمتين. لكل عنصر photoPrompt خاص به.
-3. إن حدّدت المصممة خامات، فلا تضيفي أي قماش لم تذكره — أكملي فقط التريمات المنطقية اللازمة للتصنيع.
-3-ب. ممنوع اختراع أي عنصر بنائي غير ظاهر في الصورة: لا حزام ولا خصر مخيط ولا كسرات ولا أربطة ولا إغلاق إن كانت القطعة مفتوحة. إن كانت العباية مفتوحة بلا إغلاق فاذكري ذلك صراحة في garmentFacts وفي construction.
-4. calloutMap: 5 إلى 6 عناصر، num هو رقم العنصر في materials (ترتيبه من 1)، موزّعة بين front وback، تغطي القماش الرئيسي والطبقات والزخرفة والإغلاق. حقل y لكل عنصر هو الموقع العمودي الفعلي لتلك الخامة على القطعة (0 = أعلى حافة، 100 = أدنى نقطة): مثال لعباية — القماش الرئيسي عند الجذع ~35، حاشية الرقبة/الياقة ~6، حاشية الكم ~45، الذيل ~92. ضعي كل رقم عند موضع خامته الحقيقي لا عشوائياً.
-5. specSheetLabels: أسماء كبيرة قصيرة (4 كلمات كحد أقصى)، 6-8 للأمامي و4-5 للخلفي، مطابقة لنقاط قياس فعلية من الجدول (استخدمي الاختصارات CFL, CBL, BP-BP, HFS, HBS حيث تنطبق).
-6. sewingDetailLabels: 6-8 تسميات، كل واحدة 4 كلمات كحد أقصى، وكل تسمية عند حقل y الموافق لنقطة البناء الفعلية على القطعة: الياقة/الرقبة ~5، الكتف ~10، الإبط/بداية الكم ~22، الخصر ~35، الإغلاق حسب موضعه، حاشية الكم ~45، الهيم/الذيل ~92. لا تضعي تسمية عند موضع لا تخصه.
-6-ب. حقل y إلزامي لكل عنصر في specSheetLabels وcalloutMap وsewingDetailLabels: انظري لصورة القطعة الفعلية وقدّري الموقع العمودي للنقطة على القطعة نفسها كنسبة من 0 (أعلى حافة بالقطعة) إلى 100 (أدنى نقطة بالذيل/الهيم). انتبهي لنوع القطعة: بفستان سترابلس أعلى الحافة هو خط الصدر نفسه، فيكون BUST قرب 3-6 وWAIST قرب 15-20 وLOW HIP قرب 28-35 — وليس كجسم كامل من الرأس.
-7. colorway: 4-8 ألوان بأكواد hex دقيقة من الصورة الفعلية.
-8. construction: 12 صفاً. detailViews: 4-6. artwork: 2-4. sewingSteps: 16 على الأقل.
-9. كل النصوص التقنية بالإنجليزية حصراً (لغة المصانع). العربية فقط في garmentNameAr وdescription.`;
-
-    const payload = {
-      model: MODEL,
-      max_tokens: 24000,
-      // claude-sonnet-5: التفكير التكيفي مفعّل افتراضياً ويستهلك max_tokens والوقت
-      // قبل أي نص — نطفئه لأن المطلوب استخراج JSON مباشر
-      thinking: { type: 'disabled' },
-      stream: true,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: instruction },
-        ],
-      }],
+    // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
+    const materialFallbackPrompt = (m) => {
+      const name = (m && m.name) || 'fabric sample';
+      const pantone = m && m.pantone ? ' in the exact color PANTONE ' + m.pantone + ',' : '';
+      const desc = m && m.description ? ' ' + String(m.description).slice(0, 180) : '';
+      return 'Professional studio product photograph of a single ' + name + ',' + pantone +
+        ' exactly one item only, centered, shown alone with visible texture and true material detail, soft natural folds if it is a textile, on a plain neutral background.' + desc + ' ' +
+        'The item must match its real-world form and scale exactly (a garment bag is large enough for a floor-length gown, a label is a small woven tag, a zipper is a coil zipper). ' +
+        'Macro product photography, soft even studio lighting, photorealistic, high detail. No garment worn, no person, no text, no letters, no watermark.';
     };
-
-    // مهلة خمول لا مهلة ثابتة: طالما النص يتدفّق لا نقطع.
-    const IDLE_MS = 30000;
-    const HARD_MS = 240000;
-    const claudeController = new AbortController();
-    let idleTimer = null;
-    const resetIdle = () => {
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => claudeController.abort(), IDLE_MS);
-    };
-    const hardTimer = setTimeout(() => claudeController.abort(), HARD_MS);
-    const clearClaudeTimers = () => { if (idleTimer) clearTimeout(idleTimer); clearTimeout(hardTimer); };
-    resetIdle();
-
-    let response;
-    try {
-      response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify(payload),
-        signal: claudeController.signal,
-      });
-    } catch (e) {
-      clearClaudeTimers();
-      return res.status(500).json({ error: 'انتهت مهلة تحليل التصميم، حاولي مرة ثانية' });
-    }
-
-    if (!response.ok) {
-      clearClaudeTimers();
-      const errText = await response.text();
-      return res.status(500).json({ error: 'فشل تحليل التصميم: ' + errText.slice(0, 200) });
-    }
-
-    let raw = '';
-    let streamError = '';
-    let stopReason = '';
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const consumeChunk = (chunk) => {
-      resetIdle();
-      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const t = line.trim();
-        if (!t.startsWith('data:')) continue;
-        const payloadStr = t.slice(5).trim();
-        if (!payloadStr || payloadStr === '[DONE]') continue;
-        try {
-          const evt = JSON.parse(payloadStr);
-          if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
-            raw += evt.delta.text;
-          } else if (evt.type === 'error' && evt.error) {
-            streamError = evt.error.message || evt.error.type || 'stream error';
-          } else if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) {
-            stopReason = evt.delta.stop_reason;
-          }
-        } catch (e) { /* سطر غير مكتمل — يُكمَّل في الدفعة التالية */ }
+    const materialPrompt = (m) => {
+      const p = (m && m.photoPrompt) || '';
+      if (p && p.length > 30) {
+        const pantone = m && m.pantone ? ' The exact color must be PANTONE ' + m.pantone + '.' : '';
+        return p + pantone + ' Exactly one item only, centered, at its true real-world form and scale. No person, no text, no letters, no watermark.';
       }
+      return materialFallbackPrompt(m);
     };
 
-    try {
-      const body = response.body;
-      if (body && typeof body.getReader === 'function') {
-        const reader = body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          consumeChunk(value);
-        }
-      } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
-        for await (const chunk of body) consumeChunk(chunk);
-      } else {
-        const full = await response.text();
-        full.split('\n').forEach((l) => consumeChunk(l + '\n'));
-      }
-    } catch (e) {
-      // انقطاع أثناء الاستلام — نكمل بما جُمِّع ويُصلَح لاحقاً
-    }
-    clearClaudeTimers();
+    // ------------------------------------------------------------------
+    // رفع صورة التصميم (مطلوبة لاستدعاءات Kontext)
+    // ------------------------------------------------------------------
+    let uploadedUrl = null;
+    try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 30000); }
+    catch (e) { uploadedUrl = null; }
 
-    if (!raw || raw.trim().length < 40) {
-      const reason = streamError || (stopReason ? 'stop_reason: ' + stopReason : '');
-      return res.status(500).json({
-        error: 'انقطع تحليل التصميم أثناء الاستلام' + (reason ? ' — السبب: ' + reason.slice(0, 180) : '') + '، حاولي مرة ثانية',
-      });
-    }
+    // ------------------------------------------------------------------
+    // التنفيذ عبر المجمّع: 3 Kontext + صورة لكل خامة، بحد 4 متزامنة
+    // ------------------------------------------------------------------
+    const deadline = Date.now() + DEADLINE_MS;
+    const safeRun = makeSafe(deadline);
 
-    let techpack;
-    try { techpack = safeJsonParse(raw); }
-    catch (e) {
-      return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
-    }
-    if (!techpack || typeof techpack !== 'object' || Array.isArray(techpack)) {
-      return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
-    }
+    // السلسلة: عزل القطعة عن الموديل (أمامي ثم خلفي) ثم استخراج الخطوط من كل منهما
+    const chainPromise = (async () => {
+      if (!uploadedUrl) return { cf: null, cb: null, lf: null, lb: null };
+      const cf = await safeRun(() => generateFlatKontext(uploadedUrl, coloredFrontPrompt, replicateToken, '9:16'), 110000);
+      if (!cf) return { cf: null, cb: null, lf: null, lb: null };
+      const [cb, lf] = await Promise.all([
+        safeRun(() => generateFlatKontext(cf, coloredBackPrompt, replicateToken, '9:16'), 110000),
+        safeRun(() => extractLineart(cf, replicateToken), 70000),
+      ]);
+      const lb = cb ? await safeRun(() => extractLineart(cb, replicateToken), 70000) : null;
+      return { cf, cb, lf, lb };
+    })();
 
-    techpack.brandName = brandName;
-    techpack.generatedAt = new Date().toISOString();
-    if (!techpack.sampleSize) techpack.sampleSize = '6';
-    if (!techpack.sizeRange) techpack.sizeRange = '2 - 12';
+    const materialTasks = materials.map((m) => async () => {
+      let u = await safeRun(() => generateImage(materialPrompt(m), '1:1', replicateToken), 70000, 2);
+      if (!u) u = await safeRun(() => generateImage(materialFallbackPrompt(m), '1:1', replicateToken), 70000, 1);
+      return u;
+    });
+    const materialsPromise = runPool(materialTasks, 3);
 
-    return res.status(200).json(techpack);
+    const [chain, materialPhotos] = await Promise.all([chainPromise, materialsPromise]);
+
+    return res.status(200).json({
+      coloredFrontImage: chain.cf || null,
+      coloredBackImage: chain.cb || null,
+      lineFrontImage: chain.lf || null,
+      lineBackImage: chain.lb || null,
+      materialPhotos: materialPhotos.map((u) => u || null),
+    });
   } catch (error) {
-    return res.status(500).json({ error: 'خطأ في الخادم: ' + (error.message || 'غير معروف') });
+    return res.status(500).json({ error: 'خطأ في توليد الصور: ' + (error.message || 'غير معروف') });
   }
 }
