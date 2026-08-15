@@ -904,6 +904,14 @@ function buildVideoPrompt(videoType, mood, text, hasImage) {
 // ============================================================================
 // ===== عرض التيك باك — هيكل Adstronaut الحرفي: 15 صفحة بهيدر موحّد =====
 // ============================================================================
+// كل صور Replicate تُعرض عبر وسيط بنفس النطاق: يضمن قراءة البكسلات على كانفاس
+// (اشتقاق الرسمة الخطية وكشف حدود القطعة) ويضمن نجاح حفظ التيك باك كصورة.
+function proxied(url) {
+  if (!url || typeof url !== 'string') return url;
+  if (!/^https:\/\/([a-z0-9-]+\.)*(replicate\.delivery|api\.replicate\.com)\//i.test(url)) return url;
+  return '/api/img?u=' + encodeURIComponent(url);
+}
+
 const GRADE_SIZES = ['2', '4', '6', '8', '10', '12'];
 const GRADE_SPLIT = 15; // أول 15 نقطة في صفحة التدرّج الأولى والباقي في (CONTINUED)
 
@@ -974,7 +982,7 @@ function TechpackView({ tp, preview }) {
       {list.map((m, i) => (
         <div className="tp-matcard" key={i}>
           {matPhotos[offset + i]
-            ? <img src={matPhotos[offset + i]} alt={m.name} crossOrigin="anonymous" />
+            ? <img src={proxied(matPhotos[offset + i])} alt={m.name} crossOrigin="anonymous" />
             : <div className="tp-matcard-ph"></div>}
           <div className="tp-matcard-body">
             <div className="tp-matcard-name">{m.name}</div>
@@ -1007,7 +1015,7 @@ function TechpackView({ tp, preview }) {
 
   pages.push(['SAMPLE MEASUREMENTS', (
     <>
-      <AnnotatedPair frontImage={tp.flatFrontImage} backImage={tp.flatBackImage} mode="measure"
+      <AnnotatedPair frontImage={proxied(tp.coloredFrontImage)} backImage={proxied(tp.coloredBackImage)} mode="measure"
         front={specLabels.front || []} back={specLabels.back || []} />
       <div className="tp-anno-caption">Garment Details: BLACK &nbsp;·&nbsp; Measurement Lines and Labels: DARK RED</div>
     </>
@@ -1020,7 +1028,7 @@ function TechpackView({ tp, preview }) {
   if (mat2.length > 0) pages.push(['MATERIALS (CONTINUED)', matCards(mat2, 8)]);
 
   pages.push(['MATERIALS CALLOUT', (
-    <AnnotatedPair frontImage={tp.flatFrontImage} backImage={tp.flatBackImage} mode="callout"
+    <AnnotatedPair frontImage={proxied(tp.coloredFrontImage)} backImage={proxied(tp.coloredBackImage)} mode="callout"
       front={calloutMap.filter((c) => (c.view || 'front') !== 'back')}
       back={calloutMap.filter((c) => c.view === 'back')} />
   )]);
@@ -1049,7 +1057,7 @@ function TechpackView({ tp, preview }) {
   )]);
 
   pages.push(['SEWING DETAILS', (
-    <AnnotatedPair frontImage={tp.flatFrontImage} backImage={tp.flatBackImage} mode="sewing"
+    <AnnotatedPair frontImage={proxied(tp.coloredFrontImage)} backImage={proxied(tp.coloredBackImage)} mode="sewing"
       front={sewLabels.filter((s) => (s.view || 'front') !== 'back')}
       back={sewLabels.filter((s) => s.view === 'back')} />
   )]);
@@ -1058,8 +1066,8 @@ function TechpackView({ tp, preview }) {
     <div className="tp-colorways">
       <div className="tp-img-frame">
         <div className="tp-pair">
-          <div className="tp-view">{tp.coloredFrontImage ? <img src={tp.coloredFrontImage} alt="front colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">FRONT</div></div>
-          <div className="tp-view">{tp.coloredBackImage ? <img src={tp.coloredBackImage} alt="back colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">BACK</div></div>
+          <div className="tp-view">{tp.coloredFrontImage ? <img src={proxied(tp.coloredFrontImage)} alt="front colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">FRONT</div></div>
+          <div className="tp-view">{tp.coloredBackImage ? <img src={proxied(tp.coloredBackImage)} alt="back colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">BACK</div></div>
         </div>
       </div>
       <div>
@@ -1269,20 +1277,80 @@ function useImgBox(image) {
 
 const DEFAULT_VIEW_BOX = { top: 6, bottom: 95, left: 22, right: 78 };
 
+// اشتقاق رسمة خطية أبيض/أسود من الرسم الملون — كشف حواف Sobel على كانفاس.
+// حتمي 100%: يشتغل بالمتصفح بلا أي API، فالرسمة التقنية تطلع خطية بكل توليدة.
+function useLineArt(image, enabled) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    if (!image || !enabled) { setUrl(null); return; }
+    let cancelled = false;
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const W = 820;
+        const H = Math.max(200, Math.round((img.height / img.width) * W));
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const x = c.getContext('2d');
+        x.drawImage(img, 0, 0, W, H);
+        const d = x.getImageData(0, 0, W, H).data;
+        const g = new Float32Array(W * H);
+        for (let i = 0; i < W * H; i++) {
+          const p = i * 4;
+          g[i] = d[p] * 0.299 + d[p + 1] * 0.587 + d[p + 2] * 0.114;
+        }
+        // تنعيم خفيف 3×3 لتقليل ضجيج نسيج القماش
+        const b = new Float32Array(W * H);
+        for (let y = 1; y < H - 1; y++) {
+          for (let xx = 1; xx < W - 1; xx++) {
+            let s = 0;
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) s += g[(y + dy) * W + xx + dx];
+            b[y * W + xx] = s / 9;
+          }
+        }
+        const out = x.createImageData(W, H);
+        out.data.fill(255);
+        for (let y = 1; y < H - 1; y++) {
+          for (let xx = 1; xx < W - 1; xx++) {
+            const i = y * W + xx;
+            const gx = -b[i - W - 1] - 2 * b[i - 1] - b[i + W - 1] + b[i - W + 1] + 2 * b[i + 1] + b[i + W + 1];
+            const gy = -b[i - W - 1] - 2 * b[i - W] - b[i - W + 1] + b[i + W - 1] + 2 * b[i + W] + b[i + W + 1];
+            if (Math.sqrt(gx * gx + gy * gy) > 68) {
+              const p = i * 4;
+              out.data[p] = 40; out.data[p + 1] = 40; out.data[p + 2] = 40;
+            }
+          }
+        }
+        x.putImageData(out, 0, 0);
+        if (!cancelled) setUrl(c.toDataURL('image/png'));
+      } catch (e) { if (!cancelled) setUrl(null); }
+    };
+    img.onerror = () => { if (!cancelled) setUrl(null); };
+    img.src = image;
+    return () => { cancelled = true; };
+  }, [image, enabled]);
+  return url;
+}
+
 // منظر واحد مشروح: خطوط القياس تعبر جسم القطعة، والدوائر/التسميات على جهة labelSide
 function AnnotatedView({ image, mode, items, caption, labelSide }) {
   const detected = useImgBox(image);
+  const lineArt = useLineArt(image, mode !== 'colorway');
   if (!image) {
     return <div className="tp-view"><div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div><div className="tp-view-cap">{caption}</div></div>;
   }
   const box = detected || DEFAULT_VIEW_BOX;
 
-  const all = (items || []).map((x) => (typeof x === 'string' ? { text: x } : { text: x.label || x.target || '', num: x.num }));
+  const all = (items || []).map((x) => (typeof x === 'string'
+    ? { text: x, y: null }
+    : { text: x.label || x.target || '', num: x.num, y: (typeof x.y === 'number' && x.y >= 0 && x.y <= 100) ? x.y : null }));
   const vertical = mode === 'measure' ? all.filter((x) => isVerticalPom(x.text)) : [];
   const horizontal = mode === 'measure' ? all.filter((x) => !isVerticalPom(x.text)) : all;
+  // y من التحليل البصري (نسبة على القطعة نفسها) هو المرجع؛ جدول الكلمات مجرد احتياط
   const rows = layoutRows(horizontal.map((it, i) => ({
     ...it,
-    top: box.top + (anchorTop(it.text, i, horizontal.length) / 100) * (box.bottom - box.top),
+    top: box.top + ((it.y !== null ? it.y : anchorTop(it.text, i, horizontal.length)) / 100) * (box.bottom - box.top),
   })), box.top + 1, box.bottom - 1);
 
   const bw = Math.max(box.right - box.left, 20);
@@ -1290,7 +1358,8 @@ function AnnotatedView({ image, mode, items, caption, labelSide }) {
   return (
     <div className="tp-view">
       <div className="tp-anno">
-        <img src={image} alt={caption} crossOrigin="anonymous" />
+        <img src={lineArt || image} alt={caption} crossOrigin="anonymous"
+          style={lineArt ? undefined : { filter: 'grayscale(1) contrast(1.5)' }} />
 
         {mode === 'measure' && rows.map((r, i) => (
           <div className="tp-m-wrap" key={'m' + i} style={{ top: r.top + '%', left: box.left + '%', width: bw + '%' }}>
@@ -1298,9 +1367,9 @@ function AnnotatedView({ image, mode, items, caption, labelSide }) {
             <i className="tp-m-line"></i>
           </div>
         ))}
-        {mode === 'measure' && vertical.slice(0, 2).map((v, i) => (
+        {mode === 'measure' && vertical.map((v, i) => (
           <div className="tp-anno-vert" key={'v' + i}
-            style={{ left: Math.min(box.right + 3 + i * 4, 96) + '%', top: box.top + '%', bottom: (100 - box.bottom) + '%' }}>
+            style={{ left: Math.min(box.right + 2.5 + i * 4.5, 96) + '%', top: box.top + '%', bottom: (100 - box.bottom) + '%' }}>
             <span className="tp-m-label vert">{v.text}</span>
           </div>
         ))}
@@ -1600,6 +1669,8 @@ function StyleBlock() {
       .insp-divider { font-family: 'Cormorant Garamond', serif; letter-spacing: 5px; color: var(--gold); margin-bottom: 1rem; font-size: 1.05rem; }
       .insp-text { font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; line-height: 1.75; color: var(--ink); direction: ltr; font-weight: 500; }
       .board-details { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 2rem; padding-top: 2rem; border-top: 1px solid var(--line); }
+      .detail-col { min-width: 0; }
+      .palette-col { grid-column: auto; }
       .detail-label { font-family: 'Cormorant Garamond', serif; letter-spacing: 3px; color: var(--gold-deep); font-size: 0.9rem; margin-bottom: 0.6rem; direction: ltr; }
       .detail-value { color: var(--ink); direction: ltr; font-size: 0.92rem; line-height: 1.6; font-family: 'Cormorant Garamond', serif; }
       .palette-row { display: flex; flex-wrap: wrap; gap: 0.7rem; }
