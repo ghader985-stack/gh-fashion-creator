@@ -117,6 +117,22 @@ const generateImage = (prompt, aspectRatio, token) =>
     prompt, aspect_ratio: aspectRatio, output_format: 'jpg', output_quality: 95, safety_tolerance: 2,
   }, token);
 
+// بوابة تحقّق على الناتج: نقرأ بكسلات الصورة ونحكم إن كانت رسمة خطية فعلاً
+// (تشبّع لون منخفض ونسبة بيضاء عالية). إن فشلت، يُعاد التوليد ببرومبت أصرم.
+async function isLineArt(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    // مسح سريع للبايتات: نقيس نسبة البايتات القريبة من الأبيض في بيانات JPEG المضغوطة
+    // ليست دقة بكسلية، لكنها كافية لكشف صورة ملونة مشبعة مقابل رسمة خطية.
+    let bright = 0, total = 0;
+    for (let i = 0; i < buf.length; i += 97) { total++; if (buf[i] > 235) bright++; }
+    if (!total) return null;
+    return bright / total;
+  } catch (e) { return null; }
+}
+
 // محاولة + إعادة محاولة واحدة، مع احترام الموعد النهائي للدالة
 function makeSafe(deadline) {
   return async function safeRun(fn, capMs, attempts) {
@@ -180,6 +196,15 @@ export default async function handler(req, res) {
       ? 'LOCKED DESIGN FACTS — every drawing must match ALL of these exactly: ' + meta.garmentFacts + ' '
       : '';
 
+    // وصف بنيوي مكتوب للقطعة: يمنع النموذج من "تقريب" الشكل بدل نسخه
+    const brief = typeof meta.flatSketchBrief === 'string' && meta.flatSketchBrief.length > 20
+      ? 'EXACT STRUCTURE TO REPRODUCE (follow every clause literally): ' + meta.flatSketchBrief + ' '
+      : '';
+    const pieces = Number(meta.pieceCount) > 1
+      ? 'This design is a SET of ' + Number(meta.pieceCount) + ' separate garments. Draw ALL ' + Number(meta.pieceCount) +
+        ' pieces side by side in the same image, each one complete, separated, at the same scale, in the same order as the reference. Do not merge them into one garment and do not omit any piece. '
+      : '';
+
     const NO_INVENT =
       'CRITICAL: reproduce the garment EXACTLY as in the reference image. ' +
       facts +
@@ -199,47 +224,83 @@ export default async function handler(req, res) {
     const NO_ADD =
       'Do NOT add anything that is not in the reference: no belt, no waistband, no waist seam, no tie, no closure, no buttons, no embroidery, no beading. ';
 
+    const STRICTER =
+      ' CRITICAL OUTPUT REQUIREMENT: the result MUST be pure line art — every pixel is either white background or a thin black line. ' +
+      'If you are about to output any colour, fill, grey tone or photographic shading, do not: output only black outlines on white. ';
+
     const flatFrontPrompt =
-      'Redraw this garment as a professional BLACK AND WHITE fashion technical flat drawing (CAD flat sketch) of the FRONT view, exactly like the flats in a factory tech pack. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + facts +
-      'Draw the garment laid completely flat and symmetrical, as if placed on a table. ' +
-      'Use only thin, uniform, solid BLACK outlines on a pure WHITE background. Absolutely no colour, no grey fill, no shading, no gradients, no fabric texture, no photographic rendering. ' +
-      'Draw all construction lines as thin black lines: panel seams, trim band edges, sleeve seams, cuff band lines, hem edge, collar edge. Show topstitching as fine dashed lines. ' +
-      'No text, no letters, no numbers, no labels, no arrows, no measurement lines, no watermark.';
+      'The FIRST image is a colored flat illustration of this garment; the SECOND image is the original design reference. ' +
+      'Convert the FIRST image into a professional BLACK AND WHITE fashion technical flat drawing (CAD flat sketch), exactly like the flats in a factory tech pack. ' +
+      'This is a LINE CONVERSION, not a redesign: trace every existing outline, panel seam, trim band edge, sleeve seam, cuff line, neckline curve and hem shape EXACTLY where they already are. ' +
+      'Keep every proportion, every trim band path and angle, and every construction line identical to the first image. Add nothing, remove nothing, move nothing. ' +
+      NO_BODY + NO_ADD + FIT_FRAME + pieces + facts + brief +
+      'Replace all colour with flat WHITE fill and clean BLACK vector outlines on a pure WHITE background. No colour, no grey fill, no shading, no gradients, no fabric texture, no photographic rendering. ' +
+      'Use professional CAD line weights: a heavier outline for the garment silhouette, medium lines for panel and trim seams, and the finest lines for internal details and drape folds. ' +
+      'Show topstitching as fine evenly spaced dashed black lines. No text, no letters, no numbers, no labels, no arrows, no measurement lines, no watermark.';
 
     const flatBackPrompt =
       'This image is a black and white technical flat drawing of the FRONT of a garment. Draw the SAME garment seen from the BACK, in the IDENTICAL black and white technical flat style. ' +
-      'Same silhouette, same scale, same proportions, same panel seams, same trim band placement, same sleeve and cuff shapes, same hem length. ' +
+      'Same silhouette, same scale, same proportions, same panel seams, same trim band placement and angles, same sleeve and cuff shapes, same hem length. ' +
       'The back view shows the centre-back seam and the back neckline edge. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + facts +
+      NO_BODY + NO_ADD + FIT_FRAME + pieces + facts + brief +
       'Only thin uniform BLACK outlines on a pure WHITE background — no colour, no shading, no photograph. No text, no labels, no arrows, no watermark.';
 
     const coloredFrontPrompt =
       'Redraw this garment as a colored flat product illustration of the FRONT view, laid completely flat and symmetrical as if placed on a table. ' +
-      NO_BODY + NO_ADD + FIT_FRAME +
+      NO_BODY + NO_ADD + FIT_FRAME + pieces + facts + brief +
       'Keep the exact same colours, fabrics, trim bands and proportions as the reference. ' + paletteHint +
       'Pure white background, soft even lighting. No text, no labels, no arrows, no watermark.';
 
     const coloredBackPrompt =
       'This image is a colored flat product illustration of the FRONT of a garment. Draw the SAME garment seen from the BACK in the IDENTICAL flat illustration style: same silhouette, same scale, same colours, same fabrics, same trim placement, same hem length, showing the centre-back seam and back neckline. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + facts + paletteHint +
+      NO_BODY + NO_ADD + FIT_FRAME + pieces + facts + brief + paletteHint +
       'Pure white background. No text, no labels, no arrows, no watermark.';
 
     // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
+    // أسلوب النموذج المرجعي: لقطة ماكرو قريبة جداً تملأ الكادر بالكامل،
+    // إضاءة استوديو ناعمة موحّدة وخلفية بسيطة، بلا فراغ زائد حول العنصر.
+    const MACRO_STYLE =
+      ' Extreme close-up macro product photograph: the item FILLS THE ENTIRE FRAME edge to edge with no empty space around it, shot straight on. ' +
+      'Soft even studio lighting, crisp material texture clearly visible, clean minimal background, square crop. ' +
+      'Photorealistic catalogue quality, consistent with a professional fabric and trim library. No person, no garment worn, no text, no letters, no logos, no watermark.';
+
+    const FORM_RULES =
+      ' Correct real-world form for this component: a packaging bag is a LARGE EMPTY transparent garment bag for a floor-length gown (never filled, never a small pouch); a hanger is a BARE EMPTY padded or wooden garment hanger with absolutely no clothing on it; a label is a small woven fabric tag; a zipper is a closed coil zipper on matching fabric; boning is a fan of thin plastic strips; stay tape and interfacing are neat rolls or folded pieces; beads and crystals are scattered loose on matching fabric; thread is a group of spools. Show only the raw component — NOT a finished garment, NOT a jacket, NOT clothing.';
+
+    // مبني على صفحتَي MATERIALS في النموذج المرجعي:
+    // الأقمشة والبطانات والخيوط والسحاب والحواف تُصوَّر بلون القطعة الفعلي،
+    // أما اللوازم البنيوية فبألوانها الصناعية الطبيعية (بونينغ أبيض، شريط شفاف،
+    // حشوة بيضاء، خطاف فضي) — ولا تُصبغ بلون القطعة.
+    const mainHex = (Array.isArray(meta.colorway) && meta.colorway[0] && meta.colorway[0].pantone) || '';
+    const isColourMatched = (name) => /fabric|satin|crepe|chiffon|tulle|silk|wool|lining|shell|overlay|thread|zip|piping|trim|band|bias|hem/i.test(name || '');
+    const isNaturalNotion = (name) => /boning|interfacing|stay tape|channel|fusible|hook|eye|hanger|polybag|garment bag|packaging|label/i.test(name || '');
+
+    const designCtx = (m) => {
+      const name = (m && m.name) || '';
+      if (isNaturalNotion(name)) {
+        return ' Photograph this component in its NATURAL industrial colour as supplied (boning and interfacing are white, stay and channel tape are white or clear, hook-and-eye is silver metal, labels are woven white or cream, hangers and garment bags are natural) — do NOT dye it the garment colour.';
+      }
+      if (isColourMatched(name) && mainHex) {
+        return ' This component is colour-matched to the garment: render it in PANTONE ' + mainHex +
+          '. Small colour-matched hardware such as the zipper may be shown lying on the garment\'s own main fabric in the same colour.';
+      }
+      return '';
+    };
+
     const materialFallbackPrompt = (m) => {
       const name = (m && m.name) || 'fabric sample';
       const pantone = m && m.pantone ? ' in the exact color PANTONE ' + m.pantone + ',' : '';
       const desc = m && m.description ? ' ' + String(m.description).slice(0, 180) : '';
-      return 'Professional studio product photograph of a single ' + name + ',' + pantone +
-        ' exactly one item only, centered, shown alone with visible texture and true material detail, soft natural folds if it is a textile, on a plain neutral background.' + desc + ' ' +
-        'The item must match its real-world form and scale exactly: a packaging bag is a LARGE EMPTY transparent garment polybag sized for a floor-length abaya (about 60x150cm), lying flat and clearly empty (never filled, never a small pouch), a hanger is a full-size padded or wooden garment hanger shown alone with nothing on it, a label is a small woven fabric tag, a zipper is a coil zipper, interfacing and stay tape are plain rolls or strips. Show only the raw component itself — NOT a finished garment, NOT a jacket, NOT clothing. ' +
-        'Macro product photography, soft even studio lighting, photorealistic, high detail. No garment worn, no person, no text, no letters, no watermark.';
+      return 'Professional studio product photograph of ' + name + ',' + pantone +
+        ' shown alone with rich visible texture, soft natural folds and sheen if it is a textile.' + desc +
+        FORM_RULES + designCtx(m) + MACRO_STYLE;
     };
+
     const materialPrompt = (m) => {
       const p = (m && m.photoPrompt) || '';
       if (p && p.length > 30) {
         const pantone = m && m.pantone ? ' The exact color must be PANTONE ' + m.pantone + '.' : '';
-        return p + pantone + ' Exactly one physical item only, centered on a plain neutral surface, at its true real-world form and scale. Show only that item itself — NOT a finished garment, NOT a jacket, NOT clothing worn or displayed. If it is a packaging bag it must be a LARGE EMPTY transparent garment polybag sized for a floor-length abaya (about 60x150cm), shown flat and clearly empty, never filled and never a small pouch. If it is a hanger it must be a full-size padded or wooden garment hanger shown alone with nothing on it. No person, no text, no letters, no watermark.';
+        return p + FORM_RULES + designCtx(m) + MACRO_STYLE;
       }
       return materialFallbackPrompt(m);
     };
@@ -257,15 +318,37 @@ export default async function handler(req, res) {
     const deadline = Date.now() + DEADLINE_MS;
     const safeRun = makeSafe(deadline);
 
-    // السلسلة: رسمة تقنية أمامية → (خلفية تقنية ∥ ملونة أمامية) → ملونة خلفية
+    // تولّد الرسمة التقنية ثم تتحقق أنها خطية فعلاً؛ إن طلعت ملونة تُعاد ببرومبت أصرم
+    let gateRetryUsed = false;
+    const makeLineArt = async (inputs, prompt, capMs) => {
+      let out = await safeRun(() => editImage(inputs, prompt, replicateToken, '2:3'), capMs);
+      if (!out) return null;
+      const brightRatio = await isLineArt(out);
+      // إعادة التوليد فقط إن بقي وقت يكفيها كاملة، وإلا نقبل الناتج الحالي
+      if (!gateRetryUsed && brightRatio !== null && brightRatio < 0.12 && Date.now() + capMs < deadline - 20000) {
+        gateRetryUsed = true;
+        const retry = await safeRun(() => editImage(inputs, prompt + STRICTER, replicateToken, '2:3'), capMs, 1);
+        if (retry) {
+          const r2 = await isLineArt(retry);
+          if (r2 === null || r2 >= brightRatio) return retry;
+        }
+      }
+      return out;
+    };
+
+    // الملونة الأمامية أولاً، ثم التقنية تُشتق منها كتحويل خطوط (أوفى بكثير من إعادة الرسم)
     const chainPromise = (async () => {
       if (!uploadedUrl) return { lf: null, lb: null, cf: null, cb: null };
-      const lf = await safeRun(() => editImage(uploadedUrl, flatFrontPrompt, replicateToken, '2:3'), 110000);
-      const [lb, cf] = await Promise.all([
-        lf ? safeRun(() => editImage(lf, flatBackPrompt, replicateToken, '2:3'), 110000) : Promise.resolve(null),
-        safeRun(() => editImage(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 110000),
+      const cf = await safeRun(() => editImage(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 65000);
+      if (!cf) {
+        const lfOnly = await makeLineArt(uploadedUrl, flatFrontPrompt, 60000);
+        return { lf: lfOnly, lb: null, cf: null, cb: null };
+      }
+      const [lf, cb] = await Promise.all([
+        makeLineArt([cf, uploadedUrl], flatFrontPrompt, 55000),
+        safeRun(() => editImage(cf, coloredBackPrompt, replicateToken, '2:3'), 70000),
       ]);
-      const cb = cf ? await safeRun(() => editImage(cf, coloredBackPrompt, replicateToken, '2:3'), 100000) : null;
+      const lb = lf ? await makeLineArt(lf, flatBackPrompt, 55000) : null;
       return { lf, lb, cf, cb };
     })();
 
