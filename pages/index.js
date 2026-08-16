@@ -274,6 +274,8 @@ export default function Home() {
         fd2.append('image', tpImage);
         fd2.append('meta', JSON.stringify({
           garmentFacts: d.garmentFacts || '',
+          flatSketchBrief: d.flatSketchBrief || '',
+          pieceCount: d.pieceCount || 1,
           specSheetLabels: d.specSheetLabels || {},
           calloutMap: d.calloutMap || [],
           sewingDetailLabels: d.sewingDetailLabels || [],
@@ -1014,11 +1016,12 @@ function TechpackView({ tp, preview }) {
   )]);
 
   pages.push(['SAMPLE MEASUREMENTS', (
-    <>
+    <div className="tp-spec-frame">
+      <div className="tp-spec-title">GARMENT SPEC SHEET — {(tp.garmentName || '').toUpperCase()}</div>
+      <div className="tp-spec-key">Garment Details: <b>BLACK</b>; <span className="red">Measurement Lines and Labels: RED</span></div>
       <AnnotatedPair frontImage={proxied(tp.lineFrontImage || tp.coloredFrontImage)} backImage={proxied(tp.lineBackImage || tp.coloredBackImage)} mode="measure"
         front={specLabels.front || []} back={specLabels.back || []} />
-      <div className="tp-anno-caption">Garment Details: BLACK &nbsp;·&nbsp; Measurement Lines and Labels: DARK RED</div>
-    </>
+    </div>
   )]);
 
   pages.push(['SIZE GRADING CHART', gradeTable(grade1, grade2.length > 0)]);
@@ -1066,8 +1069,8 @@ function TechpackView({ tp, preview }) {
     <div className="tp-colorways">
       <div className="tp-img-frame">
         <div className="tp-pair">
-          <div className="tp-view">{tp.coloredFrontImage ? <img src={proxied(tp.coloredFrontImage)} alt="front colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">FRONT</div></div>
-          <div className="tp-view">{tp.coloredBackImage ? <img src={proxied(tp.coloredBackImage)} alt="back colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">BACK</div></div>
+          <div className="tp-view">{(tp.coloredFrontImage || tp.lineFrontImage) ? <img src={proxied(tp.coloredFrontImage || tp.lineFrontImage)} alt="front colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">FRONT</div></div>
+          <div className="tp-view">{(tp.coloredBackImage || tp.lineBackImage) ? <img src={proxied(tp.coloredBackImage || tp.lineBackImage)} alt="back colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">BACK</div></div>
         </div>
       </div>
       <div>
@@ -1108,13 +1111,14 @@ function TechpackView({ tp, preview }) {
   if (artwork.length > 0) {
     pages.push(['ARTWORK DETAILS', (
       <table className="tp-table">
-        <thead><tr><th className="ltr left-h">ELEMENT</th><th className="ltr left-h">PLACEMENT</th><th className="ltr left-h">SIZE</th><th className="ltr left-h">NOTES</th></tr></thead>
+        <thead><tr><th className="ltr left-h">ELEMENT</th><th className="ltr left-h">PLACEMENT</th><th className="ltr left-h">SIZE</th><th className="ltr left-h">TECHNIQUE</th><th className="ltr left-h">NOTES</th></tr></thead>
         <tbody>
           {artwork.map((a, i) => (
             <tr key={i}>
               <td className="left ltr"><b>{a.name}</b></td>
               <td className="left ltr sm">{a.placement}</td>
               <td className="left ltr sm">{a.size}</td>
+              <td className="left ltr sm">{a.technique}</td>
               <td className="left ltr sm">{a.notes}</td>
             </tr>
           ))}
@@ -1131,7 +1135,7 @@ function TechpackView({ tp, preview }) {
         <div><b>Silhouette:</b> {tp.garmentInfo?.silhouette}</div>
         <div><b>Construction:</b> {tp.garmentInfo?.construction}</div>
       </div>
-      <div className="tp-gi-head">Construction &amp; Trim Details</div>
+      <div className="tp-gi-head">Construction &amp; Trim Details <span className="tp-count">{construction.length} items</span></div>
       <table className="tp-table">
         <thead><tr><th>#</th><th className="ltr left-h">SECTION</th><th className="ltr left-h">DETAIL TYPE</th><th className="ltr left-h">DESCRIPTION</th></tr></thead>
         <tbody>
@@ -1150,7 +1154,7 @@ function TechpackView({ tp, preview }) {
 
   pages.push(['SEWING INSTRUCTIONS', (
     <>
-      <div className="tp-gi-head">Sewing Instructions</div>
+      <div className="tp-gi-head">Sewing Instructions <span className="tp-count">{sewingSteps.length} instructions</span></div>
       <ol className="tp-steps">
         {sewingSteps.map((s, i) => (<li key={i} dir="ltr">{s}</li>))}
       </ol>
@@ -1688,23 +1692,27 @@ function StyleBlock() {
       .tp-anno-row { position: absolute; display: flex; align-items: center; gap: 4px; }
       .tp-anno-row.left { left: 0.5%; }
       .tp-anno-row.right { right: 0.5%; justify-content: flex-end; }
-      .tp-anno-line { flex: 1; border-top: 1.5px dashed #444; position: relative; min-width: 18px; }
+      .tp-anno-line { flex: 1; border-top: 1px solid #222; position: relative; min-width: 18px; }
       .tp-anno-line.red { border-top-color: #a3271c; }
       .tp-anno-row.left .tp-anno-line:after,
       .tp-anno-row.right .tp-anno-line:before {
-        content: ''; position: absolute; top: -3px; width: 5px; height: 5px; border-radius: 50%; background: #444;
+        content: ''; position: absolute; top: -2.5px; width: 5px; height: 5px; border-radius: 50%; background: #222;
       }
       .tp-anno-row.left .tp-anno-line:after { right: -2px; }
       .tp-anno-row.right .tp-anno-line:before { left: -2px; }
       .tp-anno-row .tp-anno-line.red:after, .tp-anno-row .tp-anno-line.red:before { background: #a3271c; }
-      .tp-anno-text { font-size: 0.56rem; font-weight: 700; color: #222; letter-spacing: 0.3px; text-transform: uppercase; background: rgba(255,255,255,0.88); padding: 1px 3px; border-radius: 2px; line-height: 1.25; max-width: 130px; }
+      .tp-anno-text { font-size: 0.55rem; font-weight: 600; color: #333; letter-spacing: 0.4px; text-transform: uppercase; background: rgba(255,255,255,0.92); padding: 1px 3px; line-height: 1.3; max-width: 130px; font-family: Arial, sans-serif; }
       .tp-anno-text.red { color: #a3271c; }
-      .tp-anno-circle { width: 22px; height: 22px; border: 1.5px solid #111; border-radius: 50%; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 0.68rem; font-weight: 800; color: #111; flex-shrink: 0; }
+      .tp-anno-circle { width: 26px; height: 26px; border: 1px solid #111; border-radius: 50%; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 600; color: #111; flex-shrink: 0; font-family: Arial, sans-serif; }
       .tp-anno-vert { position: absolute; top: 12%; bottom: 10%; border-left: 1.5px dashed #a3271c; }
       .tp-anno-vert .tp-anno-text.vert { position: absolute; top: 40%; white-space: nowrap; transform: rotate(-90deg); transform-origin: left top; }
       .tp-anno-vert.left .tp-anno-text.vert { left: -4px; }
       .tp-anno-vert.right .tp-anno-text.vert { left: 10px; }
       .tp-anno-caption { text-align: center; font-size: 0.66rem; color: #999; margin-top: 0.55rem; direction: ltr; }
+      .tp-spec-frame { border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; padding: 1rem 0.9rem 1.2rem; }
+      .tp-spec-title { text-align: center; font-family: Arial, sans-serif; font-weight: 800; font-size: 1rem; letter-spacing: 0.6px; color: #111; direction: ltr; }
+      .tp-spec-key { text-align: center; font-family: Arial, sans-serif; font-size: 0.72rem; color: #111; margin: 0.2rem 0 0.9rem; direction: ltr; }
+      .tp-spec-key .red { color: #a3271c; font-weight: 700; }
 
       /* زوج المنظرين + خطوط القياس العابرة لجسم القطعة */
       .tp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; direction: ltr; }
@@ -1713,11 +1721,11 @@ function StyleBlock() {
       .tp-view > img { width: 100%; display: block; border-radius: 4px; }
       .tp-view-cap { text-align: center; font-size: 0.64rem; font-weight: 800; letter-spacing: 1.5px; color: #555; margin-top: 0.4rem; direction: ltr; }
       .tp-m-wrap { position: absolute; display: flex; flex-direction: column; align-items: center; }
-      .tp-m-line { display: block; width: 100%; border-top: 1.5px solid #a3271c; position: relative; }
+      .tp-m-line { display: block; width: 100%; border-top: 2px solid #a3271c; position: relative; }
       .tp-m-line:before, .tp-m-line:after { content: ''; position: absolute; top: -4px; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; }
       .tp-m-line:before { left: 0; border-right: 6px solid #a3271c; }
       .tp-m-line:after { right: 0; border-left: 6px solid #a3271c; }
-      .tp-m-label { font-size: 0.5rem; font-weight: 800; color: #a3271c; letter-spacing: 0.3px; text-transform: uppercase; background: rgba(255,255,255,0.85); padding: 0 3px; border-radius: 2px; line-height: 1.2; margin-bottom: 1px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+      .tp-m-label { font-size: 0.68rem; font-weight: 800; color: #a3271c; letter-spacing: 0.4px; text-transform: uppercase; background: rgba(255,255,255,0.9); padding: 0 4px; line-height: 1.15; margin-bottom: 2px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-family: Arial, sans-serif; }
       .tp-m-label.vert { position: absolute; top: 45%; left: 4px; transform: rotate(-90deg); transform-origin: left top; margin: 0; }
 
       /* لقطات التفاصيل المقصوصة من الصورة المرجعية */
@@ -1764,6 +1772,7 @@ function StyleBlock() {
       .tp-pantone-code { font-size: 0.66rem; color: #888; text-align: left; }
 
       /* دليل البناء */
+      .tp-count { float: right; font-weight: 400; font-size: 0.68rem; color: #999; }
       .tp-gi-head { font-weight: 700; font-size: 0.82rem; color: #111; direction: ltr; text-align: left; padding-bottom: 0.4rem; border-bottom: 1px solid #eee; margin-bottom: 0.8rem; }
       .tp-gi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; direction: ltr; text-align: left; margin-bottom: 1.6rem; }
       @media (max-width: 700px) { .tp-gi { grid-template-columns: 1fr; } }
