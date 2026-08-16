@@ -145,6 +145,8 @@ ${INDUSTRY_RULES}
   "sampleSize": "6",
   "fabricSummary": "سطر إنجليزي واحد يلخّص الأقمشة الرئيسية للهيدر مثل: Emerald duchess satin with lightweight silk chiffon train overlay",
   "garmentFacts": "3-5 جمل إنجليزية قصيرة تقفل حقائق التصميم التي يُمنع تغييرها في أي رسمة، مثل: Strapless sweetheart neckline with NO straps and NO sleeves. Fitted mermaid silhouette flaring below the knee. Embroidered tulle bust panel with beading. Invisible center-back zipper. Long chiffon train. Emerald green.",
+  "pieceCount": 1,
+  "flatSketchBrief": "وصف إنجليزي بنيوي دقيق (6-10 جمل) يكفي لرسّام لرسم الرسمة التقنية المسطحة دون رؤية الصورة: عدد القطع وكل قطعة على حدة، شكل الرقبة/الياقة بالضبط، نوع الكتف والكم (kimono/set-in/sleeveless) وشكل فتحة الكم والكفّة، مسار كل حاشية أو شريط تباين (من أين يبدأ وإلى أين ينتهي وبأي زاوية)، خطوط الوصلات والبنسات، وجود أو غياب الخصر والحزام والإغلاق، شكل الحافة السفلية والذيل، والتناسب العام (الطول مقابل العرض). اذكري الحقائق كما تراها في الصورة حرفياً ولا تخترعي.",
   "description": "وصف دقيق للقطعة بالعربية، سطران",
   "garmentInfo": { "type": "بالإنجليزية مثل Strapless formal evening gown", "silhouette": "بالإنجليزية", "construction": "بالإنجليزية" },
   "measurements": [
@@ -155,13 +157,13 @@ ${INDUSTRY_RULES}
     "back": [ { "label": "CB ZIPPER LENGTH", "y": 14 }, { "label": "CBL", "y": 50 }, { "label": "TRAIN LENGTH", "y": 88 }, { "label": "HBS WIDTH incl. TRAIN", "y": 97 } ]
   },
   "materials": [
-    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark. قاعدة صارمة: صفي العنصر المادي الواحد فقط باسمه الدقيق ولونه الدقيق (بكود Pantone) وخامته وشكله — invisible zipper بلون القماش، metal hook-and-eye bar closure، spool of polyester thread، rigilene boning strips، woven satin brand label — وممنوع ذكر الفستان أو شخص أو أكثر من عنصر واحد." }
+    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark. قاعدة صارمة: كل صورة خامة يجب أن تنتمي بصرياً لهذا التصميم بالذات — استخدمي لون القطعة الفعلي بكود Pantone، وصوّري العنصر على خلفية من قماش التصميم نفسه بلونه حين يكون العنصر صغيراً (خرز، كريستال، سحاب، خطاف، ليبل)، واجعلي الخيوط والحواف والبطانات بألوان القطعة لا بألوان عامة. صفي العنصر المادي الواحد فقط باسمه الدقيق ولونه الدقيق (بكود Pantone) وخامته وشكله — invisible zipper بلون القماش، metal hook-and-eye bar closure، spool of polyester thread، rigilene boning strips، woven satin brand label — وممنوع ذكر الفستان أو شخص أو أكثر من عنصر واحد." }
   ],
   "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back", "y": 30 } ],
   "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back", "y": 12 } ],
   "colorway": [ { "part": "الجزء بالإنجليزية", "pantone": "الكود", "hex": "#XXXXXX" } ],
-  "detailViews": [ { "area": "المنطقة بالإنجليزية", "detail": "الوصف بالإنجليزية التقنية", "spec": "المواصفة/القياس بالإنجليزية" } ],
-  "artwork": [ { "name": "العنصر بالإنجليزية", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس", "notes": "ملاحظات بالإنجليزية" } ],
+  "detailViews": [ { "area": "نقطة تجميع حرجة بالإنجليزية (أهم مواضع البناء في القطعة: الياقة، الإغلاق، التقاء الأكمام، حواف الحواشي، الهيم)", "detail": "وصف تقني لكيفية تجميعها بالإنجليزية", "spec": "المواصفة/القياس بالإنجليزية" } ],
+  "artwork": [ { "name": "العنصر الزخرفي بالإنجليزية (تطريز/طباعة/أبليك/خرز/حواف زخرفية)", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس بالسنتيمتر", "technique": "أسلوب التنفيذ بالإنجليزية مثل: Hand-guided chain-stitch embroidery / Heat-set crystal application / Machine satin-stitch appliqué", "notes": "ملاحظات تنفيذية بالإنجليزية" } ],
   "construction": [ { "section": "القسم بالإنجليزية مثل Bodice", "detailType": "نوع التفصيل بالإنجليزية مثل Seam / Closure / Support", "description": "جملة إنجليزية تقنية واحدة" } ],
   "sewingSteps": [ "خطوات إنجليزية تقنية بصيغة أوامر المصنع، 16 خطوة على الأقل" ],
   "fitLog": [ { "version": "v0", "date": "${today.toISOString().slice(0, 10)}", "change": "Initial sample tech pack generated", "by": "${brandName}" } ]
@@ -179,11 +181,14 @@ ${INDUSTRY_RULES}
 3-ب. ممنوع اختراع أي عنصر بنائي غير ظاهر في الصورة: لا حزام ولا خصر مخيط ولا كسرات ولا أربطة ولا إغلاق إن كانت القطعة مفتوحة. إن كانت العباية مفتوحة بلا إغلاق فاذكري ذلك صراحة في garmentFacts وفي construction.
 4. calloutMap: 5 إلى 6 عناصر، num هو رقم العنصر في materials (ترتيبه من 1)، موزّعة بين front وback، تغطي القماش الرئيسي والطبقات والزخرفة والإغلاق. حقل y لكل عنصر هو الموقع العمودي الفعلي لتلك الخامة على القطعة (0 = أعلى حافة، 100 = أدنى نقطة): مثال لعباية — القماش الرئيسي عند الجذع ~35، حاشية الرقبة/الياقة ~6، حاشية الكم ~45، الذيل ~92. ضعي كل رقم عند موضع خامته الحقيقي لا عشوائياً.
 5. specSheetLabels: أسماء كبيرة قصيرة (4 كلمات كحد أقصى)، 6-8 للأمامي و4-5 للخلفي، مطابقة لنقاط قياس فعلية من الجدول (استخدمي الاختصارات CFL, CBL, BP-BP, HFS, HBS حيث تنطبق).
+6-د. كل تسمية خياطة يجب أن تكون مصطلح مصنع قياسياً لنقطة بناء ظاهرة فعلاً في هذه القطعة، مثل: Shawl collar facing، Kimono underarm seam، Bias-bound trim edge، Gold piping insert، Cuff band attachment، Blind-stitched hem، Concealed side zip، CB seam. ممنوع العبارات العامة أو الوصفية مثل NO WAIST SEAM أو FRONT NO CLOSURE — التسمية تصف عملية خياطة موجودة لا نفي شيء.
 6. sewingDetailLabels: 6-8 تسميات، كل واحدة 4 كلمات كحد أقصى، وكل تسمية عند حقل y الموافق لنقطة البناء الفعلية على القطعة: الياقة/الرقبة ~5، الكتف ~10، الإبط/بداية الكم ~22، الخصر ~35، الإغلاق حسب موضعه، حاشية الكم ~45، الهيم/الذيل ~92. لا تضعي تسمية عند موضع لا تخصه.
+6-ج. عند تقدير y انظري إلى الرسمة كما تُرسم مسطحة: أعلى حافة القطعة هي y=0 وأدنى نقطة بالهيم هي y=100. لقطعة خارجية مفتوحة (عباية/كيمونو/معطف): الياقة/الرقبة 2-6، الكتف 6-10، الصدر 14-20، أسفل الإبط/التقاء الكم 20-26، الخصر 30-36، الورك 42-48، فتحة الكم/الكفّة 45-55، الهيم 92-98. لفستان بلا حمالات: الصدر 3-6، الخصر 15-20، الورك 28-35. لا تضعي أي ليبل خارج نطاق قطعته.
 6-ب. حقل y إلزامي لكل عنصر في specSheetLabels وcalloutMap وsewingDetailLabels: انظري لصورة القطعة الفعلية وقدّري الموقع العمودي للنقطة على القطعة نفسها كنسبة من 0 (أعلى حافة بالقطعة) إلى 100 (أدنى نقطة بالذيل/الهيم). انتبهي لنوع القطعة: بفستان سترابلس أعلى الحافة هو خط الصدر نفسه، فيكون BUST قرب 3-6 وWAIST قرب 15-20 وLOW HIP قرب 28-35 — وليس كجسم كامل من الرأس.
 7. colorway: 4-8 ألوان بأكواد hex دقيقة من الصورة الفعلية.
-8. construction: 12 صفاً. detailViews: 4-6. artwork: 2-4. sewingSteps: 16 على الأقل.
-9. كل النصوص التقنية بالإنجليزية حصراً (لغة المصانع). العربية فقط في garmentNameAr وdescription.`;
+8. construction: 12 صفاً بالضبط. detailViews: 6 نقاط تجميع حرجة بالضبط (تُعرض في شبكة من ست لقطات). artwork: 2-4 عناصر زخرفية مع حقل technique إلزامي لكل عنصر؛ إن لم تكن القطعة تحوي أي زخرفة فأرجعي مصفوفة فارغة. sewingSteps: 16 خطوة على الأقل بترتيب تنفيذي حقيقي من التثبيت إلى التشطيب النهائي.
+9. كل النصوص التقنية بالإنجليزية حصراً (لغة المصانع). العربية فقط في garmentNameAr وdescription.
+10. pieceCount: عدد القطع المنفصلة في التصميم (طقم عباية وفستان = 2). flatSketchBrief إلزامي وبنفس دقة الصورة: صفي كل قطعة على حدة وبالترتيب، فإن كانتا قطعتين فاذكري صراحة أن الرسمة يجب أن تُظهر القطعتين جنباً إلى جنب.`;
 
     const payload = {
       model: MODEL,
