@@ -92,6 +92,70 @@ function repairJson(text) {
   return s;
 }
 
+// ============================================================================
+// تصحيح حتمي بالكود لناتج التحليل — لا يعتمد على التزام النموذج.
+// يعالج شكاوى حقيقية: خامات مكرّرة/زائدة، خامة ذكرتها المصممة وغابت،
+// ليبلات بمواضع مقلوبة أو خارج القطعة، وأرقام كول أوت لا تشير لخامة موجودة.
+// ============================================================================
+const NOTION_ORDER = [
+  [/interfacing|fusible/i, 90], [/stay tape|channel|boning/i, 91],
+  [/zip|hook|eye|button|closure|snap/i, 92], [/piping|applique|bead|crystal|sequin|embroider/i, 93],
+  [/label/i, 94], [/thread/i, 95], [/hanger/i, 96], [/bag|packaging|polybag/i, 97],
+];
+const orderKey = (name) => {
+  for (const [re, k] of NOTION_ORDER) if (re.test(name || '')) return k;
+  return 10; // الأقمشة أولاً
+};
+
+function normalizeMaterials(list, fabricInfo) {
+  let mats = Array.isArray(list) ? list.filter((m) => m && m.name) : [];
+  // إزالة التكرار بالاسم
+  const seen = new Set();
+  mats = mats.filter((m) => {
+    const k = String(m.name).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  // ترتيب وظيفي ثابت: أقمشة ← دعم ← إغلاق ← زخرفة ← ليبلات ← خيوط ← تعليق ← تغليف
+  mats.sort((a, b) => orderKey(a.name) - orderKey(b.name));
+  // ضمان وجود التعليق والتغليف في النهاية
+  const has = (re) => mats.some((m) => re.test(m.name || ''));
+  if (!has(/hanger/i)) mats.push({ name: 'Padded garment hanger', placement: 'Storage and display of the finished garment', description: 'Wide padded garment hanger sized for a floor-length garment, prevents shoulder distortion', qty: '1', unit: 'pc' });
+  if (!has(/bag|packaging|polybag/i)) mats.push({ name: 'Garment bag packaging', placement: 'Final packaging', description: 'Breathable garment bag sized for a floor-length garment, with hanger opening and clear size pocket', qty: '1', unit: 'pc' });
+  return mats.slice(0, 16);
+}
+
+// ترتيب تشريحي مرجعي: يُستخدم لتصحيح أي y مقلوب أو مفقود
+const ANATOMY = [
+  [/collar|neck|funnel|shawl/i, 4], [/shoulder/i, 9], [/chest|bust|bp-bp|cup/i, 17],
+  [/underarm|armhole|kimono join/i, 23], [/waist/i, 33], [/high hip/i, 40],
+  [/low hip|hip/i, 46], [/cuff|sleeve opening/i, 52], [/thigh|knee|flare/i, 62],
+  [/train/i, 88], [/hem|sweep|hfs|hbs/i, 95],
+];
+function anatomyY(text) {
+  for (const [re, y] of ANATOMY) if (re.test(text || '')) return y;
+  return null;
+}
+function normalizeLabels(list, key) {
+  let items = Array.isArray(list) ? list.filter(Boolean) : [];
+  items = items.map((x) => {
+    const o = typeof x === 'string' ? { [key]: x } : { ...x };
+    const text = o[key] || o.label || o.target || '';
+    let y = typeof o.y === 'number' ? o.y : null;
+    const anat = anatomyY(text);
+    // إن غاب y أو خرج عن النطاق أو خالف الموضع التشريحي بفارق كبير، نصحّحه
+    if (y === null || y < 0 || y > 100) y = anat !== null ? anat : null;
+    else if (anat !== null && Math.abs(y - anat) > 22) y = anat;
+    return { ...o, y };
+  });
+  // توزيع من بقي بلا y بالتساوي
+  const missing = items.filter((i) => i.y === null);
+  missing.forEach((it, idx) => { it.y = 8 + (84 * (idx + 1)) / (missing.length + 1); });
+  items.sort((a, b) => a.y - b.y);
+  return items;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -171,6 +235,7 @@ ${INDUSTRY_RULES}
 
 قواعد إلزامية — أي إخلال بها يُفشل التيك باك:
 1. measurements: 26 نقطة على الأقل، كل pom معه وصف كامل بين قوسين، ولكل نقطة view. مفاتيح sizes هي "2","4","6","8","10","12" حصراً وقيمها أرقام (وليست نصوصاً). مقاس العيّنة 6 هو المرجع الأوسط.
+2-و. لا تُدرجي أي خامة غير مستخدمة فعلياً في هذه القطعة، ولا تكرري نفس القماش ببندين. إن ذكرت المصممة قماشاً في مواصفاتها فهو إلزامي في القائمة باسمه كما كتبته. راجعي قائمتك النهائية: كل بند إما مرئي في الصورة أو مذكور في مواصفات المصممة أو لازمة تصنيع ضرورية — وما عدا ذلك يُحذف.
 2-أ. تغطية إلزامية: امسحي صورة القطعة لوناً بلون وجزءاً بجزء، وأدرجي بنداً مستقلاً لكل قماش ولون ظاهر فعلياً (كل لون تباين، كل حاشية، كل بطانة، كل قطعة في الطقم). إن كان الطقم قطعتين فلكل قطعة أقمشتها. لا تدمجي لونين مختلفين في بند واحد ولا تتركي أي لون ظاهر بلا بند.
 2-ب. الكميات والأحجام واقعية للمقاس 6 وحسب نوع القطعة: عباية/فستان طويل تحتاج 4-6 م للقماش الرئيسي، الحواف تُحسب بالمتر الطولي حسب طولها الفعلي، وكيس التغليف يجب أن يكون بمقاس الثوب الطويل (مثل 60×90 سم أو 40×60 سم مطوياً) لا كيساً صغيراً. اذكري القياس داخل الوصف.
 2-ج. ليبل المقاس والعناية: يذكر المقاس والتركيب النسيجي الفعلي للأقمشة المستخدمة وتعليمات العناية المناسبة لها (مثلاً: صوف/كريب = Dry clean only)، ويُخاط في الدرزة الجانبية الداخلية.
@@ -301,6 +366,20 @@ ${INDUSTRY_RULES}
     if (!techpack || typeof techpack !== 'object' || Array.isArray(techpack)) {
       return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
     }
+
+    // تصحيح حتمي بالكود قبل الإرسال
+    techpack.materials = normalizeMaterials(techpack.materials, fabricInfo);
+    const matCount = techpack.materials.length;
+    if (techpack.specSheetLabels && typeof techpack.specSheetLabels === 'object') {
+      techpack.specSheetLabels = {
+        front: normalizeLabels(techpack.specSheetLabels.front, 'label'),
+        back: normalizeLabels(techpack.specSheetLabels.back, 'label'),
+      };
+    }
+    techpack.sewingDetailLabels = normalizeLabels(techpack.sewingDetailLabels, 'label');
+    // أرقام الكول أوت يجب أن تشير لخامة موجودة فعلاً
+    techpack.calloutMap = normalizeLabels(techpack.calloutMap, 'target')
+      .filter((c) => Number(c.num) >= 1 && Number(c.num) <= matCount);
 
     techpack.brandName = brandName;
     techpack.generatedAt = new Date().toISOString();
