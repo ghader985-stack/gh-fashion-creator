@@ -133,6 +133,30 @@ async function isLineArt(url) {
   } catch (e) { return null; }
 }
 
+// كشف تكرار المنظر: يحمّل الصورة ويحلّل الأعمدة. إن ظهرت كتلتان داكنتان
+// مفصولتان بفراغ أبيض في المنتصف فهذه صورة فيها منظران — تُرفض ويُعاد التوليد.
+async function hasTwoFigures(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    // تقسيم البايتات إلى 5 شرائح أفقية تقريبية وقياس كثافة الداكن في كل شريحة
+    const slices = 5;
+    const per = Math.floor(buf.length / slices);
+    if (per < 200) return null;
+    const dens = [];
+    for (let s = 0; s < slices; s++) {
+      let dark = 0, total = 0;
+      for (let i = s * per; i < (s + 1) * per; i += 31) { total++; if (buf[i] < 120) dark++; }
+      dens.push(total ? dark / total : 0);
+    }
+    const mid = dens[2];
+    const sides = Math.max(dens[1], dens[3]);
+    // منتصف فارغ نسبياً مقابل جانبين ممتلئين = كتلتان منفصلتان
+    return sides > 0.08 && mid < sides * 0.45;
+  } catch (e) { return null; }
+}
+
 // محاولة + إعادة محاولة واحدة، مع احترام الموعد النهائي للدالة
 function makeSafe(deadline) {
   return async function safeRun(fn, capMs, attempts) {
@@ -221,6 +245,10 @@ export default async function handler(req, res) {
       'Remove the person completely. There must be NO model, NO face, NO head, NO hijab, NO headscarf, NO hair, NO neck, NO skin, NO hands, NO arms, NO legs, NO feet, NO shoes, NO mannequin, NO dress form, NO hanger, and NO body volume inside the garment. ';
     const FIT_FRAME =
       'Show the complete garment from the top edge down to the very end of the hem, centred, with empty margins on all four sides. Never crop any part of the garment. ';
+    // قفل المنظر الواحد: يمنع ظهور الأمامي والخلفي في صورة واحدة أو تكرار القطعة
+    const ONE_VIEW = (which) =>
+      'OUTPUT EXACTLY ONE GARMENT IN THE IMAGE, seen from the ' + which + ' ONLY. ' +
+      'Do NOT draw two garments. Do NOT place a front view and a back view side by side. Do NOT add a second smaller figure, a duplicate, a mirrored copy or any additional view anywhere in the frame. One single ' + which.toLowerCase() + ' view, nothing else. ';
     const NO_ADD =
       'Do NOT add anything that is not in the reference: no belt, no waistband, no waist seam, no tie, no closure, no buttons, no embroidery, no beading. ';
 
@@ -233,7 +261,7 @@ export default async function handler(req, res) {
       'Convert the FIRST image into a professional BLACK AND WHITE fashion technical flat drawing (CAD flat sketch), exactly like the flats in a factory tech pack. ' +
       'This is a LINE CONVERSION, not a redesign: trace every existing outline, panel seam, trim band edge, sleeve seam, cuff line, neckline curve and hem shape EXACTLY where they already are. ' +
       'Keep every proportion, every trim band path and angle, and every construction line identical to the first image. Add nothing, remove nothing, move nothing. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + pieces + facts + brief +
+      NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('FRONT') + pieces + facts + brief +
       'Replace all colour with flat WHITE fill and clean BLACK vector outlines on a pure WHITE background. No colour, no grey fill, no shading, no gradients, no fabric texture, no photographic rendering. ' +
       'Use professional CAD line weights: a heavier outline for the garment silhouette, medium lines for panel and trim seams, and the finest lines for internal details and drape folds. ' +
       'Show topstitching as fine evenly spaced dashed black lines. No text, no letters, no numbers, no labels, no arrows, no measurement lines, no watermark.';
@@ -242,18 +270,18 @@ export default async function handler(req, res) {
       'This image is a black and white technical flat drawing of the FRONT of a garment. Draw the SAME garment seen from the BACK, in the IDENTICAL black and white technical flat style. ' +
       'Same silhouette, same scale, same proportions, same panel seams, same trim band placement and angles, same sleeve and cuff shapes, same hem length. ' +
       'The back view shows the centre-back seam and the back neckline edge. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + pieces + facts + brief +
+      NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('BACK') + pieces + facts + brief +
       'Only thin uniform BLACK outlines on a pure WHITE background — no colour, no shading, no photograph. No text, no labels, no arrows, no watermark.';
 
     const coloredFrontPrompt =
       'Redraw this garment as a colored flat product illustration of the FRONT view, laid completely flat and symmetrical as if placed on a table. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + pieces + facts + brief +
+      NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('FRONT') + pieces + facts + brief +
       'Keep the exact same colours, fabrics, trim bands and proportions as the reference. ' + paletteHint +
       'Pure white background, soft even lighting. No text, no labels, no arrows, no watermark.';
 
     const coloredBackPrompt =
-      'This image is a colored flat product illustration of the FRONT of a garment. Draw the SAME garment seen from the BACK in the IDENTICAL flat illustration style: same silhouette, same scale, same colours, same fabrics, same trim placement, same hem length, showing the centre-back seam and back neckline. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + pieces + facts + brief + paletteHint +
+      'The FIRST image is the original design reference; the SECOND image is a colored flat illustration of its FRONT. Draw the SAME garment seen from the BACK in the IDENTICAL flat illustration style as the second image: same silhouette, same scale, same colours, same fabrics, same trim placement, same hem length, showing the centre-back seam and back neckline. ' +
+      NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('BACK') + pieces + facts + brief + paletteHint +
       'Pure white background. No text, no labels, no arrows, no watermark.';
 
     // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
@@ -324,10 +352,16 @@ export default async function handler(req, res) {
       let out = await safeRun(() => editImage(inputs, prompt, replicateToken, '2:3'), capMs);
       if (!out) return null;
       const brightRatio = await isLineArt(out);
+      const twoFigures = await hasTwoFigures(out);
+      const badColour = brightRatio !== null && brightRatio < 0.12;
+      const badViews = twoFigures === true;
       // إعادة التوليد فقط إن بقي وقت يكفيها كاملة، وإلا نقبل الناتج الحالي
-      if (!gateRetryUsed && brightRatio !== null && brightRatio < 0.12 && Date.now() + capMs < deadline - 20000) {
+      if (!gateRetryUsed && (badColour || badViews) && Date.now() + capMs < deadline - 20000) {
         gateRetryUsed = true;
-        const retry = await safeRun(() => editImage(inputs, prompt + STRICTER, replicateToken, '2:3'), capMs, 1);
+        const extra = STRICTER + (badViews
+          ? ' The previous attempt wrongly contained TWO figures. Output ONE single garment only — no second view, no duplicate, no mirrored copy anywhere in the frame. '
+          : '');
+        const retry = await safeRun(() => editImage(inputs, prompt + extra, replicateToken, '2:3'), capMs, 1);
         if (retry) {
           const r2 = await isLineArt(retry);
           if (r2 === null || r2 >= brightRatio) return retry;
@@ -346,7 +380,7 @@ export default async function handler(req, res) {
       }
       const [lf, cb] = await Promise.all([
         makeLineArt([cf, uploadedUrl], flatFrontPrompt, 55000),
-        safeRun(() => editImage(cf, coloredBackPrompt, replicateToken, '2:3'), 70000),
+        safeRun(() => editImage([uploadedUrl, cf], coloredBackPrompt, replicateToken, '2:3'), 70000),
       ]);
       const lb = lf ? await makeLineArt(lf, flatBackPrompt, 55000) : null;
       return { lf, lb, cf, cb };
