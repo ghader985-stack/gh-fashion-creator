@@ -42,8 +42,8 @@ function safeJsonParse(raw) {
   s = s.slice(start);
   const end = s.lastIndexOf('}');
   let candidate = end > 0 ? s.slice(0, end + 1) : s;
-  try { return JSON.parse(candidate); } catch (e) {}
-  try { return JSON.parse(repairJson(s)); } catch (e) {}
+  try { return JSON.parse(candidate); } catch (parseFailed) { /* محاولة تالية */ }
+  try { return JSON.parse(repairJson(s)); } catch (repairFailed) { /* يُبلَّغ أدناه */ }
   return JSON.parse(repairJson(candidate));
 }
 
@@ -171,7 +171,8 @@ export default async function handler(req, res) {
     const getField = (f) => (Array.isArray(f) ? f[0] : f) || '';
     const garmentName = getField(fields.garmentName);
     const fabricInfo = getField(fields.fabricInfo);
-    const brandName = getField(fields.brandName) || 'GH Couture AI';
+    // لا اسم افتراضي: التيك باك للعميلة لا للمنصّة. الفراغ يعني موضعاً تملؤه.
+    const brandName = (getField(fields.brandName) || '').trim();
     const season = getField(fields.season);
     const extraNotes = getField(fields.notes);
 
@@ -217,31 +218,34 @@ ${INDUSTRY_RULES}
     { "pom": "الاسم بالإنجليزية مع وصف كامل بين قوسين مثل: Center Front Length (top edge of bodice at CF V-point to front hem edge)", "view": "front|back", "tolerance": "+-1.0", "sizes": { "2": 130.0, "4": 131.0, "6": 132, "8": 133.0, "10": 134.0, "12": 135.0 } }
   ],
   "specSheetLabels": {
-    "front": [ { "label": "BUST WIDTH", "y": 4 }, { "label": "WAIST WIDTH", "y": 18 }, { "label": "LOW HIP WIDTH", "y": 32 }, { "label": "HFS WIDTH", "y": 96 }, { "label": "CFL", "y": 50 } ],
-    "back": [ { "label": "CB ZIPPER LENGTH", "y": 14 }, { "label": "CBL", "y": 50 }, { "label": "TRAIN LENGTH", "y": 88 }, { "label": "HBS WIDTH incl. TRAIN", "y": 97 } ]
+    "_تعليمة": "الليبلات أدناه مثال لفستان فقط. اختاري ليبلات هذه القطعة بعينها من جدول measurements الذي بنيتِه، بنفس صياغة أسمائها. بنطلون: WAIST WIDTH · SEAT WIDTH · THIGH WIDTH · KNEE WIDTH · LEG OPENING · OUTSEAM. بلوزة: ACROSS SHOULDER · CHEST WIDTH · ARMHOLE DEPTH · WAIST WIDTH · CUFF WIDTH · SLEEVE LENGTH. لا تنسخي ليبلات الفستان على قطعة ليست فستاناً.",
+    "front": [ { "label": "BUST WIDTH" }, { "label": "WAIST WIDTH" }, { "label": "LOW HIP WIDTH" }, { "label": "HFS WIDTH" }, { "label": "CFL" } ],
+    "back": [ { "label": "CB ZIPPER LENGTH" }, { "label": "CBL" }, { "label": "TRAIN LENGTH" }, { "label": "HBS WIDTH incl. TRAIN" } ]
   },
   "materials": [
-    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark. قاعدة صارمة: كل صورة خامة يجب أن تنتمي بصرياً لهذا التصميم بالذات — استخدمي لون القطعة الفعلي بكود Pantone، وصوّري العنصر على خلفية من قماش التصميم نفسه بلونه حين يكون العنصر صغيراً (خرز، كريستال، سحاب، خطاف، ليبل)، واجعلي الخيوط والحواف والبطانات بألوان القطعة لا بألوان عامة. صفي العنصر المادي الواحد فقط باسمه الدقيق ولونه الدقيق (بكود Pantone) وخامته وشكله — invisible zipper بلون القماش، metal hook-and-eye bar closure، spool of polyester thread، rigilene boning strips، woven satin brand label — وممنوع ذكر الفستان أو شخص أو أكثر من عنصر واحد." }
+    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "hex": "#0F6B52", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark. قاعدة صارمة: كل صورة خامة يجب أن تنتمي بصرياً لهذا التصميم بالذات — استخدمي لون القطعة الفعلي بكود hex الصريح، وصوّري العنصر على خلفية من قماش التصميم نفسه بلونه حين يكون العنصر صغيراً (خرز، كريستال، سحاب، خطاف، ليبل)، واجعلي الخيوط والحواف والبطانات بألوان القطعة لا بألوان عامة. صفي العنصر المادي الواحد فقط باسمه الدقيق ولونه الدقيق (بكود hex) وخامته وشكله — invisible zipper بلون القماش، metal hook-and-eye bar closure، spool of polyester thread، rigilene boning strips، woven satin brand label — وممنوع ذكر الفستان أو شخص أو أكثر من عنصر واحد." }
   ],
-  "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back", "y": 30 } ],
-  "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back", "y": 12 } ],
+  "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back" } ],
+  "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back" } ],
   "colorway": [ { "part": "الجزء بالإنجليزية", "pantone": "الكود", "hex": "#XXXXXX" } ],
   "detailViews": [ { "area": "نقطة تجميع حرجة بالإنجليزية (أهم مواضع البناء في القطعة: الياقة، الإغلاق، التقاء الأكمام، حواف الحواشي، الهيم)", "detail": "وصف تقني لكيفية تجميعها بالإنجليزية", "spec": "المواصفة/القياس بالإنجليزية" } ],
   "artwork": [ { "name": "العنصر الزخرفي بالإنجليزية (تطريز/طباعة/أبليك/خرز/حواف زخرفية)", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس بالسنتيمتر", "technique": "أسلوب التنفيذ بالإنجليزية مثل: Hand-guided chain-stitch embroidery / Heat-set crystal application / Machine satin-stitch appliqué", "notes": "ملاحظات تنفيذية بالإنجليزية" } ],
   "construction": [ { "section": "القسم بالإنجليزية مثل Bodice", "detailType": "نوع التفصيل بالإنجليزية مثل Seam / Closure / Support", "description": "جملة إنجليزية تقنية واحدة" } ],
   "sewingSteps": [ "خطوات إنجليزية تقنية بصيغة أوامر المصنع، 16 خطوة على الأقل" ],
-  "fitLog": [ { "version": "v0", "date": "${today.toISOString().slice(0, 10)}", "change": "Initial sample tech pack generated", "by": "${brandName}" } ]
+  "fitLog": [ { "version": "v0", "date": "${today.toISOString().slice(0, 10)}", "change": "Initial sample tech pack generated", "by": "${brandName || 'BRAND NAME'}" } ]
 }
 
 قواعد إلزامية — أي إخلال بها يُفشل التيك باك:
 1. measurements: 26 نقطة على الأقل، كل pom معه وصف كامل بين قوسين، ولكل نقطة view. مفاتيح sizes هي "2","4","6","8","10","12" حصراً وقيمها أرقام (وليست نصوصاً). مقاس العيّنة 6 هو المرجع الأوسط.
+2-ح. اسم البراند: يُؤخذ حرفياً من ملاحظات المصممة إن ذكرته. ويُمنع منعاً باتاً اختراع اسم ماركة أو وضع اسم من عندك. إن لم تذكره المصممة فاكتبي في وصف الليبل العبارة الحرفية BRAND NAME كموضع يملؤه المستخدم، وفي photoPrompt اطلبي ليبلاً منسوجاً فارغاً بلا أي كتابة أو شعار.
+2-ز. إن ظهر على التصميم خرز أو لؤلؤ أو كريستال أو ترتر، فلكلٍّ منها بند مستقل باسمه. وإن ظهر دانتيل بأي نوع (chantilly، guipure، corded، تول مطرّز) فله بند مستقل باسم نوعه. لا تدمجيها داخل وصف قماش آخر ولا تتجاهليها.
 2-و. لا تُدرجي أي خامة غير مستخدمة فعلياً في هذه القطعة، ولا تكرري نفس القماش ببندين. إن ذكرت المصممة قماشاً في مواصفاتها فهو إلزامي في القائمة باسمه كما كتبته. راجعي قائمتك النهائية: كل بند إما مرئي في الصورة أو مذكور في مواصفات المصممة أو لازمة تصنيع ضرورية — وما عدا ذلك يُحذف.
 2-أ. تغطية إلزامية: امسحي صورة القطعة لوناً بلون وجزءاً بجزء، وأدرجي بنداً مستقلاً لكل قماش ولون ظاهر فعلياً (كل لون تباين، كل حاشية، كل بطانة، كل قطعة في الطقم). إن كان الطقم قطعتين فلكل قطعة أقمشتها. لا تدمجي لونين مختلفين في بند واحد ولا تتركي أي لون ظاهر بلا بند.
 2-ب. الكميات والأحجام واقعية للمقاس 6 وحسب نوع القطعة: عباية/فستان طويل تحتاج 4-6 م للقماش الرئيسي، الحواف تُحسب بالمتر الطولي حسب طولها الفعلي، وكيس التغليف يجب أن يكون بمقاس الثوب الطويل (مثل 60×90 سم أو 40×60 سم مطوياً) لا كيساً صغيراً. اذكري القياس داخل الوصف.
 2-ج. ليبل المقاس والعناية: يذكر المقاس والتركيب النسيجي الفعلي للأقمشة المستخدمة وتعليمات العناية المناسبة لها (مثلاً: صوف/كريب = Dry clean only)، ويُخاط في الدرزة الجانبية الداخلية.
 2-د. طبيعة البنود: كل بند هو مادة خام أو لازمة تصنيع فقط — قماش، بطانة، حاشية، شريط، حشوة، دعامة، سحاب، خطاف، خيط، ليبل، شمّاعة/علاقة، وكيس تغليف. ممنوع منعاً باتاً إدراج أي قطعة ملبوسة جاهزة (جاكيت، فستان، عباية) كبند خامة.
-2-هـ. التغليف والتعليق إلزاميان في نهاية القائمة: شمّاعة مناسبة للثوب الطويل (padded/wooden garment hanger)، وكيس تغليف بمقاس الثوب الطويل — إما كيس بولي شفاف طويل 60×150 سم للتعليق، أو 60×90 سم للطي — واذكري القياس داخل الوصف.
-2. materials: 14 عنصراً بالضبط وبهذا الترتيب الوظيفي: الأقمشة الرئيسية أولاً (قماش أساسي، طبقات، بطانة، أقمشة زخرفية)، ثم الدعم البنيوي (boning، شريط قنوات)، ثم الإغلاق (سحاب، hook-and-eye)، ثم التثبيت (حشوة لاصقة، stay tape)، ثم الزخارف، ثم الليبلات، ثم الخيوط، ثم التعليق (شمّاعة)، ثم التغليف (كيس بمقاس الثوب). هذه القائمة نفسها هي الـ BOM — ترقيمها من 1 إلى 14 حسب ترتيبها، فلا تكرّري ولا تفصلي قائمتين. لكل عنصر photoPrompt خاص به.
+2-هـ. الشمّاعة وكيس التغليف اختياريان: لا تُدرجيهما إلا إن طلبتهما المصممة صراحة في مواصفاتها. أما ليبل التركيب النسيجي والمقاس وليبل تعليمات العناية فبندان إلزاميان منفصلان دائماً — بندٌ لكلٍّ منهما، لا بند واحد مدموج.
+2. materials: القائمة تتبع التصميم نفسه — لا عدد ثابت. أدرجي كل خامة ظاهرة فعلياً أو لازمة للتصنيع، ولا تخترعي بنداً لتبلغي عدداً معيّناً ولا تحذفي بنداً حقيقياً لتنزلي إلى عدد معيّن. الترتيب الوظيفي: الأقمشة الرئيسية أولاً (قماش أساسي، طبقات، دانتيل وأقمشة زخرفية، بطانة)، ثم الدعم البنيوي (boning، شريط قنوات)، ثم الإغلاق (سحاب، hook-and-eye)، ثم التثبيت (حشوة لاصقة، stay tape)، ثم الزخارف (خرز، لؤلؤ، كريستال)، ثم الليبلات، ثم الخيوط. هذه القائمة نفسها هي الـ BOM، فلا تفصلي قائمتين. لكل عنصر photoPrompt خاص به.
 3. إن حدّدت المصممة خامات، فلا تضيفي أي قماش لم تذكره — أكملي فقط التريمات المنطقية اللازمة للتصنيع.
 3-ب. ممنوع اختراع أي عنصر بنائي غير ظاهر في الصورة: لا حزام ولا خصر مخيط ولا كسرات ولا أربطة ولا إغلاق إن كانت القطعة مفتوحة. إن كانت العباية مفتوحة بلا إغلاق فاذكري ذلك صراحة في garmentFacts وفي construction.
 4. calloutMap: 5 إلى 6 عناصر، num هو رقم العنصر في materials (ترتيبه من 1)، موزّعة بين front وback، تغطي القماش الرئيسي والطبقات والزخرفة والإغلاق. حقل y لكل عنصر هو الموقع العمودي الفعلي لتلك الخامة على القطعة (0 = أعلى حافة، 100 = أدنى نقطة): مثال لعباية — القماش الرئيسي عند الجذع ~35، حاشية الرقبة/الياقة ~6، حاشية الكم ~45، الذيل ~92. ضعي كل رقم عند موضع خامته الحقيقي لا عشوائياً.
@@ -249,11 +253,11 @@ ${INDUSTRY_RULES}
 6-د. كل تسمية خياطة يجب أن تكون مصطلح مصنع قياسياً لنقطة بناء ظاهرة فعلاً في هذه القطعة، مثل: Shawl collar facing، Kimono underarm seam، Bias-bound trim edge، Gold piping insert، Cuff band attachment، Blind-stitched hem، Concealed side zip، CB seam. ممنوع العبارات العامة أو الوصفية مثل NO WAIST SEAM أو FRONT NO CLOSURE — التسمية تصف عملية خياطة موجودة لا نفي شيء.
 6. sewingDetailLabels: 6-8 تسميات، كل واحدة 4 كلمات كحد أقصى، وكل تسمية عند حقل y الموافق لنقطة البناء الفعلية على القطعة: الياقة/الرقبة ~5، الكتف ~10، الإبط/بداية الكم ~22، الخصر ~35، الإغلاق حسب موضعه، حاشية الكم ~45، الهيم/الذيل ~92. لا تضعي تسمية عند موضع لا تخصه.
 6-ج. عند تقدير y انظري إلى الرسمة كما تُرسم مسطحة: أعلى حافة القطعة هي y=0 وأدنى نقطة بالهيم هي y=100. لقطعة خارجية مفتوحة (عباية/كيمونو/معطف): الياقة/الرقبة 2-6، الكتف 6-10، الصدر 14-20، أسفل الإبط/التقاء الكم 20-26، الخصر 30-36، الورك 42-48، فتحة الكم/الكفّة 45-55، الهيم 92-98. لفستان بلا حمالات: الصدر 3-6، الخصر 15-20، الورك 28-35. لا تضعي أي ليبل خارج نطاق قطعته.
-6-ب. حقل y إلزامي لكل عنصر في specSheetLabels وcalloutMap وsewingDetailLabels: انظري لصورة القطعة الفعلية وقدّري الموقع العمودي للنقطة على القطعة نفسها كنسبة من 0 (أعلى حافة بالقطعة) إلى 100 (أدنى نقطة بالذيل/الهيم). انتبهي لنوع القطعة: بفستان سترابلس أعلى الحافة هو خط الصدر نفسه، فيكون BUST قرب 3-6 وWAIST قرب 15-20 وLOW HIP قرب 28-35 — وليس كجسم كامل من الرأس.
+6-ب. لا تُرجعي حقل y ولا أي رقم موقع في specSheetLabels أو calloutMap أو sewingDetailLabels. مواقع الليبلات تُحسب في الكود من جدول القياسات نفسه. أرجعي اسم الليبل والخامة المشار إليها فقط.
 7. colorway: 4-8 ألوان بأكواد hex دقيقة من الصورة الفعلية.
 8. construction: 12 صفاً بالضبط. detailViews: 6 نقاط تجميع حرجة بالضبط (تُعرض في شبكة من ست لقطات). artwork: 2-4 عناصر زخرفية مع حقل technique إلزامي لكل عنصر؛ إن لم تكن القطعة تحوي أي زخرفة فأرجعي مصفوفة فارغة. sewingSteps: 16 خطوة على الأقل بترتيب تنفيذي حقيقي من التثبيت إلى التشطيب النهائي.
 9. كل النصوص التقنية بالإنجليزية حصراً (لغة المصانع). العربية فقط في garmentNameAr وdescription.
-10. pieceCount: عدد القطع المنفصلة في التصميم (طقم عباية وفستان = 2). flatSketchBrief إلزامي وبنفس دقة الصورة: صفي كل قطعة على حدة وبالترتيب، فإن كانتا قطعتين فاذكري صراحة أن الرسمة يجب أن تُظهر القطعتين جنباً إلى جنب.`;
+10. pieceCount: عدد القطع المنفصلة في التصميم (طقم عباية وفستان = 2). flatSketchBrief إلزامي وبنفس دقة الصورة: صفي كل قطعة على حدة وبالترتيب، لا تَعُدّي الطبقات أو التنورة الخارجية أو الذيل أو البطانة قطعاً منفصلة — هذه أجزاء من قطعة واحدة. القطع المنفصلة هي ما يُلبس مستقلاً فقط (بلوزة مع تنورة، عباية فوق فستان). وفي كل الأحوال يجب أن تُظهر الرسمة شكلاً واحداً فقط في المنظر الواحد، لا شكلين متجاورين.`;
 
     const payload = {
       model: MODEL,
@@ -293,6 +297,7 @@ ${INDUSTRY_RULES}
         signal: claudeController.signal,
       });
     } catch (e) {
+      if (typeof console !== "undefined") console.warn("[gh]", e && e.message);
       clearClaudeTimers();
       return res.status(500).json({ error: 'انتهت مهلة تحليل التصميم، حاولي مرة ثانية' });
     }
@@ -327,7 +332,7 @@ ${INDUSTRY_RULES}
           } else if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) {
             stopReason = evt.delta.stop_reason;
           }
-        } catch (e) { /* سطر غير مكتمل — يُكمَّل في الدفعة التالية */ }
+        } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); /* سطر غير مكتمل — يُكمَّل في الدفعة التالية */ }
       }
     };
 
@@ -347,6 +352,7 @@ ${INDUSTRY_RULES}
         full.split('\n').forEach((l) => consumeChunk(l + '\n'));
       }
     } catch (e) {
+      if (typeof console !== "undefined") console.warn("[gh]", e && e.message);
       // انقطاع أثناء الاستلام — نكمل بما جُمِّع ويُصلَح لاحقاً
     }
     clearClaudeTimers();
@@ -361,6 +367,7 @@ ${INDUSTRY_RULES}
     let techpack;
     try { techpack = safeJsonParse(raw); }
     catch (e) {
+      if (typeof console !== "undefined") console.warn("[gh]", e && e.message);
       return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
     }
     if (!techpack || typeof techpack !== 'object' || Array.isArray(techpack)) {
