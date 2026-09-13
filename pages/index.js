@@ -75,13 +75,18 @@ export default function Home() {
 
   // رسمات ترفعها المصممة بنفسها. من رفعت رسمتها لا يُولَّد لها شيء مكانها،
   // ومن تركت الخانة فارغة تُولَّد لها. الاثنتان مدعومتان بلا إجبار.
-  const [upLineFront, setUpLineFront] = useState('');
-  const [upLineBack, setUpLineBack] = useState('');
-  const [upColorFront, setUpColorFront] = useState('');
-  const [upColorBack, setUpColorBack] = useState('');
+  const [upLineFront, setUpLineFront] = useState(null);
+  const [upLineBack, setUpLineBack] = useState(null);
+  const [upColorFront, setUpColorFront] = useState(null);
+  const [upColorBack, setUpColorBack] = useState(null);
+  const [upLineFrontPrev, setUpLineFrontPrev] = useState('');
+  const [upLineBackPrev, setUpLineBackPrev] = useState('');
+  const [upColorFrontPrev, setUpColorFrontPrev] = useState('');
+  const [upColorBackPrev, setUpColorBackPrev] = useState('');
 
 
   const flatsReady = Boolean(upLineFront && upLineBack && upColorFront && upColorBack);
+  const revokeLater = (u) => { if (u) setTimeout(() => URL.revokeObjectURL(u), 60000); };
   const missingFlats = [
     !upLineFront && 'الرسمة التقنية الأمامية',
     !upLineBack && 'الرسمة التقنية الخلفية',
@@ -382,15 +387,17 @@ export default function Home() {
       // طلب مستقل بسقف زمني مستقل، فلا يزاحم التحليلَ على الوقت.
       setTpStage('جارٍ توليد صور التيك باك… (قد يستغرق حتى 4 دقائق)');
       let images = {};
+      let imgError = '';
       try {
         const fd2 = new FormData();
         fd2.append('image', tpImage);
         // الرسمات التي رفعتها المصممة هي المصدر الوحيد؛ الأربع مطلوبة
         // فلا يصل هذا السطر إلا وهي كاملة، ولا يُولَّد شيء مكانها.
-        fd2.append('approvedFront', upLineFront);
-        fd2.append('approvedBack', upLineBack);
-        fd2.append('approvedColorFront', upColorFront);
-        fd2.append('approvedColorBack', upColorBack);
+        // ترسَل كملفات لا كنصوص base64: الأخيرة تضخّم الحجم وتتجاوز حدّ الطلب
+        fd2.append('flatLineFront', upLineFront);
+        fd2.append('flatLineBack', upLineBack);
+        fd2.append('flatColorFront', upColorFront);
+        fd2.append('flatColorBack', upColorBack);
         fd2.append('meta', JSON.stringify({
           garmentFacts: d.garmentFacts || '',
           flatSketchBrief: d.flatSketchBrief || '',
@@ -405,10 +412,22 @@ export default function Home() {
           })),
         }));
         const r2 = await fetch('/api/techpack-images', { method: 'POST', body: fd2 });
-        const d2 = await r2.json();
-        if (!d2.error) images = d2;
-      } catch { /* التحليل نجح — نعرضه حتى لو تعذّر توليد الصور */ }
+        // الطلب قد يُرفض قبل أن يصل (حجم أو مهلة) فلا يعود JSON أصلاً؛
+        // ابتلاع ذلك بصمت كان يُخرج تيك باك بلا صور ولا سبب ظاهر.
+        if (!r2.ok) {
+          imgError = 'تعذّر توليد الصور: استجابة ' + r2.status +
+            (r2.status === 413 ? ' — حجم الملفات المرفوعة كبير' : '');
+        } else {
+          const d2 = await r2.json();
+          if (d2.error) imgError = 'تعذّر توليد الصور: ' + d2.error;
+          else images = d2;
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] images', e && e.message);
+        imgError = 'تعذّر الوصول لخدمة الصور: ' + (e && e.message ? e.message : 'خطأ غير معروف');
+      }
 
+      if (imgError) setTpError(imgError);
       // عرض النتيجة مرة واحدة كاملة
       setTechpack({ ...d, ...images });
       incrementUsage();
@@ -861,17 +880,18 @@ export default function Home() {
                     </div>
                     <div className="flat-upload-grid">
                       {[
-                        ['الرسمة التقنية — أمامي', upLineFront, setUpLineFront],
-                        ['الرسمة التقنية — خلفي', upLineBack, setUpLineBack],
-                        ['الرسمة الملوّنة — أمامي', upColorFront, setUpColorFront],
-                        ['الرسمة الملوّنة — خلفي', upColorBack, setUpColorBack],
-                      ].map(([cap, val, setter], i) => (
+                        ['الرسمة التقنية — أمامي', upLineFront, setUpLineFront, upLineFrontPrev, setUpLineFrontPrev],
+                        ['الرسمة التقنية — خلفي', upLineBack, setUpLineBack, upLineBackPrev, setUpLineBackPrev],
+                        ['الرسمة الملوّنة — أمامي', upColorFront, setUpColorFront, upColorFrontPrev, setUpColorFrontPrev],
+                        ['الرسمة الملوّنة — خلفي', upColorBack, setUpColorBack, upColorBackPrev, setUpColorBackPrev],
+                      ].map(([cap, file, setFile, prev, setPrev], i) => (
                         <div className="flat-upload" key={'fu' + i}>
                           <div className="flat-upload-cap">{cap}</div>
-                          {val ? (
+                          {file ? (
                             <div className="img-preview">
-                              <img src={val} alt={cap} />
-                              <button onClick={() => setter('')} className="remove-img">✕</button>
+                              <img src={prev} alt={cap} />
+                              <button className="remove-img"
+                                onClick={() => { revokeLater(prev); setFile(null); setPrev(''); }}>✕</button>
                             </div>
                           ) : (
                             <label className="upload-label sm">
@@ -879,9 +899,8 @@ export default function Home() {
                                 onChange={(e) => {
                                   const f = e.target.files && e.target.files[0];
                                   if (!f) return;
-                                  const rd = new FileReader();
-                                  rd.onload = () => setter(String(rd.result || ''));
-                                  rd.readAsDataURL(f);
+                                  setFile(f);
+                                  setPrev(URL.createObjectURL(f));
                                 }} />
                               <span>اضغطي للرفع</span>
                             </label>
