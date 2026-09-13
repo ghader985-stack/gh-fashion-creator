@@ -19,6 +19,9 @@ export const config = {
   maxDuration: 300,
 };
 
+// نموذج فحص المخرجات البصري — استدعاء قصير يُرجع JSON من ثلاثة حقول
+const INSPECT_MODEL = 'claude-haiku-4-5-20251001';
+
 const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
 const REPLICATE_FLUX_URL = 'https://api.replicate.com/v1/models/' + FLUX_MODEL + '/predictions';
 
@@ -88,7 +91,7 @@ async function createPrediction(url, input, token, attempt = 0) {
   });
   const bodyText = await createRes.text();
   let prediction;
-  try { prediction = JSON.parse(bodyText); } catch (e) { throw new Error('رد غير متوقع من Replicate'); }
+  try { prediction = JSON.parse(bodyText); } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); throw new Error('رد غير متوقع من Replicate'); }
   if (createRes.status === 429 && attempt < 4) {
     await new Promise((r) => setTimeout(r, 5000));
     return createPrediction(url, input, token, attempt + 1);
@@ -119,42 +122,66 @@ const generateImage = (prompt, aspectRatio, token) =>
 
 // بوابة تحقّق على الناتج: نقرأ بكسلات الصورة ونحكم إن كانت رسمة خطية فعلاً
 // (تشبّع لون منخفض ونسبة بيضاء عالية). إن فشلت، يُعاد التوليد ببرومبت أصرم.
-async function isLineArt(url) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    // مسح سريع للبايتات: نقيس نسبة البايتات القريبة من الأبيض في بيانات JPEG المضغوطة
-    // ليست دقة بكسلية، لكنها كافية لكشف صورة ملونة مشبعة مقابل رسمة خطية.
-    let bright = 0, total = 0;
-    for (let i = 0; i < buf.length; i += 97) { total++; if (buf[i] > 235) bright++; }
-    if (!total) return null;
-    return bright / total;
-  } catch (e) { return null; }
-}
 
-// كشف تكرار المنظر: يحمّل الصورة ويحلّل الأعمدة. إن ظهرت كتلتان داكنتان
-// مفصولتان بفراغ أبيض في المنتصف فهذه صورة فيها منظران — تُرفض ويُعاد التوليد.
-async function hasTwoFigures(url) {
+
+// ---------------------------------------------------------------------------
+// فحص المخرجات بصرياً.
+//
+// النسخة السابقة كانت تقرأ بايتات الملف المضغوط (buf[i] < 120) وتعاملها كأنها
+// بكسلات. بايتات PNG/WebP المضغوطة لا علاقة لمواقعها بمواقع البكسلات، فكانت
+// البوابتان تقيسان ضجيجاً ولا ترفضان شيئاً — ولهذا خرجت رسمتان في المنظر الواحد.
+//
+// البديل: فحص بصري فعلي بنفس المفتاح المستخدم في التحليل. استدعاء واحد
+// يُرجع JSON قصيراً. عند أي فشل يُرجع null ويُقبل الناتج كما هو — فلا يعطّل
+// الفحصُ التوليدَ أبداً.
+async function inspectSketch(url, apiKey) {
+  if (!url || !apiKey) return null;
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    // تقسيم البايتات إلى 5 شرائح أفقية تقريبية وقياس كثافة الداكن في كل شريحة
-    const slices = 5;
-    const per = Math.floor(buf.length / slices);
-    if (per < 200) return null;
-    const dens = [];
-    for (let s = 0; s < slices; s++) {
-      let dark = 0, total = 0;
-      for (let i = s * per; i < (s + 1) * per; i += 31) { total++; if (buf[i] < 120) dark++; }
-      dens.push(total ? dark / total : 0);
-    }
-    const mid = dens[2];
-    const sides = Math.max(dens[1], dens[3]);
-    // منتصف فارغ نسبياً مقابل جانبين ممتلئين = كتلتان منفصلتان
-    return sides > 0.08 && mid < sides * 0.45;
-  } catch (e) { return null; }
+    const type = res.headers.get('content-type') || 'image/png';
+    if (!type.startsWith('image/')) return null;
+    const base64 = Buffer.from(await res.arrayBuffer()).toString('base64');
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45000);
+    let r;
+    try {
+      r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          model: INSPECT_MODEL,
+          max_tokens: 200,
+          thinking: { type: 'disabled' },
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: type.split(';')[0], data: base64 } },
+              { type: 'text', text:
+                'Inspect this garment technical flat sketch. Reply with ONLY a JSON object, no preamble, no markdown fences:\n' +
+                '{"figures": <how many separate garment figures are drawn in the image, as an integer>, ' +
+                '"colored": <true if the garment is filled with colour or shading, false if it is clean black line art on white>, ' +
+                '"body": <true if a human body, face, mannequin or dress form is visible, false otherwise>}' },
+            ],
+          }],
+        }),
+      });
+    } finally { clearTimeout(timer); }
+
+    if (!r || !r.ok) return null;
+    const data = await r.json();
+    const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+    const m = /\{[\s\S]*\}/.exec(text);
+    if (!m) return null;
+    const out = JSON.parse(m[0]);
+    return {
+      figures: Number.isFinite(+out.figures) ? +out.figures : null,
+      colored: out.colored === true,
+      body: out.body === true,
+    };
+  } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); return null; }
 }
 
 // محاولة + إعادة محاولة واحدة، مع احترام الموعد النهائي للدالة
@@ -178,7 +205,7 @@ async function runPool(tasks, limit) {
   const worker = async () => {
     while (next < tasks.length) {
       const i = next++;
-      try { results[i] = await tasks[i](); } catch (e) { results[i] = null; }
+      try { results[i] = await tasks[i](); } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); results[i] = null; }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
@@ -192,6 +219,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const replicateToken = process.env.REPLICATE_API_TOKEN;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!replicateToken) return res.status(500).json({ error: 'مفتاح Replicate غير مضبوط على الخادم' });
 
   try {
@@ -201,14 +229,30 @@ export default async function handler(req, res) {
     const imageFile = Array.isArray(files.image) ? files.image[0] : files.image;
     if (!imageFile) return res.status(400).json({ error: 'لم تُرفع صورة التصميم' });
 
+    // flatOnly يفصل خطوة الرسمة التقنية عن توليد التيك باك الكامل
+    const flatOnly = String(getField(fields.flatOnly) || '') === '1';
+    // رسمة اعتمدتها المصممة في قسم الفلات سكتش: تُستخدم كما هي ولا تُعاد
+    // توليدها، فلا تُصرف كلفة ولا يتغيّر ما وافقت عليه.
+    const approvedFront = (getField(fields.approvedFront) || '').trim();
+    const approvedBack = (getField(fields.approvedBack) || '').trim();
+    const approvedColorFront = (getField(fields.approvedColorFront) || '').trim();
+    const approvedColorBack = (getField(fields.approvedColorBack) || '').trim();
     let meta = {};
-    try { meta = JSON.parse(getField(fields.meta) || '{}'); } catch (e) { meta = {}; }
+    try { meta = JSON.parse(getField(fields.meta) || '{}'); } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); meta = {}; }
 
     const imgBuffer = fs.readFileSync(imageFile.filepath);
     const mediaType = detectImageType(imgBuffer);
 
-    const materials = Array.isArray(meta.materials) ? meta.materials.slice(0, 16) : [];
+    // لا سقف ثابت على عدد الخامات: القائمة تتبع التصميم، وقطعها عند رقم
+    // يترك آخر البطاقات بلا صور. السقف الحقيقي هو مهلة الدالة، ويتكفّل به
+    // مجمّع التنفيذ وفحص الموعد النهائي أدناه.
+    const materials = Array.isArray(meta.materials) ? meta.materials : [];
     const areaList = Array.isArray(meta.detailAreas) ? meta.detailAreas.filter(Boolean).join(', ') : '';
+    // تُمرَّر للرسمة التقنية لتضمن ظهور مناطق التجميع الحرجة واضحةً فيها،
+    // لأن لقطات DETAILED VIEWS تُقتطع من الرسمة نفسها.
+    const areaFocus = areaList
+      ? ' Render these construction areas clearly and legibly, since they will be shown as close-up details: ' + areaList + '. '
+      : '';
     const paletteHint = Array.isArray(meta.colorway) && meta.colorway.length
       ? 'Garment color palette: ' + meta.colorway.map((c) => (c.part || '') + ' ' + (c.hex || '')).join(', ') + '. '
       : '';
@@ -237,9 +281,6 @@ export default async function handler(req, res) {
       'Keep the exact neckline shape and the exact silhouette. ' +
       'Preserve and reproduce ALL embroidery motifs, beading, crystals and embellishments in their exact locations, shapes and density. ';
 
-    const NO_PERSON =
-      'Do NOT include any person, model, mannequin, dress form, body, skin, face, head, hair, arms, hands or legs anywhere in the image — the garment only. ';
-
     // القطعة تُرسم مسطحة بلا أي جسم، والرسمة التقنية أبيض/أسود تُنتَج مباشرة.
     const NO_BODY =
       'Remove the person completely. There must be NO model, NO face, NO head, NO hijab, NO headscarf, NO hair, NO neck, NO skin, NO hands, NO arms, NO legs, NO feet, NO shoes, NO mannequin, NO dress form, NO hanger, and NO body volume inside the garment. ';
@@ -261,7 +302,7 @@ export default async function handler(req, res) {
       'Convert the FIRST image into a professional BLACK AND WHITE fashion technical flat drawing (CAD flat sketch), exactly like the flats in a factory tech pack. ' +
       'This is a LINE CONVERSION, not a redesign: trace every existing outline, panel seam, trim band edge, sleeve seam, cuff line, neckline curve and hem shape EXACTLY where they already are. ' +
       'Keep every proportion, every trim band path and angle, and every construction line identical to the first image. Add nothing, remove nothing, move nothing. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('FRONT') + pieces + facts + brief +
+      NO_INVENT + NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('FRONT') + pieces + facts + brief + areaFocus +
       'Replace all colour with flat WHITE fill and clean BLACK vector outlines on a pure WHITE background. No colour, no grey fill, no shading, no gradients, no fabric texture, no photographic rendering. ' +
       'Use professional CAD line weights: a heavier outline for the garment silhouette, medium lines for panel and trim seams, and the finest lines for internal details and drape folds. ' +
       'Show topstitching as fine evenly spaced dashed black lines. No text, no letters, no numbers, no labels, no arrows, no measurement lines, no watermark.';
@@ -270,18 +311,18 @@ export default async function handler(req, res) {
       'This image is a black and white technical flat drawing of the FRONT of a garment. Draw the SAME garment seen from the BACK, in the IDENTICAL black and white technical flat style. ' +
       'Same silhouette, same scale, same proportions, same panel seams, same trim band placement and angles, same sleeve and cuff shapes, same hem length. ' +
       'The back view shows the centre-back seam and the back neckline edge. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('BACK') + pieces + facts + brief +
+      NO_INVENT + NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('BACK') + pieces + facts + brief + areaFocus +
       'Only thin uniform BLACK outlines on a pure WHITE background — no colour, no shading, no photograph. No text, no labels, no arrows, no watermark.';
 
     const coloredFrontPrompt =
       'Redraw this garment as a colored flat product illustration of the FRONT view, laid completely flat and symmetrical as if placed on a table. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('FRONT') + pieces + facts + brief +
+      NO_INVENT + NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('FRONT') + pieces + facts + brief +
       'Keep the exact same colours, fabrics, trim bands and proportions as the reference. ' + paletteHint +
       'Pure white background, soft even lighting. No text, no labels, no arrows, no watermark.';
 
     const coloredBackPrompt =
       'The FIRST image is the original design reference; the SECOND image is a colored flat illustration of its FRONT. Draw the SAME garment seen from the BACK in the IDENTICAL flat illustration style as the second image: same silhouette, same scale, same colours, same fabrics, same trim placement, same hem length, showing the centre-back seam and back neckline. ' +
-      NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('BACK') + pieces + facts + brief + paletteHint +
+      NO_INVENT + NO_BODY + NO_ADD + FIT_FRAME + ONE_VIEW('BACK') + pieces + facts + brief + paletteHint +
       'Pure white background. No text, no labels, no arrows, no watermark.';
 
     // صور الخامات — بطاقة لكل خامة بترتيب الـ BOM
@@ -299,7 +340,11 @@ export default async function handler(req, res) {
     // الأقمشة والبطانات والخيوط والسحاب والحواف تُصوَّر بلون القطعة الفعلي،
     // أما اللوازم البنيوية فبألوانها الصناعية الطبيعية (بونينغ أبيض، شريط شفاف،
     // حشوة بيضاء، خطاف فضي) — ولا تُصبغ بلون القطعة.
-    const mainHex = (Array.isArray(meta.colorway) && meta.colorway[0] && meta.colorway[0].pantone) || '';
+    // الـ hex قيمة صريحة يفهمها نموذج الصور؛ كود بانتون لا يعني له شيئاً
+    // فيخترع لوناً مكانه. يُذكر الكود بعد الـ hex كمرجع فقط.
+    const mainC = (Array.isArray(meta.colorway) && meta.colorway[0]) || null;
+    const mainHex = (mainC && mainC.hex) || '';
+    const mainPantone = (mainC && mainC.pantone) || '';
     const isColourMatched = (name) => /fabric|satin|crepe|chiffon|tulle|silk|wool|lining|shell|overlay|thread|zip|piping|trim|band|bias|hem/i.test(name || '');
     const isNaturalNotion = (name) => /boning|interfacing|stay tape|channel|fusible|hook|eye|hanger|polybag|garment bag|packaging|label/i.test(name || '');
 
@@ -309,7 +354,8 @@ export default async function handler(req, res) {
         return ' Photograph this component in its NATURAL industrial colour as supplied (boning and interfacing are white, stay and channel tape are white or clear, hook-and-eye is silver metal, labels are woven white or cream, hangers and garment bags are natural) — do NOT dye it the garment colour.';
       }
       if (isColourMatched(name) && mainHex) {
-        return ' This component is colour-matched to the garment: render it in PANTONE ' + mainHex +
+        return ' This component is colour-matched to the garment: render it in the EXACT colour ' + mainHex +
+          (mainPantone ? ' (PANTONE ' + mainPantone + ')' : '') +
           '. Small colour-matched hardware such as the zipper may be shown lying on the garment\'s own main fabric in the same colour.';
       }
       return '';
@@ -327,8 +373,13 @@ export default async function handler(req, res) {
     const materialPrompt = (m) => {
       const p = (m && m.photoPrompt) || '';
       if (p && p.length > 30) {
-        const pantone = m && m.pantone ? ' The exact color must be PANTONE ' + m.pantone + '.' : '';
-        return p + FORM_RULES + designCtx(m) + MACRO_STYLE;
+        // اللون الصريح أولاً: نموذج الصور لا يفكّ كود بانتون فيخترع لوناً مكانه
+        const hx = (m && m.hex) || '';
+        const pt = (m && m.pantone) || '';
+        const colour = hx
+          ? ' The exact colour must be ' + hx + (pt ? ' (PANTONE ' + pt + ')' : '') + '.'
+          : (pt ? ' The exact colour must be PANTONE ' + pt + '.' : '');
+        return p + colour + FORM_RULES + designCtx(m) + MACRO_STYLE;
       }
       return materialFallbackPrompt(m);
     };
@@ -338,7 +389,7 @@ export default async function handler(req, res) {
     // ------------------------------------------------------------------
     let uploadedUrl = null;
     try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 30000); }
-    catch (e) { uploadedUrl = null; }
+    catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); uploadedUrl = null; }
 
     // ------------------------------------------------------------------
     // التنفيذ عبر المجمّع: 3 Kontext + صورة لكل خامة، بحد 4 متزامنة
@@ -351,20 +402,30 @@ export default async function handler(req, res) {
     const makeLineArt = async (inputs, prompt, capMs) => {
       let out = await safeRun(() => editImage(inputs, prompt, replicateToken, '2:3'), capMs);
       if (!out) return null;
-      const brightRatio = await isLineArt(out);
-      const twoFigures = await hasTwoFigures(out);
-      const badColour = brightRatio !== null && brightRatio < 0.12;
-      const badViews = twoFigures === true;
-      // إعادة التوليد فقط إن بقي وقت يكفيها كاملة، وإلا نقبل الناتج الحالي
-      if (!gateRetryUsed && (badColour || badViews) && Date.now() + capMs < deadline - 20000) {
+      const look = await inspectSketch(out, apiKey);
+      // الفحص يُرجع null عند أي تعذّر — عندها يُقبل الناتج ولا يُعطَّل التوليد
+      if (!look) return out;
+
+      const badViews = look.figures !== null && look.figures > 1;
+      const badColour = look.colored === true;
+      const badBody = look.body === true;
+
+      // إعادة التوليد فقط إن بقي وقت يكفيها كاملة
+      if (!gateRetryUsed && (badColour || badViews || badBody) && Date.now() + capMs < deadline - 20000) {
         gateRetryUsed = true;
-        const extra = STRICTER + (badViews
-          ? ' The previous attempt wrongly contained TWO figures. Output ONE single garment only — no second view, no duplicate, no mirrored copy anywhere in the frame. '
-          : '');
+        let extra = STRICTER;
+        if (badViews) extra += ' The previous attempt wrongly contained ' + look.figures +
+          ' separate figures. Output ONE single garment only — no second view, no duplicate, no mirrored copy anywhere in the frame. ';
+        if (badColour) extra += ' The previous attempt was coloured or shaded. Output clean BLACK LINE ART on a pure white background, no fill, no shading, no colour. ';
+        if (badBody) extra += ' The previous attempt showed a human body, face or mannequin. Draw the garment alone, laid flat, with no body inside it. ';
+
         const retry = await safeRun(() => editImage(inputs, prompt + extra, replicateToken, '2:3'), capMs, 1);
         if (retry) {
-          const r2 = await isLineArt(retry);
-          if (r2 === null || r2 >= brightRatio) return retry;
+          const check = await inspectSketch(retry, apiKey);
+          // تُقبل الإعادة فقط إن كانت أفضل فعلاً، وإلا يبقى الناتج الأول
+          if (!check) return retry;
+          const stillBad = (check.figures !== null && check.figures > 1) || check.colored || check.body;
+          if (!stillBad) return retry;
         }
       }
       return out;
@@ -372,6 +433,19 @@ export default async function handler(req, res) {
 
     // الملونة الأمامية أولاً، ثم التقنية تُشتق منها كتحويل خطوط (أوفى بكثير من إعادة الرسم)
     const chainPromise = (async () => {
+      // الرسمة المعتمدة تُستخدم كما هي؛ يبقى الملوّن وحده للكولورويز
+      if (approvedFront || approvedColorFront) {
+        // ما وُلّد في قسم الفلات يُستخدم كما هو؛ لا يُعاد توليد شيء منه.
+        // ما نقص منه وحده يُولَّد هنا.
+        let cf = approvedColorFront || null;
+        if (!cf) cf = await safeRun(() => editImage(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 65000);
+        return {
+          lf: approvedFront || null,
+          lb: approvedBack || null,
+          cf: cf || null,
+          cb: approvedColorBack || null,
+        };
+      }
       if (!uploadedUrl) return { lf: null, lb: null, cf: null, cb: null };
       const cf = await safeRun(() => editImage(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 65000);
       if (!cf) {
@@ -386,12 +460,27 @@ export default async function handler(req, res) {
       return { lf, lb, cf, cb };
     })();
 
+    // قسم الفلات سكتش: الرسمتان وحدهما. لا صور خامات، فلا تُهدر كلفة على
+    // ما لا تطلبه هذه الخطوة.
+    if (flatOnly) {
+      const chain = await chainPromise;
+      const got = [chain.cf, chain.cb, chain.lf, chain.lb].filter(Boolean).length;
+      return res.status(200).json({
+        coloredFrontImage: chain.cf || null,
+        coloredBackImage: chain.cb || null,
+        lineFrontImage: chain.lf || null,
+        lineBackImage: chain.lb || null,
+        produced: got,
+        error: got === 0 ? 'تعذّر توليد أي رسمة — حاولي مرة ثانية' : null,
+      });
+    }
+
     const materialTasks = materials.map((m) => async () => {
       let u = await safeRun(() => generateImage(materialPrompt(m), '1:1', replicateToken), 70000, 2);
       if (!u) u = await safeRun(() => generateImage(materialFallbackPrompt(m), '1:1', replicateToken), 70000, 1);
       return u;
     });
-    const materialsPromise = runPool(materialTasks, 3);
+    const materialsPromise = runPool(materialTasks, CONCURRENCY);
 
     const [chain, materialPhotos] = await Promise.all([chainPromise, materialsPromise]);
 
