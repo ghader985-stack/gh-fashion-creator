@@ -37,7 +37,15 @@ export default async function handler(req, res) {
   if (!allowed) return res.status(403).json({ error: 'نطاق غير مسموح' });
 
   try {
-    const upstream = await fetch(parsed.toString());
+    // روابط api.replicate.com/v1/files محميّة بمفتاح: جلبها بلا ترويسة
+    // تفويض يُرجع 401 فلا تظهر الصورة. النطاق مقيَّد أصلاً بالقائمة أعلاه،
+    // والمفتاح يبقى على الخادم ولا يصل المتصفح.
+    const headers = {};
+    if (host === 'api.replicate.com' || host.endsWith('.api.replicate.com')) {
+      const token = process.env.REPLICATE_API_TOKEN;
+      if (token) headers.Authorization = 'Bearer ' + token;
+    }
+    const upstream = await fetch(parsed.toString(), { headers });
     if (!upstream.ok) return res.status(502).json({ error: 'تعذّر جلب الصورة (' + upstream.status + ')' });
 
     const type = upstream.headers.get('content-type') || 'image/jpeg';
