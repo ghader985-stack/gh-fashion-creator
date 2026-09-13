@@ -21,6 +21,28 @@ function extractBrandName(notes) {
   return '';
 }
 
+
+// تنزيل صورة واحدة من الرسمات. تمرّ عبر /api/img لأنها من نطاق آخر،
+// ولأن التنزيل المباشر من نطاق خارجي يفتح تبويباً بدل أن يحفظ ملفاً.
+async function downloadFlat(url, baseName) {
+  try {
+    const r = await fetch(proxied(url));
+    const blob = await r.blob();
+    // الامتداد من نوع الملف الفعلي: نفس الصيغة التي يقبلها التيك باك عند الرفع
+    const ext = ({ 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' })[blob.type] || 'jpg';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = baseName + '.' + ext;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[gh]', e && e.message);
+    alert('تعذّر التنزيل، جرّبي مرة ثانية');
+  }
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState('moodboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -50,6 +72,22 @@ export default function Home() {
   // ===== التيك باك =====
   const [tpImage, setTpImage] = useState(null);
   const [tpPreview, setTpPreview] = useState('');
+
+  // رسمات ترفعها المصممة بنفسها. من رفعت رسمتها لا يُولَّد لها شيء مكانها،
+  // ومن تركت الخانة فارغة تُولَّد لها. الاثنتان مدعومتان بلا إجبار.
+  const [upLineFront, setUpLineFront] = useState('');
+  const [upLineBack, setUpLineBack] = useState('');
+  const [upColorFront, setUpColorFront] = useState('');
+  const [upColorBack, setUpColorBack] = useState('');
+
+
+  const flatsReady = Boolean(upLineFront && upLineBack && upColorFront && upColorBack);
+  const missingFlats = [
+    !upLineFront && 'الرسمة التقنية الأمامية',
+    !upLineBack && 'الرسمة التقنية الخلفية',
+    !upColorFront && 'الرسمة الملوّنة الأمامية',
+    !upColorBack && 'الرسمة الملوّنة الخلفية',
+  ].filter(Boolean);
 
   // ===== فلات سكتش (الرسمة التقنية) =====
   // قسم مستقل: المصممة تولّد رسمتها هنا وتعتمدها، ثم تُستخدم في التيك باك.
@@ -317,7 +355,12 @@ export default function Home() {
 
   const handleTechpack = async () => {
     if (!gate()) return;
-    if (!tpImage) { alert('ارفعي صورة التصميم أولاً'); return; }
+    if (!tpImage) { setTpError('ارفعي صورة التصميم أولاً'); return; }
+    // حارس ثانٍ: لا يُبنى تيك باك بلا رسمات مهما كان مسار الاستدعاء
+    if (!flatsReady) {
+      setTpError('ارفعي الرسمات التقنية الأربع أولاً');
+      return;
+    }
     setTpLoading(true); setTechpack(null); setTpError('');
     try {
       // ===== الطور 1: التحليل (نص + جداول) =====
@@ -342,15 +385,12 @@ export default function Home() {
       try {
         const fd2 = new FormData();
         fd2.append('image', tpImage);
-        // الرسمات المولّدة في قسم الفلات سكتش تُستخدم كما هي ولا يُعاد توليدها
-        if (flatFront) {
-          fd2.append('approvedFront', flatFront);
-          fd2.append('approvedBack', flatBack || '');
-        }
-        if (flatColorFront) {
-          fd2.append('approvedColorFront', flatColorFront);
-          fd2.append('approvedColorBack', flatColorBack || '');
-        }
+        // الرسمات التي رفعتها المصممة هي المصدر الوحيد؛ الأربع مطلوبة
+        // فلا يصل هذا السطر إلا وهي كاملة، ولا يُولَّد شيء مكانها.
+        fd2.append('approvedFront', upLineFront);
+        fd2.append('approvedBack', upLineBack);
+        fd2.append('approvedColorFront', upColorFront);
+        fd2.append('approvedColorBack', upColorBack);
         fd2.append('meta', JSON.stringify({
           garmentFacts: d.garmentFacts || '',
           flatSketchBrief: d.flatSketchBrief || '',
@@ -737,12 +777,20 @@ export default function Home() {
                           ? <img src={proxied(flatColorFront)} alt="colored front" crossOrigin="anonymous" />
                           : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
                         <div className="flat-cap">FRONT</div>
+                        {flatColorFront && (
+                          <button className="download-btn secondary flat-dl"
+                            onClick={() => downloadFlat(flatColorFront, 'ملونة-امامية')}>تنزيل</button>
+                        )}
                       </div>
                       <div className="flat-view">
                         {flatColorBack
                           ? <img src={proxied(flatColorBack)} alt="colored back" crossOrigin="anonymous" />
                           : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
                         <div className="flat-cap">BACK</div>
+                        {flatColorBack && (
+                          <button className="download-btn secondary flat-dl"
+                            onClick={() => downloadFlat(flatColorBack, 'ملونة-خلفية')}>تنزيل</button>
+                        )}
                       </div>
                     </div>
 
@@ -753,12 +801,20 @@ export default function Home() {
                           ? <img src={proxied(flatFront)} alt="line front" crossOrigin="anonymous" />
                           : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
                         <div className="flat-cap">FRONT</div>
+                        {flatFront && (
+                          <button className="download-btn secondary flat-dl"
+                            onClick={() => downloadFlat(flatFront, 'تقنية-امامية')}>تنزيل</button>
+                        )}
                       </div>
                       <div className="flat-view">
                         {flatBack
                           ? <img src={proxied(flatBack)} alt="line back" crossOrigin="anonymous" />
                           : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
                         <div className="flat-cap">BACK</div>
+                        {flatBack && (
+                          <button className="download-btn secondary flat-dl"
+                            onClick={() => downloadFlat(flatBack, 'تقنية-خلفية')}>تنزيل</button>
+                        )}
                       </div>
                     </div>
 
@@ -766,27 +822,17 @@ export default function Home() {
                       <button onClick={handleFlat} disabled={flatLoading} className="download-btn secondary">
                         إعادة التوليد
                       </button>
-                      <button onClick={() => downloadNode('flat-result-area', 'flat-sketch.png', '#ffffff')}
-                        disabled={flatLoading} className="download-btn secondary">
-                        حفظ الرسمات
-                      </button>
+
                     </div>
                     <div className="tp-save-hint">
-                      هذه الرسمات جاهزة للتيك باك: التقنية تُستخدم في صفحات القياسات والكول أوت والخياطة،
-                      والملوّنة في الكولورويز. انتقلي لقسم التيك باك مباشرةً.
+                      نزّلي الرسمات الأربع، ثم ارفعيها في خاناتها بقسم <strong>التيك باك</strong>:
+                      التقنية تُستخدم في صفحات القياسات والكول أوت والخياطة، والملوّنة في الكولورويز.
                     </div>
                   </div>
                 )}
               </div>
             )}
 
-            {activeTab === 'techpack' && !flatFront && (
-              <div className="tp-audit">
-                لم تولّدي رسمة تقنية بعد. يمكنك المتابعة وستُولَّد تلقائياً،
-                أو الرجوع لقسم <strong>فلات سكتش (الرسمة التقنية)</strong> لتوليدها ومعاينتها أولاً —
-                عندها تُبنى صفحات القياسات والكول أوت والخياطة على رسمة رأيتِها بعينك.
-              </div>
-            )}
             {activeTab === 'techpack' && (
               <div className="tool">
                 <section className="card">
@@ -808,6 +854,43 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="field">
+                    <label>الرسمات التقنية — مطلوبة</label>
+                    <div className="tp-save-hint" style={{ margin: '0 0 0.7rem' }}>
+                      الأربع مطلوبة: عليها تُرسم الليبلات والقياسات وأرقام الكول أوت.
+                      ارفعي رسماتك، أو نزّليها من قسم <strong>فلات سكتش (الرسمة التقنية)</strong> وارفعيها هنا.
+                    </div>
+                    <div className="flat-upload-grid">
+                      {[
+                        ['الرسمة التقنية — أمامي', upLineFront, setUpLineFront],
+                        ['الرسمة التقنية — خلفي', upLineBack, setUpLineBack],
+                        ['الرسمة الملوّنة — أمامي', upColorFront, setUpColorFront],
+                        ['الرسمة الملوّنة — خلفي', upColorBack, setUpColorBack],
+                      ].map(([cap, val, setter], i) => (
+                        <div className="flat-upload" key={'fu' + i}>
+                          <div className="flat-upload-cap">{cap}</div>
+                          {val ? (
+                            <div className="img-preview">
+                              <img src={val} alt={cap} />
+                              <button onClick={() => setter('')} className="remove-img">✕</button>
+                            </div>
+                          ) : (
+                            <label className="upload-label sm">
+                              <input type="file" accept="image/*" style={{ display: 'none' }}
+                                onChange={(e) => {
+                                  const f = e.target.files && e.target.files[0];
+                                  if (!f) return;
+                                  const rd = new FileReader();
+                                  rd.onload = () => setter(String(rd.result || ''));
+                                  rd.readAsDataURL(f);
+                                }} />
+                              <span>اضغطي للرفع</span>
+                            </label>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="field">
                     <label>اسم التصميم (اختياري)</label>
                     <input type="text" value={tpName} onChange={(e) => setTpName(e.target.value)} placeholder="مثال: فستان أوشن فايبز" />
                   </div>
@@ -826,9 +909,16 @@ export default function Home() {
                       <input type="text" value={tpNotes} onChange={(e) => setTpNotes(e.target.value)} placeholder="اسم البراند، وأي تفاصيل خاصة" />
                     </div>
                   </div>
-                  <button onClick={handleTechpack} disabled={tpLoading} className="cta">
+                  <button onClick={handleTechpack} disabled={tpLoading || !flatsReady} className="cta">
                     {tpLoading ? <><span className="spinner"></span> {tpStage || 'جارٍ بناء التيك باك…'}</> : 'أنشئي التيك باك'}
                   </button>
+                  {!flatsReady && !tpLoading && (
+                    <div className="tp-audit" style={{ marginTop: '0.8rem' }}>
+                      لبناء التيك باك، ارفعي {missingFlats.length === 4 ? 'الرسمات التقنية الأربع' : 'ما ينقص:'}
+                      {missingFlats.length < 4 && <> <strong>{missingFlats.join(' · ')}</strong></>}
+                      {' — '}من ملفاتك أو من قسم <strong>فلات سكتش (الرسمة التقنية)</strong>.
+                    </div>
+                  )}
                   {tpError && <div className="err">{tpError}</div>}
                 </section>
 
@@ -2423,6 +2513,12 @@ function StyleBlock() {
       .flat-view img { width: 100%; display: block; }
       .flat-cap { text-align: center; font-size: 0.68rem; letter-spacing: 0.14em; color: #999; margin-top: 0.4rem; }
       .flat-actions { display: flex; gap: 0.6rem; margin-top: 0.9rem; flex-wrap: wrap; }
+      .flat-upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+      @media (max-width: 700px) { .flat-upload-grid { grid-template-columns: 1fr; } }
+      .flat-upload { background: #fff; border: 1px solid #eceae4; border-radius: 6px; padding: 0.5rem; }
+      .flat-upload-cap { font-size: 0.7rem; color: #777; margin-bottom: 0.4rem; text-align: center; }
+      .upload-label.sm { min-height: 84px; font-size: 0.74rem; }
+      .flat-dl { width: 100%; margin-top: 0.45rem; font-size: 0.72rem; padding: 0.35rem; }
       .flat-group-title { font-size: 0.78rem; font-weight: 700; color: #555; margin: 1.1rem 0 0.5rem; }
       .flat-group-title:first-child { margin-top: 0; }
       .tp-save-hint { font-size: 0.72rem; color: #888; margin: 0.4rem 0 0.9rem; line-height: 1.7; }
