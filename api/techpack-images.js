@@ -434,17 +434,34 @@ export default async function handler(req, res) {
     // الملونة الأمامية أولاً، ثم التقنية تُشتق منها كتحويل خطوط (أوفى بكثير من إعادة الرسم)
     const chainPromise = (async () => {
       // الرسمة المعتمدة تُستخدم كما هي؛ يبقى الملوّن وحده للكولورويز
-      if (approvedFront || approvedColorFront) {
-        // ما وُلّد في قسم الفلات يُستخدم كما هو؛ لا يُعاد توليد شيء منه.
-        // ما نقص منه وحده يُولَّد هنا.
+      if (approvedFront || approvedBack || approvedColorFront || approvedColorBack) {
+        // ما رفعته المصممة أو ولّدته في قسم الفلات يُستخدم كما هو ولا يُعاد
+        // توليده. الناقص وحده يُولَّد هنا، فلا تبقى صفحة بلا رسمة ولا تُصرف
+        // كلفة على ما هو موجود أصلاً.
         let cf = approvedColorFront || null;
-        if (!cf) cf = await safeRun(() => editImage(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 65000);
-        return {
-          lf: approvedFront || null,
-          lb: approvedBack || null,
-          cf: cf || null,
-          cb: approvedColorBack || null,
-        };
+        if (!cf && uploadedUrl) {
+          cf = await safeRun(() => editImage(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 60000);
+        }
+
+        // الواجهة تُلزم برفع الأربع، فالتوليد هنا شبكة أمان لمسار غير متوقّع فقط
+        const base = cf ? [cf, uploadedUrl].filter(Boolean) : uploadedUrl;
+        const needLf = !approvedFront && base;
+        const needCb = !approvedColorBack && cf;
+        const [genLf, genCb] = await Promise.all([
+          needLf ? makeLineArt(base, flatFrontPrompt, 55000) : Promise.resolve(null),
+          needCb ? safeRun(() => editImage([uploadedUrl, cf].filter(Boolean), coloredBackPrompt, replicateToken, '2:3'), 60000) : Promise.resolve(null),
+        ]);
+
+        const lf = approvedFront || genLf || null;
+        const cb = approvedColorBack || genCb || null;
+
+        let lb = approvedBack || null;
+        if (!lb) {
+          const backSrc = cb || lf;
+          if (backSrc) lb = await makeLineArt(backSrc, flatBackPrompt, 55000);
+        }
+
+        return { lf, lb, cf: cf || null, cb };
       }
       if (!uploadedUrl) return { lf: null, lb: null, cf: null, cb: null };
       const cf = await safeRun(() => editImage(uploadedUrl, coloredFrontPrompt, replicateToken, '2:3'), 65000);
