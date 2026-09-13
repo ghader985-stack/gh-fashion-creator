@@ -63,7 +63,9 @@ async function uploadToReplicate(buffer, mediaType, token) {
   });
   if (!res.ok) throw new Error('فشل رفع الصورة (' + res.status + ')');
   const data = await res.json();
-  return (data.urls && data.urls.get) || null;
+  // تفضيل رابط التسليم المفتوح على رابط api المحميّ بمفتاح: الأخير يحتاج
+  // ترويسة تفويض عند كل جلب، ولا يصلح للعرض المباشر في المتصفح.
+  return (data.urls && (data.urls.download || data.urls.get)) || null;
 }
 
 async function pollPrediction(prediction, token, maxTries) {
@@ -223,6 +225,10 @@ export default async function handler(req, res) {
   if (!replicateToken) return res.status(500).json({ error: 'مفتاح Replicate غير مضبوط على الخادم' });
 
   try {
+    // يبدأ العدّ من لحظة دخول الطلب: كل ما يسبق التوليد (تحليل النموذج،
+    // رفع الصور) يُحسب ضمن المهلة، وإلا تجاوزت الدالة حدّ المنصّة وقُطعت
+    // قبل أن تُرجع أي صورة.
+    const requestStart = Date.now();
     const form = formidable({ maxFileSize: 12 * 1024 * 1024 });
     const [fields, files] = await form.parse(req);
 
@@ -231,12 +237,16 @@ export default async function handler(req, res) {
 
     // flatOnly يفصل خطوة الرسمة التقنية عن توليد التيك باك الكامل
     const flatOnly = String(getField(fields.flatOnly) || '') === '1';
-    // رسمة اعتمدتها المصممة في قسم الفلات سكتش: تُستخدم كما هي ولا تُعاد
-    // توليدها، فلا تُصرف كلفة ولا يتغيّر ما وافقت عليه.
-    const approvedFront = (getField(fields.approvedFront) || '').trim();
-    const approvedBack = (getField(fields.approvedBack) || '').trim();
-    const approvedColorFront = (getField(fields.approvedColorFront) || '').trim();
-    const approvedColorBack = (getField(fields.approvedColorBack) || '').trim();
+
+    // الرسمات التي رفعتها المصممة تصل كملفات لا كنصوص base64: النص يضخّم
+    // الحجم ثلثاً ويتجاوز حدّ حجم الطلب فيُرفَض الطلب كاملاً قبل أن يصل.
+    const pickFile = (f) => (Array.isArray(f) ? f[0] : f) || null;
+    const flatFiles = {
+      lf: pickFile(files.flatLineFront),
+      lb: pickFile(files.flatLineBack),
+      cf: pickFile(files.flatColorFront),
+      cb: pickFile(files.flatColorBack),
+    };
     let meta = {};
     try { meta = JSON.parse(getField(fields.meta) || '{}'); } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); meta = {}; }
 
@@ -391,10 +401,31 @@ export default async function handler(req, res) {
     try { uploadedUrl = await withTimeout(uploadToReplicate(imgBuffer, mediaType, replicateToken), 30000); }
     catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); uploadedUrl = null; }
 
+    // رفع الرسمات الأربع معاً للحصول على روابط تُعرَض في التيك باك
+    const uploadFlat = async (f) => {
+      if (!f) return null;
+      try {
+        const buf = fs.readFileSync(f.filepath);
+        const mt = detectImageType(buf);
+        return await withTimeout(uploadToReplicate(buf, mt, replicateToken), 20000);
+      } catch (e) {
+        if (typeof console !== "undefined") console.warn("[gh] flat upload", e && e.message);
+        return null;
+      }
+    };
+    const [upLf, upLb, upCf, upCb] = await Promise.all([
+      uploadFlat(flatFiles.lf), uploadFlat(flatFiles.lb),
+      uploadFlat(flatFiles.cf), uploadFlat(flatFiles.cb),
+    ]);
+    const approvedFront = upLf || '';
+    const approvedBack = upLb || '';
+    const approvedColorFront = upCf || '';
+    const approvedColorBack = upCb || '';
+
     // ------------------------------------------------------------------
     // التنفيذ عبر المجمّع: 3 Kontext + صورة لكل خامة، بحد 4 متزامنة
     // ------------------------------------------------------------------
-    const deadline = Date.now() + DEADLINE_MS;
+    const deadline = requestStart + DEADLINE_MS;
     const safeRun = makeSafe(deadline);
 
     // تولّد الرسمة التقنية ثم تتحقق أنها خطية فعلاً؛ إن طلعت ملونة تُعاد ببرومبت أصرم
