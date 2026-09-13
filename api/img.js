@@ -27,6 +27,7 @@ export default async function handler(req, res) {
 
   let parsed;
   try { parsed = new URL(target); } catch (e) {
+    if (typeof console !== "undefined") console.warn("[gh]", e && e.message);
     return res.status(400).json({ error: 'رابط غير صالح' });
   }
   if (parsed.protocol !== 'https:') return res.status(400).json({ error: 'رابط غير مسموح' });
@@ -48,6 +49,7 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(200).send(buf);
   } catch (e) {
+    if (typeof console !== "undefined") console.warn("[gh]", e && e.message);
     return res.status(502).json({ error: 'تعذّر جلب الصورة' });
   }
 }
