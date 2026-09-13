@@ -1311,7 +1311,7 @@ function TechpackView({ tp, preview }) {
   const calloutMap = pruneCallouts(tp.calloutMap, materials);
   const auditIssues = auditTechpack(tp, materials, measurements);
   const sewLabels = tp.sewingDetailLabels || [];
-  const detailViews = tp.detailViews || [];
+  const detailViews = visibleDetails(tp.detailViews);
   const artwork = tp.artwork || [];
   const construction = tp.construction || [];
   const sewingSteps = tp.sewingSteps || [];
@@ -1457,7 +1457,11 @@ function TechpackView({ tp, preview }) {
 
   pages.push(['DETAILED VIEWS', (
     <>
-      <RefCrops image={preview} areas={detailViews.map((d) => d.area)} anchors={buildAnchors(measurements, meta.sampleSize, 'front')} />
+      <RefCrops
+        frontImage={proxied(tp.coloredFrontImage)}
+        backImage={proxied(tp.coloredBackImage)}
+        items={detailViews}
+        anchors={buildAnchors(measurements, meta.sampleSize, 'front')} />
       {detailViews.length > 0 && (
         <table className="tp-table" style={{ marginTop: '1rem' }}>
           <thead><tr><th className="ltr left-h">AREA</th><th className="ltr left-h">DETAIL</th><th className="ltr left-h">SPEC</th></tr></thead>
@@ -1477,7 +1481,16 @@ function TechpackView({ tp, preview }) {
 
   if (artwork.length > 0) {
     pages.push(['ARTWORK DETAILS', (
-      <table className="tp-table">
+      <>
+      {/* لقطات الزخرفة تُقتطع من الرسمة الملوّنة نفسها — بلا توليد إضافي.
+          النموذج المرجعي يعرض هذه الصفحة كصور زخرفة مع ملاحظات، لا كجدول
+          مجرّد؛ والمصنع يحتاج أن يرى العنصر لا أن يقرأ عنه فقط. */}
+      <RefCrops
+        frontImage={proxied(tp.coloredFrontImage)}
+        backImage={proxied(tp.coloredBackImage)}
+        items={artwork.map((a) => ({ area: a.name, view: a.view || 'front' }))}
+        anchors={buildAnchors(measurements, meta.sampleSize, 'front')} />
+      <table className="tp-table" style={{ marginTop: '1rem' }}>
         <thead><tr><th className="ltr left-h">ELEMENT</th><th className="ltr left-h">PLACEMENT</th><th className="ltr left-h">SIZE</th><th className="ltr left-h">TECHNIQUE</th><th className="ltr left-h">NOTES</th></tr></thead>
         <tbody>
           {artwork.map((a, i) => (
@@ -1491,6 +1504,7 @@ function TechpackView({ tp, preview }) {
           ))}
         </tbody>
       </table>
+      </>
     )]);
   }
 
@@ -2183,25 +2197,63 @@ function AnnotatedPair({ frontImage, backImage, mode, front, back, measurements,
 // فكان كل ما لا يطابقها يسقط على قصّات ثابتة عشوائية.
 const DEFAULT_CROPS = ['50% 12%', '50% 26%', '50% 40%', '50% 58%', '50% 74%', '50% 90%'];
 
-function RefCrops({ image, areas, anchors }) {
-  if (!image) return <div className="tp-img-ph" style={{ aspectRatio: '4/3' }}></div>;
-  const list = (areas && areas.length ? areas : []).slice(0, 6);
-  while (list.length < 6) list.push('');
-  const posFor = (name, i) => {
-    // المعلم التشريحي يُستخرج من اسم المنطقة، ثم يُحوَّل إلى نسبة من جدول القياسات
-    const lm = landmarkOf(name, true);
+
+// تنقية تفاصيل DETAILED VIEWS.
+// اللقطات تُقتطع من رسمة مسطّحة، فما لا يُرى فيها لا يصلح لقطةً: السحاب
+// المخفي، الدرزات والبطانة والدعامات الداخلية. البرومبت يمنعها، وهذا
+// المرشّح يجعل المنع حتمياً بالكود لا رجاءً للنموذج.
+const HIDDEN_DETAIL = /invisible\s*zip|concealed|hidden|inner|interior|internal|lining(?!\s*hem)|understitch|boning|interfac|stay\s*tape|seam\s*allowance|bone\s*channel|facing\b|serge|overlock|basting/i;
+
+function visibleDetails(list) {
+  const arr = Array.isArray(list) ? list : [];
+  const kept = arr.filter((d) => {
+    const hay = [d && d.area, d && d.detail].filter(Boolean).join(' ');
+    return hay && !HIDDEN_DETAIL.test(hay);
+  });
+  return kept.length ? kept : arr;   // لا تُفرَّغ الصفحة إن رُفض كل شيء
+}
+
+function RefCrops({ frontImage, backImage, items, anchors }) {
+  // تُقتطع اللقطات من الرسمة الملوّنة لا من صورة التصميم: صورة التصميم
+  // تضم رأس العارضة، فأي لقطة من أعلاها تُخرج وجهاً بدل تفصيل القطعة.
+  // الرسمة المسطّحة لا رأس فيها ولا جسم، فكل لقطة تقع على القماش.
+  if (!frontImage && !backImage) {
+    return <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '4/3' }}>
+      <span>الرسمة الملوّنة غير متوفّرة — تُقتطع منها لقطات التفاصيل</span>
+    </div>;
+  }
+  // تُعرض التفاصيل الموجودة فقط: حشو المربعات الفارغة كان يُخرج لقطات
+  // بلا تسمية على الصفحة.
+  const list = (items && items.length ? items : []).slice(0, 6);
+  if (!list.length) {
+    return <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '4/3' }}>
+      <span>لا تفاصيل مرئية لعرضها</span>
+    </div>;
+  }
+
+  const posFor = (it, i) => {
+    const lm = landmarkOf(it && it.area, true);
     if (lm && anchors && anchors[lm] != null && anchors.__total) {
-      const y = Math.max(4, Math.min(96, (anchors[lm] / anchors.__total) * 100));
+      const y = Math.max(6, Math.min(94, (anchors[lm] / anchors.__total) * 100));
       return '50% ' + Math.round(y) + '%';
     }
     return DEFAULT_CROPS[i % DEFAULT_CROPS.length];
   };
+
+  // كل لقطة تُقتطع من منظرها الفعلي: تفصيل خلفي من الرسمة الخلفية
+  const srcFor = (it) => {
+    const wantBack = it && String(it.view || '').toLowerCase() === 'back';
+    if (wantBack && backImage) return backImage;
+    return frontImage || backImage;
+  };
+
   return (
     <div className="tp-crops">
-      {list.map((name, i) => (
+      {list.map((it, i) => (
         <div className="tp-crop" key={i}>
-          <div className="tp-crop-img" style={{ backgroundImage: 'url(' + image + ')', backgroundPosition: posFor(name, i) }}></div>
-          {name ? <div className="tp-crop-cap">{name}</div> : null}
+          <div className="tp-crop-img"
+            style={{ backgroundImage: 'url(' + srcFor(it) + ')', backgroundPosition: posFor(it, i) }}></div>
+          {it && it.area ? <div className="tp-crop-cap">{it.area}</div> : null}
         </div>
       ))}
     </div>
@@ -2622,7 +2674,10 @@ function StyleBlock() {
       .tp-crops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; direction: ltr; }
       @media (max-width: 600px) { .tp-crops { grid-template-columns: repeat(2, 1fr); } }
       .tp-crop { border: 1px solid #e5e5e5; border-radius: 6px; overflow: hidden; background: #fff; }
-      .tp-crop-img { width: 100%; aspect-ratio: 1; background-size: 340%; background-repeat: no-repeat; }
+      /* التكبير مضبوط للرسمة المسطّحة: القطعة فيها تشغل نحو ثلث العرض،
+         و340% كانت تُخرج بقعة قماش بلا سياق. 190% تُظهر التفصيل مع محيطه. */
+      .tp-crop-img { width: 100%; aspect-ratio: 1; background-size: 190%;
+        background-repeat: no-repeat; background-color: #fff; }
       .tp-crop-cap { text-align: center; font-size: 0.62rem; font-weight: 700; color: #333; padding: 0.35rem 0.3rem; direction: ltr; border-top: 1px solid #eee; }
 
       /* الجداول */
