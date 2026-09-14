@@ -43,6 +43,84 @@ async function downloadFlat(url, baseName) {
   }
 }
 
+
+// مسافة لونية ومحوّل hex — معرّفان هنا لأنهما يُستخدمان في دوال أعلى الملف
+const cDist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+const toHex = (c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+
+// سحب أغلب ألوان التصميم من بكسلات الصورة قبل توليد صور الخامات،
+// حتى تُولَّد كل خامة بلون القطعة الحقيقي لا بلون خمّنه النموذج.
+async function sampleDesignColors(objectUrl, maxColors) {
+  try {
+    const img = await new Promise((res, rej) => {
+      const im = new window.Image();
+      im.onload = () => res(im);
+      im.onerror = () => rej(new Error('load'));
+      im.src = objectUrl;
+    });
+    const W = 200;
+    const H = Math.max(60, Math.round((img.height / img.width) * W));
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, W, H);
+    const data = ctx.getImageData(0, 0, W, H).data;
+
+    const bag = new Map();
+    const push = (x, y) => {
+      const i = (y * W + x) * 4;
+      const k = (data[i] >> 4) + ',' + (data[i + 1] >> 4) + ',' + (data[i + 2] >> 4);
+      const e = bag.get(k) || { n: 0, s: [0, 0, 0] };
+      e.n++; e.s[0] += data[i]; e.s[1] += data[i + 1]; e.s[2] += data[i + 2];
+      bag.set(k, e);
+    };
+    for (let x = 0; x < W; x++) { push(x, 0); push(x, H - 1); }
+    for (let y = 0; y < H; y++) { push(0, y); push(W - 1, y); }
+    let bg = [255, 255, 255], best = null;
+    bag.forEach((e) => { if (!best || e.n > best.n) best = e; });
+    if (best) bg = best.s.map((v) => v / best.n);
+
+    const pts = [];
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 200) continue;
+      const p = [data[i], data[i + 1], data[i + 2]];
+      if (cDist(p, bg) < 70) continue;
+      if (Math.max(p[0], p[1], p[2]) < 28) continue;
+      if (Math.min(p[0], p[1], p[2]) > 238) continue;
+      pts.push(p);
+    }
+    return clusterColors(pts, maxColors || 6)
+      .map((x) => ({ hex: toHex(x.rgb), share: Math.round(x.share * 1000) / 10 }));
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[gh] sample', e && e.message);
+    return [];
+  }
+}
+
+
+// أقرب لون مسحوب فعلياً للون الذي خمّنه النموذج: يبقى وصف الجزء صحيحاً
+// ويصبح كود اللون مضبوطاً.
+function nearestSampled(guessHex, sampled) {
+  if (!Array.isArray(sampled) || !sampled.length) return '';
+  const valid = sampled.filter((x) => x && /^#?[0-9a-f]{6}$/i.test(String(x.hex || '')));
+  if (!valid.length) return '';
+  sampled = valid;
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(guessHex || ''));
+  if (!m) return sampled[0].hex;
+  const v = parseInt(m[1], 16);
+  const g = [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  let best = null, bd = Infinity;
+  sampled.forEach((sc) => {
+    // لون مستخرج تالف يُنتج NaN فتنهار المقارنة بصمت ويخرج لون غلط للخامة
+    const mm = /^#?([0-9a-f]{6})$/i.exec(String((sc && sc.hex) || ''));
+    if (!mm) return;
+    const n2 = parseInt(mm[1], 16);
+    const d = cDist(g, [(n2 >> 16) & 255, (n2 >> 8) & 255, n2 & 255]);
+    if (d < bd) { bd = d; best = sc; }
+  });
+  return best ? best.hex : '';
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState('moodboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -143,9 +221,11 @@ export default function Home() {
 
   useEffect(() => {
     const savedUser = localStorage.getItem('gh_user');
-    if (savedUser) setUser(JSON.parse(savedUser));
-    const savedUsage = localStorage.getItem('gh_usage');
-    if (savedUsage) setUsageCount(parseInt(savedUsage));
+    // قراءة التخزين محميّة: قيمة تالفة كانت تُنتج NaN فينكسر العدّاد بصمت
+    try { if (savedUser) setUser(JSON.parse(savedUser)); }
+    catch (e) { if (typeof console !== 'undefined') console.warn('[gh] user', e && e.message); }
+    const savedUsage = parseInt(localStorage.getItem('gh_usage'), 10);
+    if (Number.isFinite(savedUsage) && savedUsage >= 0) setUsageCount(savedUsage);
   }, []);
 
   // مجموعات السايدبار — مرتبة مثل المنصات الاحترافية
@@ -388,6 +468,8 @@ export default function Home() {
       setTpStage('جارٍ توليد صور التيك باك… (قد يستغرق حتى 4 دقائق)');
       let images = {};
       let imgError = '';
+      // تُسحب قبل إرسال الخامات لتُولَّد صورها بلون التصميم الحقيقي
+      const sampled = await sampleDesignColors(tpPreview, 6);
       try {
         const fd2 = new FormData();
         fd2.append('image', tpImage);
@@ -408,7 +490,10 @@ export default function Home() {
           colorway: d.colorway || [],
           detailAreas: (d.detailViews || []).map((x) => x.area),
           materials: (d.materials || []).map((m) => ({
-            name: m.name, pantone: m.pantone, hex: m.hex, photoPrompt: m.photoPrompt,
+            name: m.name, pantone: m.pantone,
+            // اللون الحقيقي من بكسلات التصميم يسبق تخمين النموذج
+            hex: nearestSampled(m.hex, sampled) || m.hex,
+            photoPrompt: m.photoPrompt,
           })),
         }));
         const r2 = await fetch('/api/techpack-images', { method: 'POST', body: fd2 });
@@ -428,7 +513,7 @@ export default function Home() {
       }
 
       if (imgError) setTpError(imgError);
-      // عرض النتيجة مرة واحدة كاملة
+      // عرض النتيجة مرة واحدة كاملة — الصور بروابط دائمة من الخادم
       setTechpack({ ...d, ...images });
       incrementUsage();
     } catch { setTpError('خطأ في الاتصال، حاولي مرة ثانية'); }
@@ -643,13 +728,13 @@ export default function Home() {
                       </div>
                       <div className="board-collage">
                         <div className="collage-hero" onClick={() => downloadImage(moodBoard.heroImage, 0)} title="اضغطي لحفظ الصورة">
-                          <img src={moodBoard.heroImage} alt="hero" crossOrigin="anonymous" />
+                          <img src={moodBoard.heroImage} alt="hero" />
                           <span className="save-badge">حفظ</span>
                         </div>
                         <div className="collage-tiles">
                           {moodImgs.map((img, i) => (
                             <div className="collage-tile" key={i} onClick={() => downloadImage(img, i + 1)} title="اضغطي لحفظ الصورة">
-                              <img src={img} alt={`mood-${i}`} crossOrigin="anonymous" />
+                              <img src={img} alt={`mood-${i}`} />
                               <span className="save-badge">حفظ</span>
                             </div>
                           ))}
@@ -742,7 +827,7 @@ export default function Home() {
                 {studioResult && (
                   <div className="studio-result">
                     <div className="studio-img" onClick={() => downloadImage(studioResult.imageUrl, 0)} title="اضغطي لحفظ الصورة">
-                      <img src={studioResult.imageUrl} alt="design" crossOrigin="anonymous" />
+                      <img src={studioResult.imageUrl} alt="design" />
                       <span className="save-badge">حفظ</span>
                     </div>
                     <div className="studio-prompt">
@@ -793,7 +878,7 @@ export default function Home() {
                     <div className="flat-pair">
                       <div className="flat-view">
                         {flatColorFront
-                          ? <img src={proxied(flatColorFront)} alt="colored front" crossOrigin="anonymous" />
+                          ? <img src={flatColorFront} alt="colored front" />
                           : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
                         <div className="flat-cap">FRONT</div>
                         {flatColorFront && (
@@ -803,7 +888,7 @@ export default function Home() {
                       </div>
                       <div className="flat-view">
                         {flatColorBack
-                          ? <img src={proxied(flatColorBack)} alt="colored back" crossOrigin="anonymous" />
+                          ? <img src={flatColorBack} alt="colored back" />
                           : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
                         <div className="flat-cap">BACK</div>
                         {flatColorBack && (
@@ -817,7 +902,7 @@ export default function Home() {
                     <div className="flat-pair">
                       <div className="flat-view">
                         {flatFront
-                          ? <img src={proxied(flatFront)} alt="line front" crossOrigin="anonymous" />
+                          ? <img src={flatFront} alt="line front" />
                           : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
                         <div className="flat-cap">FRONT</div>
                         {flatFront && (
@@ -827,7 +912,7 @@ export default function Home() {
                       </div>
                       <div className="flat-view">
                         {flatBack
-                          ? <img src={proxied(flatBack)} alt="line back" crossOrigin="anonymous" />
+                          ? <img src={flatBack} alt="line back" />
                           : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
                         <div className="flat-cap">BACK</div>
                         {flatBack && (
@@ -1216,7 +1301,7 @@ function buildVideoPrompt(videoType, mood, text, hasImage) {
 // (اشتقاق الرسمة الخطية وكشف حدود القطعة) ويضمن نجاح حفظ التيك باك كصورة.
 function proxied(url) {
   if (!url || typeof url !== 'string') return url;
-  if (!/^https:\/\/([a-z0-9-]+\.)*(replicate\.delivery|api\.replicate\.com)\//i.test(url)) return url;
+  if (!/^https:\/\/([a-z0-9-]+\.)*(replicate\.delivery|api\.replicate\.com|blob\.vercel-storage\.com|public\.blob\.vercel-storage\.com)\//i.test(url)) return url;
   return '/api/img?u=' + encodeURIComponent(url);
 }
 
@@ -1271,17 +1356,25 @@ function auditTechpack(tp, materials, measurements) {
 }
 
 function TechpackView({ tp, preview }) {
+  // كود ستايل احتياطي مشتقّ من الاسم والتاريخ: الفراغ في هذا الحقل يعني
+  // أن المصنع لا يملك مرجعاً يربط به الصفحات والعيّنات.
+  const fallbackStyleCode = () => {
+    const base = String(tp.garmentName || 'STYLE').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) || 'STYLE';
+    const d = (tp.generatedAt || new Date().toISOString()).slice(2, 10).replace(/-/g, '');
+    return 'STY_' + base + '_' + d;
+  };
+
   const meta = {
-    styleCode: tp.styleCode,
-    garmentName: tp.garmentName,
-    season: tp.season,
+    styleCode: tp.styleCode || fallbackStyleCode(),
+    garmentName: tp.garmentName || 'Untitled Design',
+    season: tp.season || '—',
     sampleSize: tp.sampleSize || '6',
     sizeRange: tp.sizeRange || '2 - 12',
-    category: tp.category,
+    category: tp.category || 'Apparel',
     fabricSummary: tp.fabricSummary || '',
     brandName: tp.brandName || 'BRAND NAME',   // موضع تملؤه العميلة
     version: 'v0',
-    date: (tp.generatedAt || '').slice(0, 10),
+    date: (tp.generatedAt || new Date().toISOString()).slice(0, 10),
     preview,
   };
 
@@ -1352,7 +1445,7 @@ function TechpackView({ tp, preview }) {
       {list.map((m, i) => (
         <div className="tp-matcard" key={i}>
           {matPhotos[offset + i]
-            ? <img src={proxied(matPhotos[offset + i])} alt={m.name} crossOrigin="anonymous" />
+            ? <img src={matPhotos[offset + i]} alt={m.name} />
             : <div className="tp-matcard-ph"></div>}
           <div className="tp-matcard-body">
             <div className="tp-matcard-name">{m.name}</div>
@@ -1371,7 +1464,7 @@ function TechpackView({ tp, preview }) {
   pages.push(['REFERENCE IMAGES', (
     <div className="tp-ref-frame">
       {preview
-        ? <img src={preview} alt="design reference" crossOrigin="anonymous" />
+        ? <img src={preview} alt="design reference" />
         : <div className="tp-img-ph" style={{ aspectRatio: '3/4' }}></div>}
     </div>
   )]);
@@ -1380,7 +1473,7 @@ function TechpackView({ tp, preview }) {
     <div className="tp-spec-frame">
       <div className="tp-spec-title">GARMENT SPEC SHEET — {(tp.garmentName || '').toUpperCase()}</div>
       <div className="tp-spec-key">Garment Details: <b>BLACK</b>; <span className="red">Measurement Lines and Labels: RED</span></div>
-      <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={proxied(tp.lineFrontImage)} backImage={proxied(tp.lineBackImage)} mode="measure"
+      <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={tp.lineFrontImage} backImage={tp.lineBackImage} mode="measure"
         front={specLabels.front || []} back={specLabels.back || []} />
     </div>
   )]);
@@ -1395,7 +1488,7 @@ function TechpackView({ tp, preview }) {
   });
 
   pages.push(['MATERIALS CALLOUT', (
-    <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={proxied(tp.lineFrontImage)} backImage={proxied(tp.lineBackImage)} mode="callout"
+    <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={tp.lineFrontImage} backImage={tp.lineBackImage} mode="callout"
       front={calloutMap.filter((c) => (c.view || 'front') !== 'back')}
       back={calloutMap.filter((c) => c.view === 'back')} />
   )]);
@@ -1424,7 +1517,7 @@ function TechpackView({ tp, preview }) {
   )]);
 
   pages.push(['SEWING DETAILS', (
-    <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={proxied(tp.lineFrontImage)} backImage={proxied(tp.lineBackImage)} mode="sewing"
+    <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={tp.lineFrontImage} backImage={tp.lineBackImage} mode="sewing"
       front={sewLabels.filter((s) => (s.view || 'front') !== 'back')}
       back={sewLabels.filter((s) => s.view === 'back')} />
   )]);
@@ -1433,8 +1526,8 @@ function TechpackView({ tp, preview }) {
     <div className="tp-colorways">
       <div className="tp-img-frame">
         <div className="tp-pair">
-          <div className="tp-view">{(tp.coloredFrontImage || tp.lineFrontImage) ? <img src={proxied(tp.coloredFrontImage || tp.lineFrontImage)} alt="front colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">FRONT</div></div>
-          <div className="tp-view">{(tp.coloredBackImage || tp.lineBackImage) ? <img src={proxied(tp.coloredBackImage || tp.lineBackImage)} alt="back colorway" crossOrigin="anonymous" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">BACK</div></div>
+          <div className="tp-view">{(tp.coloredFrontImage || tp.lineFrontImage) ? <img src={tp.coloredFrontImage || tp.lineFrontImage} alt="front colorway" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">FRONT</div></div>
+          <div className="tp-view">{(tp.coloredBackImage || tp.lineBackImage) ? <img src={tp.coloredBackImage || tp.lineBackImage} alt="back colorway" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">BACK</div></div>
         </div>
       </div>
       <div>
@@ -1458,8 +1551,8 @@ function TechpackView({ tp, preview }) {
   pages.push(['DETAILED VIEWS', (
     <>
       <RefCrops
-        frontImage={proxied(tp.coloredFrontImage)}
-        backImage={proxied(tp.coloredBackImage)}
+        frontImage={tp.coloredFrontImage}
+        backImage={tp.coloredBackImage}
         items={detailViews}
         anchors={buildAnchors(measurements, meta.sampleSize, 'front')} />
       {detailViews.length > 0 && (
@@ -1486,8 +1579,8 @@ function TechpackView({ tp, preview }) {
           النموذج المرجعي يعرض هذه الصفحة كصور زخرفة مع ملاحظات، لا كجدول
           مجرّد؛ والمصنع يحتاج أن يرى العنصر لا أن يقرأ عنه فقط. */}
       <RefCrops
-        frontImage={proxied(tp.coloredFrontImage)}
-        backImage={proxied(tp.coloredBackImage)}
+        frontImage={tp.coloredFrontImage}
+        backImage={tp.coloredBackImage}
         items={artwork.map((a) => ({ area: a.name, view: a.view || 'front' }))}
         anchors={buildAnchors(measurements, meta.sampleSize, 'front')} />
       <table className="tp-table" style={{ marginTop: '1rem' }}>
@@ -1600,7 +1693,7 @@ function useImgBox(image) {
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
-        const W = 140;
+        const W = 140;   // قراءة مصغّرة تكفي لكشف حدود القطعة
         const H = Math.max(60, Math.round((img.height / img.width) * W));
         const c = document.createElement('canvas');
         c.width = W; c.height = H;
@@ -1627,7 +1720,9 @@ function useImgBox(image) {
       } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); if (!cancelled) setBox(null); }
     };
     img.onerror = () => { if (!cancelled) setBox(null); };
-    img.src = image;
+    // مسار القراءة وحده يمرّ بالوسيط لأن canvas يحتاج رؤوس CORS.
+    // فشل القراءة لا يكسر العرض: يسقط إلى إطار افتراضي فقط.
+    img.src = proxied(image);
     return () => { cancelled = true; };
   }, [image]);
   return box;
@@ -1690,8 +1785,6 @@ function nearestPantone(hex) {
   return { code: best.code + ' TCX', name: best.name, hex: best.hex, deltaE: Math.round(bestD * 10) / 10 };
 }
 
-const cDist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
-const toHex = (c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
 
 // تجميع بلا اختراع: كل مركز هو متوسط بكسلات حقيقية من الصورة
 function clusterColors(points, k) {
@@ -2060,13 +2153,13 @@ const MAT_REQUIRED = [
 // الخرز واللؤلؤ والدانتيل: تُضاف فقط إن رآها التحليل في التصميم
 const MAT_CUES = [
   [/\bpearl/i, { name: 'Pearl embellishments', placement: 'Hand-applied over the embellished areas of the design',
-    description: 'Round glass or resin pearls in mixed sizes, hand-stitched with fine beading thread', qty: '', unit: 'pcs',
+    description: 'Round glass or resin pearls in mixed sizes, hand-stitched with fine beading thread', qty: '500', unit: 'pcs',
     photoPrompt: 'Professional studio product photograph of loose round pearls in mixed sizes scattered on fabric, macro detail, soft even lighting, photorealistic. No watermark.' }],
   [/\bbead|beading|beaded/i, { name: 'Bead embellishments', placement: 'Hand-applied over the embellished areas of the design',
-    description: 'Glass seed and bugle beads in mixed sizes, hand-stitched with fine beading thread', qty: '', unit: 'pcs',
+    description: 'Glass seed and bugle beads in mixed sizes, hand-stitched with fine beading thread', qty: '800', unit: 'pcs',
     photoPrompt: 'Professional studio product photograph of loose glass seed and bugle beads scattered on fabric, macro detail, soft even lighting, photorealistic. No watermark.' }],
   [/\blace\b|guipure|chantilly|broderie/i, { name: 'Lace fabric', placement: 'Panels and edges where lace appears on the design',
-    description: 'Corded lace on fine net ground, colour matched to the design', qty: '', unit: 'm',
+    description: 'Corded lace on fine net ground, colour matched to the design', qty: '1.5', unit: 'm',
     photoPrompt: 'Professional studio product photograph of a piece of corded lace fabric on plain background, macro detail showing the net ground, soft even lighting, photorealistic. No watermark.' }],
 ];
 
@@ -2099,7 +2192,16 @@ function normalizeMaterials(raw, cues, hex, pantone) {
       return { ...m, photoPrompt: m.photoPrompt.replace(/\.\s*No\s+watermark/i, ', exact colour ' + tint + '. No watermark') };
     });
   }
-  return list.map((m, i) => ({ ...m, num: i + 1 }));
+  // لا بند بلا كمية: الشرطة في البوم تعني أن المصنع لا يعرف كم يشتري.
+  // التقدير مبدئي حسب الوحدة، والمصممة تعدّله.
+  const fallbackQty = (u) => (
+    { pcs: '500', pc: '1', m: '1.5', g: '200', set: '1', spool: '3', yd: '1.5' }[String(u || '').toLowerCase()] || '1');
+  return list.map((m, i) => ({
+    ...m,
+    qty: (m.qty === '' || m.qty == null) ? fallbackQty(m.unit) : m.qty,
+    unit: m.unit || 'pc',
+    num: i + 1,
+  }));
 }
 
 // كل رقم كول أوت يجب أن يشير إلى خامة موجودة فعلاً
@@ -2141,7 +2243,7 @@ function AnnotatedView({ image, mode, items, caption, labelSide, measurements, s
   return (
     <div className="tp-view">
       <div className="tp-anno">
-        <img src={image} alt={caption} crossOrigin="anonymous" />
+        <img src={image} alt={caption} />
 
         {mode === 'measure' && rows.map((r, i) => (
           <div className={'tp-m-wrap' + (r.uncomputed ? ' uncomputed' : '')} key={'m' + i} style={{ top: r.top + '%', left: box.left + '%', width: bw + '%' }}>
@@ -2272,7 +2374,7 @@ function TpPage({ n, total, title, children }) {
       <div className="tp-hd">
         <div className="tp-hd-left">
           {meta.preview
-            ? <img src={meta.preview} alt="" className="tp-hd-thumb" crossOrigin="anonymous" />
+            ? <img src={meta.preview} alt="" className="tp-hd-thumb" />
             : <div className="tp-hd-thumb ph"></div>}
           <div>
             <div className="tp-hd-code">{meta.styleCode}</div>
