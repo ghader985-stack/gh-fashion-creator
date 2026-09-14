@@ -9,6 +9,8 @@ const ALLOWED_HOSTS = [
   'replicate.delivery',
   'pbxt.replicate.delivery',
   'api.replicate.com',
+  'blob.vercel-storage.com',        // التخزين الدائم للصور
+  'public.blob.vercel-storage.com',
 ];
 
 export const config = {
