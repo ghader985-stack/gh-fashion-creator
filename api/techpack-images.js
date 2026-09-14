@@ -12,6 +12,7 @@
 // المخرجات: { coloredFrontImage, coloredBackImage, lineFrontImage, lineBackImage, materialPhotos: [...] }
 
 import formidable from 'formidable';
+import { put } from '@vercel/blob';
 import fs from 'fs';
 
 export const config = {
@@ -125,6 +126,40 @@ const generateImage = (prompt, aspectRatio, token) =>
 // بوابة تحقّق على الناتج: نقرأ بكسلات الصورة ونحكم إن كانت رسمة خطية فعلاً
 // (تشبّع لون منخفض ونسبة بيضاء عالية). إن فشلت، يُعاد التوليد ببرومبت أصرم.
 
+
+
+// ---------------------------------------------------------------------------
+// حفظ صورة في التخزين الدائم وإرجاع رابط عام.
+// السبب: روابط Replicate مؤقتة وروابط المتصفح المحلية تموت بإغلاق التبويب،
+// فلا تُعرض لأي مستخدمة أخرى ولا تُحفظ داخل الـ PDF. Blob يعطي رابطاً ثابتاً.
+// عند غياب التوكن أو فشل الحفظ يعود الرابط الأصلي كما هو، فلا يتعطّل التوليد.
+async function persist(input, name, mediaType) {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return typeof input === 'string' ? input : null;
+  }
+  try {
+    let body = input;
+    let type = mediaType || 'image/jpeg';
+    if (typeof input === 'string') {
+      if (!/^https?:\/\//i.test(input)) return input;
+      const r = await withTimeout(fetch(input), 25000);
+      if (!r.ok) return input;
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.startsWith('image/')) return input;
+      type = ct.split(';')[0];
+      body = Buffer.from(await r.arrayBuffer());
+    }
+    const ext = ({ 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' })[type] || 'jpg';
+    const key = 'techpack/' + Date.now() + '-' + Math.random().toString(36).slice(2, 9) + '-' + name + '.' + ext;
+    const res = await withTimeout(
+      put(key, body, { access: 'public', contentType: type, addRandomSuffix: false }),
+      25000);
+    return (res && res.url) || (typeof input === 'string' ? input : null);
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[gh] persist', e && e.message);
+    return typeof input === 'string' ? input : null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // فحص المخرجات بصرياً.
@@ -402,25 +437,35 @@ export default async function handler(req, res) {
     catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); uploadedUrl = null; }
 
     // رفع الرسمات الأربع معاً للحصول على روابط تُعرَض في التيك باك
-    const uploadFlat = async (f) => {
-      if (!f) return null;
+    // كل رسمة تُحفظ في التخزين الدائم للعرض، وتُرفع إلى Replicate لتكون
+    // مدخلاً للنماذج. الأول للمتصفح والثاني للتوليد، ولا يغني أحدهما عن الآخر.
+    const uploadFlat = async (f, name) => {
+      if (!f) return { display: null, model: null };
       try {
         const buf = fs.readFileSync(f.filepath);
         const mt = detectImageType(buf);
-        return await withTimeout(uploadToReplicate(buf, mt, replicateToken), 20000);
+        const [display, model] = await Promise.all([
+          persist(buf, name, mt),
+          withTimeout(uploadToReplicate(buf, mt, replicateToken), 20000).catch(() => null),
+        ]);
+        return { display: display || null, model: model || null };
       } catch (e) {
         if (typeof console !== "undefined") console.warn("[gh] flat upload", e && e.message);
-        return null;
+        return { display: null, model: null };
       }
     };
     const [upLf, upLb, upCf, upCb] = await Promise.all([
-      uploadFlat(flatFiles.lf), uploadFlat(flatFiles.lb),
-      uploadFlat(flatFiles.cf), uploadFlat(flatFiles.cb),
+      uploadFlat(flatFiles.lf, 'line-front'), uploadFlat(flatFiles.lb, 'line-back'),
+      uploadFlat(flatFiles.cf, 'color-front'), uploadFlat(flatFiles.cb, 'color-back'),
     ]);
-    const approvedFront = upLf || '';
-    const approvedBack = upLb || '';
-    const approvedColorFront = upCf || '';
-    const approvedColorBack = upCb || '';
+    // روابط العرض الدائمة تُرجَع للواجهة؛ روابط النماذج تدخل سلسلة التوليد
+    const shownFlats = {
+      lf: upLf.display, lb: upLb.display, cf: upCf.display, cb: upCb.display,
+    };
+    const approvedFront = upLf.model || upLf.display || '';
+    const approvedBack = upLb.model || upLb.display || '';
+    const approvedColorFront = upCf.model || upCf.display || '';
+    const approvedColorBack = upCb.model || upCb.display || '';
 
     // ------------------------------------------------------------------
     // التنفيذ عبر المجمّع: 3 Kontext + صورة لكل خامة، بحد 4 متزامنة
@@ -512,12 +557,19 @@ export default async function handler(req, res) {
     // ما لا تطلبه هذه الخطوة.
     if (flatOnly) {
       const chain = await chainPromise;
-      const got = [chain.cf, chain.cb, chain.lf, chain.lb].filter(Boolean).length;
+      // روابط دائمة: المصممة تنزّلها وترفعها في التيك باك لاحقاً
+      const [fcf, fcb, flf, flb] = await Promise.all([
+        chain.cf ? persist(chain.cf, 'flat-color-front') : Promise.resolve(null),
+        chain.cb ? persist(chain.cb, 'flat-color-back') : Promise.resolve(null),
+        chain.lf ? persist(chain.lf, 'flat-line-front') : Promise.resolve(null),
+        chain.lb ? persist(chain.lb, 'flat-line-back') : Promise.resolve(null),
+      ]);
+      const got = [fcf, fcb, flf, flb].filter(Boolean).length;
       return res.status(200).json({
-        coloredFrontImage: chain.cf || null,
-        coloredBackImage: chain.cb || null,
-        lineFrontImage: chain.lf || null,
-        lineBackImage: chain.lb || null,
+        coloredFrontImage: fcf,
+        coloredBackImage: fcb,
+        lineFrontImage: flf,
+        lineBackImage: flb,
         produced: got,
         error: got === 0 ? 'تعذّر توليد أي رسمة — حاولي مرة ثانية' : null,
       });
@@ -530,13 +582,24 @@ export default async function handler(req, res) {
     });
     const materialsPromise = runPool(materialTasks, CONCURRENCY);
 
-    const [chain, materialPhotos] = await Promise.all([chainPromise, materialsPromise]);
+    const [chain, rawMaterialPhotos] = await Promise.all([chainPromise, materialsPromise]);
+    // روابط نواتج Replicate مؤقتة وتنتهي: تُحفظ لتبقى في التيك باك والـ PDF
+    const materialPhotos = await Promise.all(
+      rawMaterialPhotos.map((u, i) => (u ? persist(u, 'material-' + (i + 1)) : Promise.resolve(null))));
+
+    // ما رفعته المصممة يُعرَض من رابطه الدائم؛ وما وُلِّد هنا يُحفظ قبل إرجاعه
+    const [outCf, outCb, outLf, outLb] = await Promise.all([
+      shownFlats.cf ? Promise.resolve(shownFlats.cf) : (chain.cf ? persist(chain.cf, 'color-front') : Promise.resolve(null)),
+      shownFlats.cb ? Promise.resolve(shownFlats.cb) : (chain.cb ? persist(chain.cb, 'color-back') : Promise.resolve(null)),
+      shownFlats.lf ? Promise.resolve(shownFlats.lf) : (chain.lf ? persist(chain.lf, 'line-front') : Promise.resolve(null)),
+      shownFlats.lb ? Promise.resolve(shownFlats.lb) : (chain.lb ? persist(chain.lb, 'line-back') : Promise.resolve(null)),
+    ]);
 
     return res.status(200).json({
-      coloredFrontImage: chain.cf || null,
-      coloredBackImage: chain.cb || null,
-      lineFrontImage: chain.lf || null,
-      lineBackImage: chain.lb || null,
+      coloredFrontImage: outCf || null,
+      coloredBackImage: outCb || null,
+      lineFrontImage: outLf || null,
+      lineBackImage: outLb || null,
       materialPhotos: materialPhotos.map((u) => u || null),
     });
   } catch (error) {
