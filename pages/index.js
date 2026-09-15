@@ -470,6 +470,16 @@ export default function Home() {
       let imgError = '';
       // تُسحب قبل إرسال الخامات لتُولَّد صورها بلون التصميم الحقيقي
       const sampled = await sampleDesignColors(tpPreview, 6);
+
+      // القائمة تُصحَّح مرة واحدة هنا: نفس القائمة تُولَّد صورها وتُعرض،
+      // فلا يختلف ما في الصورة عمّا هو مكتوب تحتها.
+      const designCues = [d.description, d.garmentFacts, d.flatSketchBrief, tpNotes,
+        (d.artwork || []).map((a) => [a.name, a.technique, a.description].join(' ')).join(' ')];
+      const fixedMaterials = normalizeMaterials(
+        (d.materials || []).map((m) => ({ ...m, hex: nearestSampled(m.hex, sampled) || m.hex })),
+        designCues, (sampled[0] && sampled[0].hex) || '',
+        (d.colorway && d.colorway[0] && d.colorway[0].pantone) || '',
+        extractBrandName(tpNotes), d.careInstructions || '');
       try {
         const fd2 = new FormData();
         fd2.append('image', tpImage);
@@ -484,16 +494,13 @@ export default function Home() {
           garmentFacts: d.garmentFacts || '',
           flatSketchBrief: d.flatSketchBrief || '',
           pieceCount: d.pieceCount || 1,
-          specSheetLabels: d.specSheetLabels || {},
-          calloutMap: d.calloutMap || [],
-          sewingDetailLabels: d.sewingDetailLabels || [],
+          // الليبلات وأرقام الكول أوت تُحسب في الواجهة ولا تدخل التوليد:
+          // إرسالها كان يزيد حجم الطلب بلا أي استعمال في الخلفية.
           colorway: d.colorway || [],
           detailAreas: (d.detailViews || []).map((x) => x.area),
-          materials: (d.materials || []).map((m) => ({
-            name: m.name, pantone: m.pantone,
-            // اللون الحقيقي من بكسلات التصميم يسبق تخمين النموذج
-            hex: nearestSampled(m.hex, sampled) || m.hex,
-            photoPrompt: m.photoPrompt,
+          materials: fixedMaterials.map((m) => ({
+            num: m.num, name: m.name, pantone: m.pantone,
+            hex: m.hex, photoPrompt: m.photoPrompt,
           })),
         }));
         const r2 = await fetch('/api/techpack-images', { method: 'POST', body: fd2 });
@@ -513,8 +520,8 @@ export default function Home() {
       }
 
       if (imgError) setTpError(imgError);
-      // عرض النتيجة مرة واحدة كاملة — الصور بروابط دائمة من الخادم
-      setTechpack({ ...d, ...images });
+      // عرض النتيجة مرة واحدة كاملة — بنفس القائمة التي وُلِّدت صورها
+      setTechpack({ ...d, ...images, materials: fixedMaterials });
       incrementUsage();
     } catch { setTpError('خطأ في الاتصال، حاولي مرة ثانية'); }
     setTpLoading(false);
@@ -1043,7 +1050,7 @@ export default function Home() {
                       حفظ PDF: النص يبقى نصاً — قابل للبحث والنسخ والطباعة بأي مقاس.
                       في نافذة الطباعة اختاري «حفظ كـ PDF».
                     </div>
-                    <TechpackView tp={techpack} preview={tpPreview} />
+                    <TechpackSheet tp={techpack} preview={tpPreview} />
                   </>
                 )}
               </div>
@@ -1355,6 +1362,348 @@ function auditTechpack(tp, materials, measurements) {
   return issues;
 }
 
+// ============================================================================
+// ورقة تيك باك بصفحة واحدة — على بنية نموذج RK Fashion.
+//
+// كل الصور من الأربع التي ترفعها المصممة: التصميم الملوّن أماماً وخلفاً،
+// والرسمة التقنية أماماً وخلفاً. لا توليد صور في هذه الورقة إطلاقاً:
+//   · لقطات DETAILS & CLOSE-UP تُقتطع من الصورة الملوّنة
+//   · CONSTRUCTION DETAILS تُبنى فوق الرسمة التقنية بليبلات محسوبة
+//   · مربعات الأقمشة والكولورواي سواتشات ملوّنة من بكسل التصميم
+// عدد الأقمشة والتريمات يتبع التصميم، لا رقماً ثابتاً.
+// ============================================================================
+
+// أيقونات العناية مرسومة بالكود: أشكال هندسية بسيطة لا صور مولّدة.
+function CareIcon({ kind }) {
+  const S = { width: 34, height: 34, viewBox: '0 0 40 40', fill: 'none',
+    stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  const cross = <><line x1="6" y1="8" x2="34" y2="32" /><line x1="34" y1="8" x2="6" y2="32" /></>;
+  if (kind === 'dryclean') return <svg {...S}><circle cx="20" cy="20" r="13" /></svg>;
+  if (kind === 'nowash') return <svg {...S}><path d="M5 14 L35 14 L31 31 L9 31 Z" /><path d="M5 14 Q12 8 20 13 Q28 18 35 14" />{cross}</svg>;
+  if (kind === 'nobleach') return <svg {...S}><path d="M20 7 L34 31 L6 31 Z" />{cross}</svg>;
+  if (kind === 'steamlow') return <svg {...S}><path d="M6 27 Q6 15 20 15 Q34 15 34 27 Z" /><circle cx="20" cy="23" r="1.4" fill="currentColor" stroke="none" /></svg>;
+  if (kind === 'noiron') return <svg {...S}><path d="M6 27 Q6 15 20 15 Q34 15 34 27 Z" />{cross}</svg>;
+  if (kind === 'notumble') return <svg {...S}><rect x="6" y="8" width="28" height="24" rx="2" /><circle cx="20" cy="20" r="8" />{cross}</svg>;
+  if (kind === 'hangbag') return <svg {...S}><path d="M20 8 L20 12" /><path d="M11 12 L29 12 L31 32 L9 32 Z" /><path d="M17 8 Q20 5 23 8" /></svg>;
+  return <svg {...S}><circle cx="20" cy="20" r="13" /></svg>;
+}
+
+// اشتقاق رموز العناية من الخامات الفعلية لا من نص عام
+function careIcons(materials) {
+  const hay = (materials || []).map((m) => [m.name, m.description].join(' ')).join(' ').toLowerCase();
+  const delicate = /bead|pearl|sequin|crystal|embroider|lace|tulle|silk|chiffon|organza|velvet|satin/.test(hay);
+  const out = [];
+  out.push(delicate
+    ? { kind: 'dryclean', label: ['DRY CLEAN', 'ONLY'] }
+    : { kind: 'dryclean', label: ['GENTLE', 'WASH'] });
+  out.push({ kind: 'nowash', label: ['DO NOT', 'WASH'] });
+  out.push({ kind: 'nobleach', label: ['DO NOT', 'BLEACH'] });
+  out.push(/bead|pearl|sequin|crystal|embroider/.test(hay)
+    ? { kind: 'noiron', label: ['DO NOT IRON', 'ON BEADING'] }
+    : { kind: 'steamlow', label: ['STEAM', 'LOW'] });
+  out.push({ kind: 'hangbag', label: ['STORE HANGING', 'IN GARMENT BAG'] });
+  return out;
+}
+
+// توزيع الخامات على أقمشة وتريمات — يتبع التصميم لا عدداً ثابتاً
+function splitFabricsTrims(materials) {
+  const isFabric = /fabric|shell|tulle|satin|silk|crepe|chiffon|organza|lace|mesh|lining|velvet|jacquard|taffeta|georgette|cotton|linen|wool|denim|twill/i;
+  const isTrim = /zipper|button|hook|snap|bead|pearl|crystal|sequin|piping|boning|elastic|tape|thread|label|interfacing|trim|clasp|buckle/i;
+  const fabrics = [], trims = [];
+  (materials || []).forEach((m) => {
+    const hay = [m.name, m.description].filter(Boolean).join(' ');
+    if (isTrim.test(m.name || '') && !/fabric$/i.test(m.name || '')) trims.push(m);
+    else if (isFabric.test(hay)) fabrics.push(m);
+    else trims.push(m);
+  });
+  return { fabrics, trims };
+}
+
+// استخراج التركيب النسيجي والوزن من وصف الخامة إن ذُكرا
+function fibreOf(desc) {
+  const m = /(\d{1,3}%\s*[A-Za-z]+(?:\s*,\s*\d{1,3}%\s*[A-Za-z]+)*)/.exec(String(desc || ''));
+  return m ? m[1] : '';
+}
+function gsmOf(desc) {
+  const m = /(\d{2,3})\s*[-–]?\s*(\d{2,3})?\s*gsm/i.exec(String(desc || ''));
+  return m ? (m[2] ? m[1] + '-' + m[2] + ' GSM' : m[1] + ' GSM') : '';
+}
+
+// القياسات تبقى بالسنتيمتر كما في بقية الأداة وكما تعمل المصممة
+const sizeVal = (cm) => (Number.isFinite(+cm) ? Math.round(+cm * 10) / 10 : null);
+const SHEET_SIZES = [
+  ['XS', '0-2'], ['S', '4-6'], ['M', '8-10'],
+  ['L', '12-14'], ['XL', '16-18'], ['XXL', '20-22'],
+];
+
+// صفوف جدول المقاسات: الخمسة التي يعرضها النموذج، مأخوذة من الجدول الكامل
+const SHEET_ROWS = [
+  ['BUST', /\bbust\s*width\b|\bchest\s*width\b/i],
+  ['WAIST', /\bwaist\s*width\b/i],
+  ['HIP', /\blow\s*hip\s*width\b|\bhip\s*width\b|\bseat\s*width\b/i],
+  ['FRONT LENGTH\n(SHOULDER TO HEM)', /center\s*front\s*length|\bfront\s*length\b/i],
+  ['BACK LENGTH\n(SHOULDER TO HEM)', /center\s*back\s*length|\bback\s*length\b/i],
+];
+
+function sheetSizeChart(measurements, sizeKeys) {
+  const rows = Array.isArray(measurements) ? measurements : [];
+  const keys = (sizeKeys && sizeKeys.length ? sizeKeys : GRADE_SIZES);
+  return SHEET_ROWS.map(([label, re]) => {
+    const hit = rows.find((r) => re.test(r.pom || ''));
+    const vals = keys.map((k) => {
+      if (!hit || !hit.sizes) return '—';
+      const v = sizeVal(hit.sizes[k]);
+      return v == null ? '—' : String(v);
+    });
+    return { label, vals };
+  });
+}
+
+function TechpackSheet({ tp, preview }) {
+  const alreadyFixed = Array.isArray(tp.materials) && tp.materials.length > 0 && tp.materials[0].num != null;
+  const designCues = [tp.description, tp.garmentFacts, tp.flatSketchBrief, tp.notes,
+    (tp.artwork || []).map((a) => [a.name, a.technique, a.description].join(' ')).join(' ')];
+  const materials = alreadyFixed
+    ? tp.materials
+    : normalizeMaterials(tp.materials, designCues, (tp.colorway || [])[0]?.hex, (tp.colorway || [])[0]?.pantone,
+        tp.brandName, tp.careInstructions);
+
+  const measurements = tp.measurements || [];
+  const extractedColors = useExtractedColors(preview || proxied(tp.coloredFrontImage), 6);
+  const colorway = mergeColorway(tp.colorway || [], extractedColors);
+  const { fabrics, trims } = splitFabricsTrims(materials);
+  const detailViews = visibleDetails(tp.detailViews);
+  const anchors = buildAnchors(measurements, tp.sampleSize || '6', 'front');
+  const icons = careIcons(materials);
+  const sizeRows = sheetSizeChart(measurements, GRADE_SIZES);
+
+  const styleCode = tp.styleCode || ('STY-' + (tp.generatedAt || '').slice(2, 10).replace(/-/g, ''));
+  const brand = tp.brandName || 'BRAND NAME';
+  const collection = tp.collectionName || tp.season || '';
+
+  const sewLabels = Array.isArray(tp.sewingDetailLabels) ? tp.sewingDetailLabels : [];
+
+  return (
+    <div id="techpack-canvas" className="sheet">
+      {/* ===== الهيدر ===== */}
+      <div className="sh-head">
+        <div className="sh-brand">
+          <div className="sh-brand-name">{brand}</div>
+          {collection ? <div className="sh-brand-sub">{collection}</div> : null}
+        </div>
+        <div className="sh-meta">
+          <div><span>STYLE NO.</span><b>{styleCode}</b></div>
+          <div><span>STYLE NAME</span><b>{tp.garmentName || '—'}</b></div>
+        </div>
+        <div className="sh-meta">
+          <div><span>SEASON</span><b>{tp.season || '—'}</b></div>
+          <div><span>CATEGORY</span><b>{tp.category || '—'}</b></div>
+          <div><span>DATE</span><b>{(tp.generatedAt || '').slice(0, 10)}</b></div>
+        </div>
+      </div>
+
+      {/* ===== الصف الأول: اللوك · الرسمة التقنية · التفاصيل ===== */}
+      <div className="sh-row sh-row-1">
+        <div className="sh-cell">
+          <div className="sh-corner">LOOK<br /><i>FRONT</i></div>
+          <div className="sh-look">
+            {tp.coloredFrontImage ? <img src={tp.coloredFrontImage} alt="look front" /> : <div className="sh-ph" />}
+          </div>
+          <div className="sh-corner sh-corner-b">BACK VIEW</div>
+          <div className="sh-look sh-look-sm">
+            {tp.coloredBackImage ? <img src={tp.coloredBackImage} alt="look back" /> : <div className="sh-ph" />}
+          </div>
+        </div>
+
+        <div className="sh-cell">
+          <div className="sh-title">TECHNICAL FLAT</div>
+          <div className="sh-flats">
+            <div className="sh-flat">
+              <div className="sh-cap">FRONT</div>
+              {tp.lineFrontImage ? <img src={tp.lineFrontImage} alt="flat front" /> : <div className="sh-ph" />}
+            </div>
+            <div className="sh-flat">
+              <div className="sh-cap">BACK</div>
+              {tp.lineBackImage ? <img src={tp.lineBackImage} alt="flat back" /> : <div className="sh-ph" />}
+            </div>
+          </div>
+        </div>
+
+        <div className="sh-cell">
+          <div className="sh-title">DETAILS &amp; CLOSE-UP</div>
+          <SheetCrops
+            frontImage={tp.coloredFrontImage}
+            backImage={tp.coloredBackImage}
+            items={detailViews.slice(0, 4)}
+            anchors={anchors} />
+        </div>
+      </div>
+
+      {/* ===== الصف الثاني: تفاصيل التصميم · الأقمشة والتريمات ===== */}
+      <div className="sh-row sh-row-2">
+        <div className="sh-cell sh-span2">
+          <div className="sh-title">DESIGN DETAILS</div>
+          <ul className="sh-bullets">
+            {(tp.designDetails && tp.designDetails.length
+              ? tp.designDetails
+              : (tp.construction || []).slice(0, 8).map((c) => c.description)
+            ).slice(0, 8).map((d, i) => <li key={'dd' + i}>{d}</li>)}
+          </ul>
+        </div>
+
+        <div className="sh-cell">
+          <div className="sh-title">FABRICS &amp; TRIMS</div>
+          <div className="sh-sub">FABRIC</div>
+          {fabrics.map((f, i) => (
+            <div className="sh-fab" key={'fb' + i}>
+              <div className="sh-fab-txt">
+                <b>{(f.name || '').toUpperCase()}</b>
+                {fibreOf(f.description) ? <span>({fibreOf(f.description)})</span> : null}
+                {gsmOf(f.description) ? <span>{gsmOf(f.description)}</span> : null}
+                <span>COLOR: {f.pantoneName || f.hex || '—'}</span>
+              </div>
+              <div className="sh-swatch" style={{ background: f.hex || '#ddd' }} />
+            </div>
+          ))}
+          {trims.length ? <div className="sh-sub">TRIMS</div> : null}
+          <div className="sh-trims">
+            {trims.slice(0, 6).map((t, i) => (
+              <div className="sh-trim" key={'tr' + i}>
+                <div className="sh-trim-dot" style={{ background: t.hex || '#eee' }} />
+                <b>{(t.name || '').toUpperCase()}</b>
+                <span>{t.placement || ''}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ===== الصف الثالث: البناء · المواصفات · العناية ===== */}
+      <div className="sh-row sh-row-3">
+        <div className="sh-cell">
+          <div className="sh-title">CONSTRUCTION DETAILS</div>
+          <AnnotatedPair
+            frontImage={tp.lineFrontImage}
+            backImage={tp.lineBackImage}
+            mode="sewing"
+            front={sewLabels.filter((s) => (s.view || 'front') !== 'back')}
+            back={sewLabels.filter((s) => s.view === 'back')}
+            measurements={measurements}
+            sampleSize={tp.sampleSize || '6'} />
+        </div>
+
+        <div className="sh-cell">
+          <div className="sh-title">MATERIAL SPECIFICATIONS</div>
+          <table className="sh-table">
+            <thead><tr><th>COMPONENT</th><th>SPECIFICATION</th></tr></thead>
+            <tbody>
+              {materials.map((m, i) => (
+                <tr key={'ms' + i}>
+                  <td className="sh-comp">{(m.name || '').toUpperCase()}</td>
+                  <td>{m.description || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="sh-cell">
+          <div className="sh-title">CARE INSTRUCTIONS</div>
+          <div className="sh-care">
+            {icons.map((ic, i) => (
+              <div className="sh-care-i" key={'ci' + i}>
+                <CareIcon kind={ic.kind} />
+                <span>{ic.label[0]}<br />{ic.label[1]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ===== الصف الأخير: جدول المقاسات · الكولورواي ===== */}
+      <div className="sh-row sh-row-4">
+        <div className="sh-cell sh-span2">
+          <div className="sh-title">SIZE CHART (CM)</div>
+          <table className="sh-table sh-size">
+            <thead>
+              <tr>
+                <th>SIZE</th>
+                {SHEET_SIZES.map(([n, r]) => <th key={n}>{n} ({r})</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {sizeRows.map((r, i) => (
+                <tr key={'sz' + i}>
+                  <td className="sh-comp">{r.label.split('\n').map((t, j) => <div key={j}>{t}</div>)}</td>
+                  {r.vals.map((v, j) => <td key={j}>{v}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="sh-note">
+            <span>* ALL MEASUREMENTS ARE IN CM AND SUBJECT TO ±1 CM TOLERANCE.</span>
+            <span>* SAMPLE SIZE: SMALL (4-6)</span>
+          </div>
+        </div>
+
+        <div className="sh-cell">
+          <div className="sh-title">COLORWAY</div>
+          <div className="sh-colorway">
+            {colorway.slice(0, 4).map((c, i) => (
+              <div className="sh-cw" key={'cw' + i}>
+                <div className="sh-cw-box" style={{ background: c.hex }} />
+                <b>{(c.pantoneName || c.part || '').toUpperCase()}</b>
+                <span>{c.pantone || ''}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// لقطات DETAILS & CLOSE-UP — تُقتطع من الصورة الملوّنة المرفوعة، بلا توليد
+function SheetCrops({ frontImage, backImage, items, anchors }) {
+  const list = (items && items.length ? items : []).slice(0, 4);
+  if (!list.length) {
+    return <div className="sh-ph" style={{ aspectRatio: '1/1' }} />;
+  }
+  const srcFor = (it) => (String((it && it.view) || '').toLowerCase() === 'back' && backImage)
+    ? backImage : (frontImage || backImage);
+  const posFor = (it, i) => {
+    const area = (it && it.area) || '';
+    const lm = landmarkOf(area, true);
+    const x = Math.max(10, Math.min(90, Math.round(zoneX(area, 'left') * 100)));
+    if (lm && anchors && anchors[lm] != null && anchors.__total) {
+      const y = Math.max(6, Math.min(94, (anchors[lm] / anchors.__total) * 100));
+      return x + '% ' + Math.round(y) + '%';
+    }
+    return x + '% ' + [16, 38, 62, 84][i % 4] + '%';
+  };
+  const zoomFor = (it) => {
+    const a = String((it && it.area) || '');
+    if (/cuff|collar|zipper|button|hook|label|neckline|wrist/i.test(a)) return '360%';
+    if (/seam|panel|insert|pleat|dart|hem\s*finish/i.test(a)) return '290%';
+    if (/skirt|train|sweep|overlay|tier|layer/i.test(a)) return '210%';
+    return '270%';
+  };
+  return (
+    <div className="sh-details">
+      {list.map((it, i) => (
+        <div className="sh-detail" key={'sd' + i}>
+          <div className="sh-detail-img" style={{
+            backgroundImage: 'url(' + srcFor(it) + ')',
+            backgroundPosition: posFor(it, i),
+            backgroundSize: zoomFor(it),
+          }} />
+          <div className="sh-detail-cap">{it.area || ''}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TechpackView({ tp, preview }) {
   // كود ستايل احتياطي مشتقّ من الاسم والتاريخ: الفراغ في هذا الحقل يعني
   // أن المصنع لا يملك مرجعاً يربط به الصفحات والعيّنات.
@@ -1380,9 +1729,15 @@ function TechpackView({ tp, preview }) {
 
   // القائمة تمرّ بالتصحيح الحتمي قبل العرض: دمج المكرّر، إضافة ما رآه التحليل
   // في التصميم (خرز/لؤلؤ/دانتيل)، إلزام التاغين، ترتيب وظيفي، ثم ترقيم.
+  // القائمة صُحّحت مرة واحدة قبل التوليد وجاءت مرقّمة؛ تُعاد المعالجة فقط
+  // إن وصلت خاماً (مسار قديم أو تيك باك محفوظ سابقاً).
+  const alreadyFixed = Array.isArray(tp.materials) && tp.materials.length > 0 && tp.materials[0].num != null;
   const designCues = [tp.description, tp.garmentFacts, tp.flatSketchBrief, tp.notes,
     (tp.artwork || []).map((a) => [a.name, a.technique, a.description].join(' ')).join(' ')];
-  const materials = normalizeMaterials(tp.materials, designCues, (tp.colorway || [])[0]?.hex, (tp.colorway || [])[0]?.pantone);
+  const materials = alreadyFixed
+    ? tp.materials
+    : normalizeMaterials(tp.materials, designCues, (tp.colorway || [])[0]?.hex, (tp.colorway || [])[0]?.pantone,
+        tp.brandName, tp.careInstructions);
   const matPhotos = tp.materialPhotos || [];
   const measurements = tp.measurements || [];
   const gradePages = [];
@@ -1700,19 +2055,29 @@ function useImgBox(image) {
         const ctx = c.getContext('2d');
         ctx.drawImage(img, 0, 0, W, H);
         const data = ctx.getImageData(0, 0, W, H).data;
-        let top = H, bot = -1, left = W, right = -1;
-        for (let y = 1; y < H - 1; y++) {
-          for (let x = 1; x < W - 1; x++) {
+
+        // كشف الحدود بعدّ البكسلات لكل صف وعمود، لا بأول بكسل داكن.
+        // الرسمة التقنية مليئة بنقاط الخرز الرمادية المتناثرة، والعتبة
+        // المتساهلة كانت تعدّ نقطة واحدة حدّاً للقطعة فيزيح الإطار كلّه
+        // وتخطئ كل مواقع الليبلات المحسوبة.
+        const rowCount = new Array(H).fill(0);
+        const colCount = new Array(W).fill(0);
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
             const p = (y * W + x) * 4;
-            if ((data[p] + data[p + 1] + data[p + 2]) / 3 < 150) {
-              if (y < top) top = y;
-              if (y > bot) bot = y;
-              if (x < left) left = x;
-              if (x > right) right = x;
-            }
+            if (data[p + 3] < 40) continue;
+            const lum = (data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114);
+            if (lum < 205) { rowCount[y]++; colCount[x]++; }   // أي حبر غير الخلفية
           }
         }
-        const found = bot > 0 && bot - top > H * 0.2;
+        // صفٌّ يُعدّ جزءاً من القطعة إن حمل حبراً يتجاوز ضجيج النقاط المتناثرة
+        const rowMin = Math.max(2, Math.round(W * 0.02));
+        const colMin = Math.max(2, Math.round(H * 0.02));
+        let top = -1, bot = -1, left = -1, right = -1;
+        for (let y = 0; y < H; y++) if (rowCount[y] >= rowMin) { if (top < 0) top = y; bot = y; }
+        for (let x = 0; x < W; x++) if (colCount[x] >= colMin) { if (left < 0) left = x; right = x; }
+
+        const found = top >= 0 && bot > top && bot - top > H * 0.2 && right > left;
         if (!cancelled) setBox(found ? {
           top: (top / H) * 100, bottom: (bot / H) * 100,
           left: (left / W) * 100, right: (right / W) * 100,
@@ -1931,8 +2296,8 @@ const LANDMARKS = [
   ['waist',    /\bwaist\b/i],
   ['highhip',  /high\s*hip/i],
   ['hip',      /\bhip\b|\bseat\b/i],
-  ['crotch',   /\bcrotch\b|\brise\b/i],
   ['cuff',     /\bcuff\b|sleeve\s*opening|sleeve\s*hem/i],
+  ['crotch',   /\bcrotch\b|\brise\b/i],
   ['thigh',    /\bthigh\b/i],
   ['knee',     /\bknee\b|flare\s*break/i],
   ['calf',     /\bcalf\b/i],
@@ -2017,6 +2382,38 @@ function buildAnchors(rows, size, view) {
       const v = base + rel.delta; if (v >= 0 && v <= total) cm[lm] = v;
     });
   }
+  // تصحيح القياسات المنسوبة إلى الخصر لا إلى الحافة العليا.
+  // "Flare Break Height (from waist seam…)" و "Thigh (mid-thigh of skirt)"
+  // تُقاس من خط الخصر؛ أخذها كما هي يقلب الترتيب التشريحي فتصير الركبة
+  // فوق الفخذ وتتكدّس الليبلات في نطاق واحد.
+  if (cm.waist != null) {
+    const fromWaist = /from\s*(the\s*)?(natural\s*)?waist|below\s*waist|waist\s*seam\s*(down|to)|of\s*skirt|skirt\s*yoke|where\s*skirt|down\s*to\s*point/i;
+    rows.forEach((r) => {
+      const pom = r.pom || '';
+      if (SPAN_POM_RE.test(pom)) return;
+      const lm = landmarkOf(pom);
+      if (!lm || LM_RANK[lm] == null || LM_RANK[lm] <= LM_RANK.waist) return;
+      if (!fromWaist.test(pom)) return;
+      if (relationOf(pom)) return;          // عولج بالفعل في جولة العلاقات
+      const v = pomVal(r, size);
+      if (v == null || v <= 0) return;
+      if (v >= cm.waist) return;            // قيمة أكبر من الخصر مقيسة من الأعلى أصلاً
+      const abs = cm.waist + v;
+      if (abs <= total) cm[lm] = abs;
+    });
+  }
+
+  // الأسورة عند نهاية الكم: موضعها = الكتف + طول الكم، لا استيفاء بين
+  // الفخذ والركبة. الاستيفاء كان يضعها أسفل الورك وهي عند المعصم.
+  {
+    const sl = rows.find((r) => /sleeve\s*length/i.test(r.pom || ''));
+    const slv = sl ? pomVal(sl, size) : null;
+    if (slv != null && slv > 0 && cm.shoulder != null) {
+      const abs = cm.shoulder + slv;
+      if (abs > 0 && abs <= total) cm.cuff = abs;
+    }
+  }
+
   const known = Object.keys(cm).filter((k) => LM_RANK[k] != null && cm[k] != null)
     .map((k) => ({ rank: LM_RANK[k], v: cm[k] })).sort((a, b) => a.rank - b.rank);
   LANDMARKS.forEach(([k], rank) => {
@@ -2025,6 +2422,20 @@ function buildAnchors(rows, size, view) {
     for (const p of known) { if (p.rank < rank) lo = p; if (p.rank > rank && hi == null) hi = p; }
     if (lo && hi && hi.rank !== lo.rank) cm[k] = lo.v + ((rank - lo.rank) / (hi.rank - lo.rank)) * (hi.v - lo.v);
   });
+  // حارس الترتيب: لا يعلو معلمٌ على ما فوقه مهما كانت صياغة الجدول.
+  // انقلاب الترتيب يضع الركبة فوق الفخذ ويُفسد كل مواقع الليبلات.
+  let prev = 0;
+  LANDMARKS.forEach(([k]) => {
+    if (cm[k] == null) return;
+    if (cm[k] < prev) cm[k] = prev;
+    prev = cm[k];
+  });
+
+  // خط الكنس يقع عند حافة الهيم المرسومة، لا عند آخر بكسل في الصورة:
+  // أسفل الرسمة ينتهي بأطراف تول وذيل تمتد تحت خط الهيم الفعلي، فوضع
+  // الليبل عند 100% يضعه أسفل الحافة التي يقيسها المصنع.
+  cm.hem = total * 0.955;
+
   cm.__total = total;
   return cm;
 }
@@ -2163,8 +2574,29 @@ const MAT_CUES = [
     photoPrompt: 'Professional studio product photograph of a piece of corded lace fabric on plain background, macro detail showing the net ground, soft even lighting, photorealistic. No watermark.' }],
 ];
 
-function normalizeMaterials(raw, cues, hex, pantone) {
-  let list = Array.isArray(raw) ? raw.filter((m) => m && m.name) : [];
+
+// تعليمات العناية تُشتقّ من الخامات الموجودة فعلاً، لا نصاً عاماً:
+// التطريز والخرز والتول والحرير كلٌّ يفرض قيداً مختلفاً على الغسيل والكي.
+function careFromMaterials(list) {
+  const hay = (list || []).map((m) => [m.name, m.description].join(' ')).join(' ').toLowerCase();
+  const out = [];
+  const delicate = /bead|pearl|sequin|crystal|embroider|lace|tulle|silk|chiffon|organza|velvet|satin/.test(hay);
+  out.push(delicate ? 'Dry Clean Only' : 'Gentle Machine Wash Cold');
+  if (/bead|pearl|sequin|crystal|embroider/.test(hay)) out.push('Do Not Iron Directly on Embellishment');
+  else out.push('Cool Iron if Needed');
+  out.push('Do Not Bleach');
+  out.push('Do Not Tumble Dry');
+  if (/tulle|chiffon|organza/.test(hay)) out.push('Store Flat or Hanging on Padded Hanger');
+  return out.join(', ');
+}
+
+function normalizeMaterials(raw, cues, hex, pantone, brandName, careText) {
+  // الشمّاعة والتغليف ليسا من خامات الخياطة. إزالة إجباريتهما وحدها لا تكفي:
+  // النموذج قد يعيدهما من تلقائه، فيُحذفان حتمياً هنا.
+  const EXCLUDED = /hanger|garment\s*bag|poly\s*bag|polybag|packaging|tissue\s*paper|\bgift\s*box\b|hook\s*rail|swing\s*tag|price\s*tag|barcode/i;
+  let list = Array.isArray(raw)
+    ? raw.filter((m) => m && m.name && !EXCLUDED.test([m.name, m.placement].filter(Boolean).join(' ')))
+    : [];
   list = matDedupe(list);
 
   const hay = (cues || []).filter(Boolean).join(' ');
@@ -2177,6 +2609,21 @@ function normalizeMaterials(raw, cues, hex, pantone) {
   MAT_REQUIRED.forEach((req) => {
     if (list.some((m) => req.test.test([m.name, m.placement, m.description].join(' ')))) return;
     list.push({ ...req.item });
+  });
+
+  // الليبل بلا اسم براند وبلا تعليمات عناية لا فائدة منه للمصنع:
+  // يُحقن الاسم الذي كتبته المصممة، وتُشتقّ العناية من الخامات الفعلية.
+  const brand = String(brandName || '').trim() || 'BRAND NAME';
+  const care = String(careText || '').trim() || careFromMaterials(list);
+  list = list.map((m) => {
+    const hay = [m.name, m.placement, m.description].join(' ');
+    if (/composition|size\s*label|main\s*label|brand\s*label/i.test(hay) && !/care\s*instruction/i.test(hay)) {
+      return { ...m, description: 'Woven label stating brand name "' + brand + '", garment size, and fibre composition' };
+    }
+    if (/care\s*(instruction|label)|washing\s*label|care\s*tag/i.test(hay)) {
+      return { ...m, description: 'Woven care label stating: ' + care };
+    }
+    return m;
   });
 
   list = list.map((m, i) => ({ m, i, g: MAT_ORDER[matGroup(m)] }))
@@ -2208,6 +2655,29 @@ function normalizeMaterials(raw, cues, hex, pantone) {
 function pruneCallouts(callouts, materials) {
   const max = materials.length;
   return (callouts || []).filter((c) => Number.isFinite(+c.num) && +c.num >= 1 && +c.num <= max);
+}
+
+
+// الموضع الأفقي داخل القطعة (0 = أقصى اليسار، 1 = أقصى اليمين من صندوق القطعة).
+// يُشتقّ من وصف الموضع نفسه: ما هو عند خط الوسط يُشار إليه في الوسط، وما هو
+// عند الجنب أو الكم يُشار إليه عند الحافة المقابلة. بدونه تصطفّ كل الأرقام
+// على حافة واحدة ولا يعرف المصنع أيّ خامة تخصّ أيّ موضع.
+const X_ZONES = [
+  [/center\s*front|center\s*back|\bcf\b|\bcb\b|placket|zipper|spine|center\s*seam|hem\s*edge|waist\s*seam|neckline|collar|funnel/i, 0.50],
+  [/princess\s*seam|bust|chest|bodice\s*front|diagonal|inset|panel/i, 0.34],
+  [/side\s*seam|side\s*panel|underarm|armhole|\bside\b/i, 0.18],
+  [/sleeve|cuff|wrist|bishop/i, 0.08],
+  [/skirt|godet|flare|sweep|overlay|tier|layer/i, 0.40],
+  [/lining|interlining|boning|interfacing|stay\s*tape/i, 0.28],
+  [/bead|pearl|crystal|sequin|embroider|applique/i, 0.44],
+];
+
+function zoneX(text, side) {
+  const t = String(text || '');
+  let f = 0.34;                       // افتراضي: داخل القطعة لا على حافتها
+  for (const [re, v] of X_ZONES) { if (re.test(t)) { f = v; break; } }
+  // side = الجهة التي تخرج منها التسمية؛ الخط يدخل نحو الداخل منها
+  return side === 'right' ? (1 - f) : f;
 }
 
 function AnnotatedView({ image, mode, items, caption, labelSide, measurements, sampleSize, view }) {
@@ -2262,9 +2732,12 @@ function AnnotatedView({ image, mode, items, caption, labelSide, measurements, s
 
         {mode !== 'measure' && rows.map((r, i) => {
           // التسمية تلاصق حافة القطعة والخط يلمس القطعة نفسها — لا تسميات عائمة بالفراغ
+          // نقطة النهاية الحقيقية داخل القطعة، لا حافة الصندوق
+          const bw = box.right - box.left;
+          const tipX = box.left + zoneX(r.text || r.target || '', labelSide) * bw;
           const style = labelSide === 'right'
-            ? { top: r.top + '%', left: (box.right - 2) + '%', width: Math.min(24, 100 - box.right + 1.5) + '%' }
-            : { top: r.top + '%', left: Math.max(box.left - 22, 0.5) + '%', width: (box.left + 2 - Math.max(box.left - 22, 0.5)) + '%' };
+            ? { top: r.top + '%', left: tipX + '%', width: Math.max(2, 100 - tipX - 0.5) + '%' }
+            : { top: r.top + '%', left: Math.max(tipX - 26, 0.5) + '%', width: (tipX - Math.max(tipX - 26, 0.5)) + '%' };
           return (
             <div className={'tp-anno-row ' + (labelSide === 'right' ? 'right' : 'left')} key={'c' + i} style={style}>
               {labelSide === 'right' ? <><i className="tp-anno-line"></i>{mode === 'callout' ? <span className="tp-anno-circle">{r.num}</span> : <span className="tp-anno-text">{r.text}</span>}</>
@@ -2333,13 +2806,28 @@ function RefCrops({ frontImage, backImage, items, anchors }) {
     </div>;
   }
 
+  // الموضع الأفقي يتبع المنطقة كما في أرقام الكول أوت: القصّ من الوسط دائماً
+  // كان يُخرج الأسورة وخياطة الجنب من منتصف القطعة فلا تظهر أصلاً.
   const posFor = (it, i) => {
-    const lm = landmarkOf(it && it.area, true);
+    const area = (it && it.area) || '';
+    const lm = landmarkOf(area, true);
+    const xf = zoneX(area, 'left');                 // 0 يسار … 1 يمين
+    const x = Math.max(8, Math.min(92, Math.round(xf * 100)));
     if (lm && anchors && anchors[lm] != null && anchors.__total) {
       const y = Math.max(6, Math.min(94, (anchors[lm] / anchors.__total) * 100));
-      return '50% ' + Math.round(y) + '%';
+      return x + '% ' + Math.round(y) + '%';
     }
-    return DEFAULT_CROPS[i % DEFAULT_CROPS.length];
+    const fallback = DEFAULT_CROPS[i % DEFAULT_CROPS.length];
+    return x + '% ' + fallback.split(' ')[1];
+  };
+
+  // التقريب يتبع حجم التفصيل: ياقة أو أسورة تحتاج تقريباً أعلى من تنورة
+  const zoomFor = (it) => {
+    const a = String((it && it.area) || '');
+    if (/cuff|collar|zipper|button|hook|label|neckline|wrist/i.test(a)) return '380%';
+    if (/seam|panel|insert|pleat|dart|hem\s*finish/i.test(a)) return '300%';
+    if (/skirt|train|sweep|overlay|tier|layer/i.test(a)) return '220%';
+    return '280%';
   };
 
   // كل لقطة تُقتطع من منظرها الفعلي: تفصيل خلفي من الرسمة الخلفية
@@ -2354,7 +2842,8 @@ function RefCrops({ frontImage, backImage, items, anchors }) {
       {list.map((it, i) => (
         <div className="tp-crop" key={i}>
           <div className="tp-crop-img"
-            style={{ backgroundImage: 'url(' + srcFor(it) + ')', backgroundPosition: posFor(it, i) }}></div>
+            style={{ backgroundImage: 'url(' + srcFor(it) + ')',
+              backgroundPosition: posFor(it, i), backgroundSize: zoomFor(it) }}></div>
           {it && it.area ? <div className="tp-crop-cap">{it.area}</div> : null}
         </div>
       ))}
@@ -2631,12 +3120,102 @@ function StyleBlock() {
 
       /* صفحة مستقلة لكل قسم */
 
+
+      /* ===== ورقة التيك باك — صفحة واحدة على بنية نموذج RK ===== */
+      .sheet { background: #fff; color: #1a1a1a; font-family: 'Tajawal', system-ui, sans-serif;
+        width: 210mm; margin: 0 auto; padding: 0; direction: ltr; font-size: 7.6px; line-height: 1.4; }
+      .sheet * { box-sizing: border-box; }
+      .sh-head { display: grid; grid-template-columns: 1.15fr 1.25fr 1fr; border: 1px solid #d8d5cf; }
+      .sh-head > div { padding: 7px 10px; border-right: 1px solid #d8d5cf; }
+      .sh-head > div:last-child { border-right: 0; }
+      .sh-brand-name { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 17px;
+        letter-spacing: 0.16em; color: #6b1a2b; font-weight: 600; }
+      .sh-brand-sub { font-size: 6.4px; letter-spacing: 0.3em; color: #6d6a66; margin-top: 3px; }
+      .sh-meta > div { display: grid; grid-template-columns: 74px 1fr; gap: 6px; margin-bottom: 4px; }
+      .sh-meta > div:last-child { margin-bottom: 0; }
+      .sh-meta span { font-size: 6.4px; letter-spacing: 0.1em; color: #4a4744; font-weight: 700; }
+      .sh-meta b { font-size: 7.4px; font-weight: 500; color: #1a1a1a; }
+
+      .sh-row { display: grid; border: 1px solid #d8d5cf; border-top: 0; }
+      .sh-row-1 { grid-template-columns: 1fr 1.05fr 0.92fr; }
+      .sh-row-2 { grid-template-columns: 1fr 1.05fr 0.92fr; }
+      .sh-row-3 { grid-template-columns: 1fr 1.05fr 0.92fr; }
+      .sh-row-4 { grid-template-columns: 1fr 1.05fr 0.92fr; }
+      .sh-cell { padding: 7px 8px; border-right: 1px solid #d8d5cf; min-width: 0; }
+      .sh-cell:last-child { border-right: 0; }
+      .sh-span2 { grid-column: span 2; }
+
+      .sh-title { text-align: center; font-size: 7.6px; font-weight: 700; letter-spacing: 0.16em;
+        margin-bottom: 6px; color: #1a1a1a; }
+      .sh-sub { font-size: 6.6px; font-weight: 700; letter-spacing: 0.12em; color: #4a4744;
+        margin: 5px 0 4px; }
+      .sh-corner { font-size: 6.2px; font-weight: 700; letter-spacing: 0.12em; color: #4a4744; }
+      .sh-corner i { font-style: normal; font-weight: 500; }
+      .sh-corner-b { margin-top: 5px; }
+      .sh-cap { text-align: center; font-size: 6.2px; letter-spacing: 0.14em; color: #6d6a66; margin-bottom: 3px; }
+
+      .sh-look img, .sh-flat img { width: 100%; display: block; object-fit: contain; }
+      .sh-look { margin-top: 3px; }
+      .sh-look-sm img { max-height: 118px; object-fit: contain; }
+      .sh-flats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .sh-ph { width: 100%; aspect-ratio: 2/3; background: #f3f1ed; border: 1px dashed #d8d5cf; }
+
+      .sh-details { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .sh-detail-img { width: 100%; aspect-ratio: 1/1; background-repeat: no-repeat;
+        background-color: #f3f1ed; border: 1px solid #e6e3de; }
+      .sh-detail-cap { font-size: 5.9px; text-align: center; letter-spacing: 0.06em;
+        color: #4a4744; margin-top: 3px; line-height: 1.35; }
+
+      .sh-bullets { margin: 0; padding: 0; list-style: none;
+        columns: 2; column-gap: 14px; font-size: 7px; }
+      .sh-bullets li { break-inside: avoid; margin-bottom: 7px; padding-left: 9px; position: relative;
+        letter-spacing: 0.02em; }
+      .sh-bullets li::before { content: '•'; position: absolute; left: 0; color: #6b1a2b; }
+
+      .sh-fab { display: grid; grid-template-columns: 1fr 52px; gap: 7px; align-items: stretch;
+        border-bottom: 1px solid #e6e3de; padding: 5px 0; }
+      .sh-fab:last-of-type { border-bottom: 0; }
+      .sh-fab-txt b { display: block; font-size: 6.8px; letter-spacing: 0.06em; }
+      .sh-fab-txt span { display: block; font-size: 6.4px; color: #4a4744; }
+      .sh-swatch { border-radius: 2px; min-height: 34px; }
+
+      .sh-trims { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; text-align: center; }
+      .sh-trim-dot { width: 34px; height: 34px; border-radius: 50%; margin: 0 auto 3px;
+        border: 1px solid #e6e3de; }
+      .sh-trim b { display: block; font-size: 6.4px; letter-spacing: 0.08em; }
+      .sh-trim span { display: block; font-size: 6px; color: #6d6a66; line-height: 1.3; }
+
+      .sh-table { width: 100%; border-collapse: collapse; font-size: 6.6px; }
+      .sh-table th { background: #f6f4f1; text-align: left; padding: 4px 6px;
+        font-weight: 700; letter-spacing: 0.08em; border: 1px solid #e6e3de; }
+      .sh-table td { padding: 4px 6px; border: 1px solid #e6e3de; vertical-align: top; }
+      .sh-comp { font-weight: 700; letter-spacing: 0.05em; white-space: nowrap; }
+      .sh-size td, .sh-size th { text-align: center; }
+      .sh-size td:first-child, .sh-size th:first-child { text-align: left; }
+      .sh-note { display: flex; gap: 26px; font-size: 5.8px; color: #6d6a66; margin-top: 4px; }
+
+      .sh-care { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; text-align: center; }
+      .sh-care-i { color: #3a3734; }
+      .sh-care-i span { display: block; font-size: 5.8px; letter-spacing: 0.05em;
+        color: #4a4744; margin-top: 2px; line-height: 1.3; }
+
+      .sh-colorway { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; text-align: center; }
+      .sh-cw-box { width: 100%; aspect-ratio: 3/2; border-radius: 2px; margin-bottom: 3px; }
+      .sh-cw b { display: block; font-size: 6.4px; letter-spacing: 0.06em; }
+      .sh-cw span { display: block; font-size: 5.9px; color: #6d6a66; }
+
+      @media (max-width: 820px) {
+        .sheet { width: 100%; font-size: 9px; }
+        .sh-head, .sh-row-1, .sh-row-2, .sh-row-3, .sh-row-4 { grid-template-columns: 1fr; }
+        .sh-span2 { grid-column: span 1; }
+        .sh-cell { border-right: 0; border-bottom: 1px solid #d8d5cf; }
+      }
       /* ===== الطباعة / تصدير PDF =====
          عند الطباعة يُخفى كل ما عدا التيك باك، وتُفرَض ورقة A4 أفقية بحيث
          تقع كل صفحة تيك باك على ورقة واحدة كاملة كما في النموذج المرجعي.
          النص يبقى متجهاً: قابلاً للبحث والنسخ والطباعة بأي مقاس. */
       @media print {
-        @page { size: A4 landscape; margin: 0; }
+        @page { size: A4 portrait; margin: 6mm; }
         html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
         /* يُخفى كل شيء، ثم يُستعاد #techpack-canvas وسلسلة آبائه فقط */
         body.printing-techpack * { visibility: hidden !important; }
@@ -2652,17 +3231,10 @@ function StyleBlock() {
         #techpack-canvas, #techpack-canvas * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .tp { background: #fff !important; padding: 0 !important; margin: 0 !important; }
         /* ورقة لكل صفحة، بلا ظل ولا حواف شاشة */
-        .tp-page {
-          box-shadow: none !important;
-          border-radius: 0 !important;
-          margin: 0 !important;
-          padding: 10mm 12mm !important;
-          width: 297mm; height: 210mm;
-          box-sizing: border-box;
-          overflow: hidden;
-          break-after: page;
-          page-break-after: always;
-        }
+        /* الورقة صفحة واحدة: تُطبع كاملة بلا فواصل داخلية */
+        .sheet { width: 100% !important; font-size: 7.2px !important; }
+        .sh-row, .sh-head, .sh-cell, .sh-fab, .sh-trim, .sh-detail, .sh-cw,
+        .sh-care-i, .sh-table, tr { break-inside: avoid; page-break-inside: avoid; }
         .tp-page:last-child { break-after: auto; page-break-after: auto; }
         /* منع انقسام الجداول والبطاقات بين ورقتين */
         .tp-table, .tp-crops, .tp-pair, .tp-mat-grid, .tp-colorways,
