@@ -1,9 +1,18 @@
-// api/techpack.js
-// الطور 1: يستقبل صورة تصميم + مواصفات، يحلّلها عبر Claude Vision،
-// ويرجّع تيك باك كامل (JSON) بهيكل مطابق حرفياً لنموذج Adstronaut:
-// مقاسات رقمية 2-12 مع عيّنة 6، أوصاف POM كاملة، 14 خامة مرتّبة = BOM،
-// تسميات صفحة القياسات المشروحة، وخريطة الترقيم لصفحة الـ Callout.
-// الصور تُولَّد في الطور 2 (/api/techpack-images).
+// pages/api/techpack.js
+// تحليل التيك باك — استدعاء واحد لـ Claude يُرجع كل بيانات ورقة RK.
+//
+// المدخلات (multipart):
+//   design      صورة التصميم الملوّنة بمسطرة إحداثيات
+//   colorFront  الرسمة الملوّنة الأمامية بمسطرة إحداثيات
+//   lineFront   الرسمة التقنية الأمامية بمسطرة إحداثيات
+//   lineBack   الرسمة التقنية الخلفية بمسطرة إحداثيات
+//   garmentName · fabricInfo · season · notes
+//
+// لا توليد صور هنا ولا في أي مكان من الورقة: كل الصور تُقصّ في المتصفح من
+// الصور المرفوعة، بالإحداثيات التي يحددها هذا التحليل.
+//
+// المخرجات مضبوطة بمخطط JSON (structured outputs): الناتج صالح دائماً،
+// بلا إصلاح نصوص وبلا إعادة محاولة.
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -14,391 +23,396 @@ export const config = {
 };
 
 const MODEL = 'claude-sonnet-5';
+const MAX_TOKENS = 12000;
+const CALL_TIMEOUT_MS = 240000;
 
-// ============================================================================
-const INDUSTRY_RULES = `
-معايير مرجعية (طبّقيها حسب القطعة الفعلية، لا أرقام عشوائية):
-# نقاط القياس: 26 نقطة على الأقل. للفساتين الطويلة: CF Length, CB Length, Side Seam Length, Bust Width, Top Edge Width Front/Back, Waist Width, Waist Position, High Hip, Low Hip, Thigh, Knee Width at Flare Break, Flare Break Height, Hem Sweep Front, Hem Sweep Back incl. Train, Train Length, Front/Back Neckline Drop, Bodice Side Height, Cup Height, BP to BP, CB Zipper Length, Embellishment Depth, Overlay Start Height, Boning Length, Lining Length CF, Shoulder to Bust. لأنواع أخرى استبدلي بالمناسب (Inseam, Outseam, Rise, Sleeve Length, Across Shoulder, Armhole...).
-# التدرّج بين المقاسات المتتالية: الأبعاد الأفقية ~1.2-1.5 سم، الأطوال ~0.5-1 سم، التفاصيل الصغيرة ~0.3 سم. قياسات ثابتة عبر المقاسات (مثل Train Length) تبقى ثابتة.
-# التفاوتات بصيغة "+-X.X": أفقي كبير +-0.6، أطوال +-1.0 إلى +-2.5، تفاصيل +-0.3 إلى +-0.5.
-# تعليمات الخياطة: تسلسل مصنع منطقي، 16 خطوة على الأقل.
-`;
+const CARE_ENUM = ['dryclean', 'handwash', 'wash30', 'nowash', 'nobleach', 'steamlow', 'ironlow',
+  'noiron', 'notumble', 'dryflat', 'hangbag', 'storefolded'];
+const SOURCE_ENUM = ['design', 'colorFront'];
+const TRIM_ENUM = ['zipper', 'button', 'hook', 'snap', 'thread', 'label', 'elastic', 'boning',
+  'bead', 'crystal', 'sequin', 'pearl', 'piping', 'lace', 'ribbon', 'embroidery', 'other'];
 
+// ---------------------------------------------------------------------------
 function detectImageType(buffer) {
-  if (!buffer || buffer.length < 12) return 'image/jpeg';
-  if (buffer[0]===0xff && buffer[1]===0xd8 && buffer[2]===0xff) return 'image/jpeg';
-  if (buffer[0]===0x89 && buffer[1]===0x50 && buffer[2]===0x4e && buffer[3]===0x47) return 'image/png';
-  if (buffer[0]===0x47 && buffer[1]===0x49 && buffer[2]===0x46) return 'image/gif';
-  if (buffer[0]===0x52 && buffer[1]===0x49 && buffer[2]===0x46 && buffer[3]===0x46 &&
-      buffer[8]===0x57 && buffer[9]===0x45 && buffer[10]===0x42 && buffer[11]===0x50) return 'image/webp';
+  if (!buffer || buffer.length < 4) return 'image/jpeg';
+  if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) return 'image/jpeg';
+  if (buffer.length > 12 && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
   return 'image/jpeg';
 }
 
-function safeJsonParse(raw) {
-  let s = (raw || '').trim();
-  s = s.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  const start = s.indexOf('{');
-  if (start === -1) throw new Error('no json object found');
-  s = s.slice(start);
-  const end = s.lastIndexOf('}');
-  let candidate = end > 0 ? s.slice(0, end + 1) : s;
-  try { return JSON.parse(candidate); } catch (parseFailed) { /* محاولة تالية */ }
-  try { return JSON.parse(repairJson(s)); } catch (repairFailed) { /* يُبلَّغ أدناه */ }
-  return JSON.parse(repairJson(candidate));
+const getField = (f) => String((Array.isArray(f) ? f[0] : f) || '').trim();
+const pickFile = (f) => (Array.isArray(f) ? f[0] : f) || null;
+
+function imageBlock(file) {
+  const buf = fs.readFileSync(file.filepath);
+  return {
+    type: 'image',
+    source: { type: 'base64', media_type: detectImageType(buf), data: buf.toString('base64') },
+  };
 }
 
-function repairJson(text) {
-  let s = text.trim();
-  let inStr = false, esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-  }
-  if (inStr) {
-    // القطع وقع داخل نص: نحذف علامة الاقتباس المفتوحة نفسها لا أن نبقيها،
-    // وإلا يبقى النص غير منتهٍ ويفشل التحليل (باگ مكتشف باختبار القطع).
-    const lastQuote = s.lastIndexOf('"');
-    if (lastQuote > 0) s = s.slice(0, lastQuote);
-  }
-  let prev;
-  do {
-    prev = s;
-    s = s.replace(/,\s*$/, '');
-    s = s.replace(/"[^"]*"\s*:\s*$/, '');
-    s = s.replace(/"[^"]*"\s*:\s*[-\d.]+$/, '');
-    s = s.replace(/,\s*$/, '');
-  } while (s !== prev);
-  const stack = [];
-  inStr = false; esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-      continue;
-    }
-    if (c === '"') { inStr = true; continue; }
-    if (c === '{' || c === '[') stack.push(c);
-    else if (c === '}' || c === ']') stack.pop();
-  }
-  for (let i = stack.length - 1; i >= 0; i--) {
-    s += stack[i] === '{' ? '}' : ']';
-  }
-  return s;
-}
-
-// ============================================================================
-// تصحيح حتمي بالكود لناتج التحليل — لا يعتمد على التزام النموذج.
-// يعالج شكاوى حقيقية: خامات مكرّرة/زائدة، خامة ذكرتها المصممة وغابت،
-// ليبلات بمواضع مقلوبة أو خارج القطعة، وأرقام كول أوت لا تشير لخامة موجودة.
-// ============================================================================
-const NOTION_ORDER = [
-  [/interfacing|fusible/i, 90], [/stay tape|channel|boning/i, 91],
-  [/zip|hook|eye|button|closure|snap/i, 92], [/piping|applique|bead|crystal|sequin|embroider/i, 93],
-  [/label/i, 94], [/thread/i, 95], [/hanger/i, 96], [/bag|packaging|polybag/i, 97],
-];
-const orderKey = (name) => {
-  for (const [re, k] of NOTION_ORDER) if (re.test(name || '')) return k;
-  return 10; // الأقمشة أولاً
+// ---------------------------------------------------------------------------
+// مخطط الناتج. كل الحقول مطلوبة وبلا اتحادات أنواع — شرط المخطط المضبوط.
+const NUM = { type: 'number' };
+const STR = { type: 'string' };
+const BOX = {
+  type: 'object',
+  properties: { x1: NUM, y1: NUM, x2: NUM, y2: NUM },
+  required: ['x1', 'y1', 'x2', 'y2'],
+  additionalProperties: false,
 };
+const obj = (props) => ({
+  type: 'object',
+  properties: props,
+  required: Object.keys(props),
+  additionalProperties: false,
+});
+const arr = (items) => ({ type: 'array', items });
+const SRC = { type: 'string', enum: SOURCE_ENUM };
 
-function normalizeMaterials(list, fabricInfo) {
-  let mats = Array.isArray(list) ? list.filter((m) => m && m.name) : [];
-  // إزالة التكرار بالاسم
-  const seen = new Set();
-  mats = mats.filter((m) => {
-    const k = String(m.name).toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  // ترتيب وظيفي ثابت: أقمشة ← دعم ← إغلاق ← زخرفة ← ليبلات ← خيوط ← تعليق ← تغليف
-  mats.sort((a, b) => orderKey(a.name) - orderKey(b.name));
-  // ضمان وجود التعليق والتغليف في النهاية
-  const has = (re) => mats.some((m) => re.test(m.name || ''));
-  if (!has(/hanger/i)) mats.push({ name: 'Padded garment hanger', placement: 'Storage and display of the finished garment', description: 'Wide padded garment hanger sized for a floor-length garment, prevents shoulder distortion', qty: '1', unit: 'pc' });
-  if (!has(/bag|packaging|polybag/i)) mats.push({ name: 'Garment bag packaging', placement: 'Final packaging', description: 'Breathable garment bag sized for a floor-length garment, with hanger opening and clear size pocket', qty: '1', unit: 'pc' });
-  return mats.slice(0, 16);
+const SCHEMA = obj({
+  styleName: STR,
+  season: STR,
+  category: STR,
+  collectionLine: STR,
+  garmentType: STR,
+  designDetails: arr(STR),
+  garmentColors: arr(obj({ name: STR, source: SRC, box: BOX })),
+  fabrics: arr(obj({
+    role: STR, name: STR, composition: STR, weight: STR, colorName: STR, hex: STR,
+    visible: { type: 'boolean' }, source: SRC, box: BOX,
+  })),
+  trims: arr(obj({
+    kind: { type: 'string', enum: TRIM_ENUM },
+    name: STR, description: STR, colorName: STR, hex: STR,
+    visible: { type: 'boolean' }, source: SRC, box: BOX,
+  })),
+  details: arr(obj({ caption: STR, source: SRC, box: BOX })),
+  specs: arr(obj({ component: STR, specification: STR })),
+  constructionFront: arr(obj({ label: STR, x: NUM, y: NUM })),
+  constructionBack: arr(obj({ label: STR, x: NUM, y: NUM })),
+  care: arr({ type: 'string', enum: CARE_ENUM }),
+  sizeRows: arr(obj({ label: STR, values: arr(obj({ min: NUM, max: NUM })) })),
+});
+
+// ---------------------------------------------------------------------------
+function buildPrompt(meta) {
+  return `You are a senior technical designer preparing a ONE-PAGE factory tech pack sheet.
+
+You receive four images. Each image has a blue coordinate ruler printed in its white margin:
+0 is the top-left corner of the picture area, 100 is the right edge (x) and 100 is the bottom edge (y).
+Faint blue grid lines inside the picture mark every 5 units (stronger every 10).
+Every coordinate you return is in these units, measured on the picture area only — never on the margin.
+
+IMAGE 1 — the finished colour design (the look). source = "design".
+IMAGE 2 — the colour flat, FRONT view (the same garment drawn flat, in colour). source = "colorFront".
+IMAGE 3 — the technical flat, FRONT view (line art).
+IMAGE 4 — the technical flat, BACK view (line art).
+
+SOURCE RULE — every item with a box (garmentColors, fabrics, trims, details) also has "source":
+look at BOTH IMAGE 1 and IMAGE 2, choose the one where that element is clearest, largest and most
+accurate, set source to "design" (IMAGE 1) or "colorFront" (IMAGE 2), and measure the box on THAT image.
+Most front details are usually clearest on IMAGE 2 (no skin, no pose, no shadow); use IMAGE 1 when the
+texture, embellishment or colour is clearly better there. A box is always measured on its own source image.
+
+Designer input (may be written in Arabic — always answer in English):
+- Style name: ${meta.garmentName || '(not given)'}
+- Fabric specification: ${meta.fabricInfo || '(not given)'}
+- Season: ${meta.season || '(not given)'}
+- Notes: ${meta.notes || '(none)'}
+
+The garment can be any type: gown, dress, abaya, kaftan, skirt, trousers, blouse, jacket, suit, jumpsuit.
+Describe only what is really in the design. Never invent an element that is not there
+(no belt, pockets, buttons, slit, pleats, straps or closures that are not visible or not required to make the garment).
+
+HEADER
+- styleName: max 4 words. If the designer gave a name, render it faithfully in English (translate or transliterate). Otherwise a concise descriptive name such as "Crystalline Ruffle Gown".
+- season: the designer's season in English, formatted like "FALL / WINTER 2026" or "SPRING / SUMMER 2027". Empty string if the designer gave none. Never invent a season.
+- category: like "EVENING / COUTURE", "BRIDAL / COUTURE", "MODEST WEAR / ABAYA", "READY-TO-WEAR / DAYWEAR".
+- collectionLine: the collection or line name only if the notes state one; otherwise empty string.
+- garmentType: one or two words.
+
+DESIGN DETAILS (designDetails): 6 to 8 lines, each at most 8 words, covering silhouette, neckline, sleeves, closure, lining, length and the signature details. Factory wording, no marketing words.
+
+GARMENT COLOURS (garmentColors): the 1 to 3 main colours of the GARMENT only, largest area first. Ignore skin, hair, shoes, jewellery, background and shadows. For each colour give a plain English name, a source, and a SMALL box (3 to 8 units each side) on that source image that lies completely inside a flat, evenly lit area of that colour — no seam, no embellishment, no shadow, no highlight.
+
+FABRICS (fabrics): every textile of the garment, max 4, in this order: main fabric, contrast fabric, overlay / lace / tulle / illusion, lining.
+- role: "MAIN FABRIC", "CONTRAST FABRIC", "OVERLAY", "ILLUSION", "LACE" or "LINING".
+- name: e.g. "Premium Satin", "Stretch Tulle".
+- composition: fibre content with percentages, e.g. "96% Polyester, 4% Spandex". Use the designer's specification when given, otherwise the standard composition of that fabric.
+- weight: typical weight, e.g. "220 GSM".
+- colorName: plain colour name as seen, e.g. "Burgundy", "Nude".
+- hex: #RRGGBB of that fabric as seen. For a hidden lining use the colour it should be (normally the main fabric colour unless the designer said otherwise).
+- visible: true if this fabric can be seen on IMAGE 1 or IMAGE 2.
+- source and box: if visible, a box on the chosen source image framing a clean representative area of ONLY this fabric (texture clearly readable, no skin, no background, no other fabric, no face), at least 8 units on each side. If not visible return source "design" and x1=y1=x2=y2=0.
+If the designer specified the fabrics, use exactly those fabrics and do not add other textiles.
+
+TRIMS (trims): the key trims and closures, max 4, the most characteristic first (embellishment before closures).
+- kind: the closest value of the enum.
+- name: e.g. "Crystals", "Piping", "Invisible Zipper".
+- description: 2 to 4 words, e.g. "Hand Applied", "Crystal Piping Along Ruffle Edge", "Invisible Zipper".
+- colorName, hex, visible, source, box: same rules as fabrics. A box for a trim frames that trim closely (at least 5 units each side). Concealed zippers, hooks, thread and labels are NOT visible.
+Never list hangers, garment bags, tissue paper or hang tags.
+
+DETAILS (details): exactly 4 close-up crops of the most distinctive VISIBLE front details, each taken from its clearest source image (embellishment, lace, neckline, ruffle or edge finish, slit finish, fabric surface, cuff, closure if visible).
+- box: frames the detail tightly with a little context, roughly square, 10 to 30 units wide, lying on the garment, never including a face. The 4 boxes must show different areas and not overlap by more than a third.
+- caption: 3 to 7 words in factory style, e.g. "HAND APPLIED CRYSTAL DETAIL ON ILLUSION TULLE", "HIGH SLIT WITH CLEAN FINISH".
+
+MATERIAL SPECIFICATIONS (specs): one row per material component, 6 to 10 rows, in this order: shell, overlay / lace / illusion, lining, embellishments, piping and other trims, closures, thread, label.
+- component: short name, e.g. "SHELL", "ILLUSION", "LINING", "CRYSTALS", "PIPING", "ZIPPER", "THREAD", "LABEL".
+- specification: two short lines separated by a newline character: first the material name, then composition and weight or finish, e.g. "Premium Satin" + newline + "96% Polyester, 4% Spandex – 220 GSM".
+Always include THREAD ("Polyester" / "Color Matched") and LABEL ("Woven Label" / the brand name from the notes, or "Brand Name" if none).
+
+CONSTRUCTION DETAILS
+- constructionFront: 4 to 6 callouts for IMAGE 3. constructionBack: 3 to 5 callouts for IMAGE 4.
+- label: a standard factory term, max 6 words, e.g. "CONCEALED ZIPPER AT CENTER BACK", "BUILT-IN BODICE SUPPORT", "SCULPTURAL RUFFLE WITH CRYSTAL PIPING", "FLOOR LENGTH WITH SWEEP TRAIN".
+- x, y: the exact point ON the drawn line or inside the drawn area of that feature in that image — always on the garment, never on the white background. Spread the callouts over the garment from top to bottom. Internal features (bodice support, lining) point to the area where they sit.
+
+CARE (care): exactly 5 values — 4 care symbols chosen for the real materials, then 1 storage symbol.
+Embellished or delicate garments: dryclean, nowash, nobleach, and steamlow (or noiron when beading covers the garment).
+Storage: hangbag for evening, structured or long garments; storefolded for knits and casual pieces.
+
+SIZE CHART (sizeRows): exactly 5 rows of finished garment measurements in CENTIMETRES, for the sizes in this order: XS (US 0-2), S (4-6), M (8-10), L (12-14), XL (16-18), XXL (20-22). Sample size is S. Each row has exactly 6 values.
+Choose the rows for the garment type:
+- gowns, dresses, abayas, kaftans, jumpsuits: BUST, WAIST, HIP, FRONT LENGTH (SHOULDER TO HEM), BACK LENGTH (SHOULDER TO HEM)
+- tops, blouses, jackets: BUST, WAIST, SHOULDER WIDTH, SLEEVE LENGTH, BODY LENGTH (HPS TO HEM)
+- skirts: WAIST, HIP, HEM SWEEP, FRONT LENGTH (WAIST TO HEM), BACK LENGTH (WAIST TO HEM)
+- trousers: WAIST, HIP, FRONT RISE, INSEAM, LEG OPENING
+Circumference rows (bust, waist, hip, sweep, opening) are ranges: max is 2 to 3 cm above min.
+Length and width rows are single values: min equals max.
+Values increase from XS to XXL with realistic grading (circumferences about +5 cm per size, lengths about +1 cm per size) and match the real garment length seen in the design.`;
 }
 
-// ترتيب تشريحي مرجعي: يُستخدم لتصحيح أي y مقلوب أو مفقود
-const ANATOMY = [
-  [/collar|neck|funnel|shawl/i, 4], [/shoulder/i, 9], [/chest|bust|bp-bp|cup/i, 17],
-  [/underarm|armhole|kimono join/i, 23], [/waist/i, 33], [/high hip/i, 40],
-  [/low hip|hip/i, 46], [/cuff|sleeve opening/i, 52], [/thigh|knee|flare/i, 62],
-  [/train/i, 88], [/hem|sweep|hfs|hbs/i, 95],
-];
-function anatomyY(text) {
-  for (const [re, y] of ANATOMY) if (re.test(text || '')) return y;
-  return null;
-}
-function normalizeLabels(list, key) {
-  let items = Array.isArray(list) ? list.filter(Boolean) : [];
-  items = items.map((x) => {
-    const o = typeof x === 'string' ? { [key]: x } : { ...x };
-    const text = o[key] || o.label || o.target || '';
-    let y = typeof o.y === 'number' ? o.y : null;
-    const anat = anatomyY(text);
-    // إن غاب y أو خرج عن النطاق أو خالف الموضع التشريحي بفارق كبير، نصحّحه
-    if (y === null || y < 0 || y > 100) y = anat !== null ? anat : null;
-    else if (anat !== null && Math.abs(y - anat) > 22) y = anat;
-    return { ...o, y };
-  });
-  // توزيع من بقي بلا y بالتساوي
-  const missing = items.filter((i) => i.y === null);
-  missing.forEach((it, idx) => { it.y = 8 + (84 * (idx + 1)) / (missing.length + 1); });
-  items.sort((a, b) => a.y - b.y);
-  return items;
+// ---------------------------------------------------------------------------
+// تطبيع حتمي: حدود الإحداثيات، الأعداد، وتنسيق قيم المقاسات
+const clamp = (v) => Math.max(0, Math.min(100, Number.isFinite(+v) ? +v : 0));
+const str = (v) => (typeof v === 'string' ? v.trim() : '');
+const hex = (v) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(str(v));
+  return m ? '#' + m[1].toUpperCase() : '';
+};
+const lower = (v) => str(v).toLowerCase();
+const src = (v) => (lower(v) === 'colorfront' ? 'colorFront' : 'design');
+const box = (b) => {
+  const o = b || {};
+  const x1 = clamp(o.x1), x2 = clamp(o.x2), y1 = clamp(o.y1), y2 = clamp(o.y2);
+  return { x1: Math.min(x1, x2), y1: Math.min(y1, y2), x2: Math.max(x1, x2), y2: Math.max(y1, y2) };
+};
+const r5 = (n) => Math.round(n * 2) / 2;
+const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+function sizeCell(v) {
+  let a = Number(v && v.min);
+  let b = Number(v && v.max);
+  if (!Number.isFinite(a) && !Number.isFinite(b)) return '—';
+  if (!Number.isFinite(a)) a = b;
+  if (!Number.isFinite(b)) b = a;
+  if (a > b) [a, b] = [b, a];
+  a = r5(a); b = r5(b);
+  return Math.abs(b - a) < 0.25 ? fmt(a) : fmt(a) + '-' + fmt(b);
 }
 
+// في وضع التعليمات بدون مخطط: يُستخرج كائن JSON من النص حتى لو أُحيط بأسوار markdown
+function extractJson(text) {
+  const t = String(text || '').replace(/```(?:json)?/gi, '').trim();
+  const a = t.indexOf('{');
+  const b = t.lastIndexOf('}');
+  if (a < 0 || b <= a) throw new Error('no json');
+  return t.slice(a, b + 1);
+}
+
+function normalize(raw) {
+  const o = raw && typeof raw === 'object' ? raw : {};
+  const list = (v) => (Array.isArray(v) ? v : []);
+  return {
+    styleName: str(o.styleName),
+    season: str(o.season),
+    category: str(o.category),
+    collectionLine: str(o.collectionLine),
+    garmentType: str(o.garmentType),
+    designDetails: list(o.designDetails).map(str).filter(Boolean).slice(0, 8),
+    garmentColors: list(o.garmentColors).map((c) => ({ name: str(c && c.name), source: src(c && c.source), box: box(c && c.box) }))
+      .filter((c) => c.box.x2 > c.box.x1 && c.box.y2 > c.box.y1).slice(0, 3),
+    fabrics: list(o.fabrics).map((f) => ({
+      role: str(f && f.role), name: str(f && f.name), composition: str(f && f.composition),
+      weight: str(f && f.weight), colorName: str(f && f.colorName), hex: hex(f && f.hex),
+      visible: Boolean(f && f.visible), source: src(f && f.source), box: box(f && f.box),
+    })).filter((f) => f.name).slice(0, 4),
+    trims: list(o.trims).map((t) => ({
+      kind: TRIM_ENUM.includes(lower(t && t.kind)) ? lower(t.kind) : 'other',
+      name: str(t && t.name), description: str(t && t.description),
+      colorName: str(t && t.colorName), hex: hex(t && t.hex),
+      visible: Boolean(t && t.visible), source: src(t && t.source), box: box(t && t.box),
+    })).filter((t) => t.name).slice(0, 4),
+    details: list(o.details).map((d) => ({ caption: str(d && d.caption), source: src(d && d.source), box: box(d && d.box) }))
+      .filter((d) => d.box.x2 > d.box.x1 && d.box.y2 > d.box.y1).slice(0, 4),
+    specs: list(o.specs).map((s) => ({ component: str(s && s.component), specification: str(s && s.specification) }))
+      .filter((s) => s.component || s.specification).slice(0, 12),
+    constructionFront: list(o.constructionFront).map((c) => ({ label: str(c && c.label), x: clamp(c && c.x), y: clamp(c && c.y) }))
+      .filter((c) => c.label).slice(0, 7),
+    constructionBack: list(o.constructionBack).map((c) => ({ label: str(c && c.label), x: clamp(c && c.x), y: clamp(c && c.y) }))
+      .filter((c) => c.label).slice(0, 7),
+    care: list(o.care).map(lower).filter((k) => CARE_ENUM.includes(k)),
+    sizeRows: list(o.sizeRows).map((r) => {
+      const vals = list(r && r.values).slice(0, 6).map(sizeCell);
+      while (vals.length < 6) vals.push('—');
+      return { label: str(r && r.label), values: vals };
+    }).filter((r) => r.label).slice(0, 5),
+  };
+}
+
+// ---------------------------------------------------------------------------
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'مفتاح Claude غير مضبوط على الخادم' });
+  if (!apiKey) {
+    return res.status(500).json({ error: 'مفتاح Claude غير مضبوط على الخادم' });
+  }
 
+  let files;
+  let fields;
   try {
-    const form = formidable({ maxFileSize: 12 * 1024 * 1024 });
-    const [fields, files] = await new Promise((resolve, reject) => {
-      form.parse(req, (err, flds, fls) => (err ? reject(err) : resolve([flds, fls])));
-    });
+    const form = formidable({ maxFileSize: 8 * 1024 * 1024, maxTotalFileSize: 16 * 1024 * 1024 });
+    [fields, files] = await form.parse(req);
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[gh] techpack form', e && e.message);
+    return res.status(400).json({ error: 'تعذّر استلام الصور — حجمها كبير أو الاتصال انقطع' });
+  }
 
-    const getField = (f) => (Array.isArray(f) ? f[0] : f) || '';
-    const garmentName = getField(fields.garmentName);
-    const fabricInfo = getField(fields.fabricInfo);
-    // لا اسم افتراضي: التيك باك للعميلة لا للمنصّة. الفراغ يعني موضعاً تملؤه.
-    const brandName = (getField(fields.brandName) || '').trim();
-    const season = getField(fields.season);
-    const extraNotes = getField(fields.notes);
+  const design = pickFile(files.design);
+  const colorFront = pickFile(files.colorFront);
+  const lineFront = pickFile(files.lineFront);
+  const lineBack = pickFile(files.lineBack);
+  if (!design || !colorFront || !lineFront || !lineBack) {
+    return res.status(400).json({ error: 'صورة التصميم والرسمات الأمامية والخلفية مطلوبة' });
+  }
 
-    const imageFile = files.image ? (Array.isArray(files.image) ? files.image[0] : files.image) : null;
-    if (!imageFile) return res.status(400).json({ error: 'لم تُرفع صورة التصميم' });
+  const meta = {
+    garmentName: getField(fields.garmentName),
+    fabricInfo: getField(fields.fabricInfo),
+    season: getField(fields.season),
+    notes: getField(fields.notes),
+  };
 
-    const imgBuffer = fs.readFileSync(imageFile.filepath);
-    const base64 = imgBuffer.toString('base64');
-    const mediaType = detectImageType(imgBuffer);
+  const content = [
+    { type: 'text', text: 'IMAGE 1 — colour design:' },
+    imageBlock(design),
+    { type: 'text', text: 'IMAGE 2 — colour flat, FRONT:' },
+    imageBlock(colorFront),
+    { type: 'text', text: 'IMAGE 3 — technical flat, FRONT:' },
+    imageBlock(lineFront),
+    { type: 'text', text: 'IMAGE 4 — technical flat, BACK:' },
+    imageBlock(lineBack),
+    { type: 'text', text: buildPrompt(meta) },
+  ];
 
-    const today = new Date();
-    const yymmdd = today.toISOString().slice(2, 10).replace(/-/g, '');
-
-    const instruction = `أنتِ مصمِّمة تقنية (Technical Designer) خبيرة تبني تيك باك بمعيار منصات المصانع الاحترافية.
-
-حلّلي صورة القطعة بدقة عالية جداً واستخرجي خصائصها الفعلية (النوع، القصّة، السيلويت، الرقبة، الطول، الإغلاق، التفاصيل الزخرفية) ثم ابني تيك باك كاملاً:
-
-${INDUSTRY_RULES}
-
-معلومات المصممة:
-- اسم القطعة: ${garmentName || 'استنتجيه من الصورة'}
-- مواصفات القماش: ${fabricInfo || 'اقترحي خامات منطقية حسب التصميم'}
-- الموسم: ${season || 'استنتجيه'}
-- ملاحظات: ${extraNotes || 'لا يوجد'}
-
-أرجعي JSON فقط (بدون أي نص أو أسوار ماركداون) بهذا الشكل الحرفي:
-
-{
-  "styleCode": "STY_XXXXXX_${yymmdd}_XXXX",
-  "garmentName": "الاسم الوصفي الكامل بالإنجليزية مثل: Emerald Strapless Sweetheart Mermaid Evening Gown with Embroidered Tulle Bust",
-  "garmentNameAr": "الاسم بالعربية",
-  "category": "الفئة بالإنجليزية مثل Dresses",
-  "season": "الموسم مثل SS26",
-  "sizeRange": "2 - 12",
-  "sampleSize": "6",
-  "fabricSummary": "سطر إنجليزي واحد يلخّص الأقمشة الرئيسية للهيدر مثل: Emerald duchess satin with lightweight silk chiffon train overlay",
-  "garmentFacts": "3-5 جمل إنجليزية قصيرة تقفل حقائق التصميم التي يُمنع تغييرها في أي رسمة، مثل: Strapless sweetheart neckline with NO straps and NO sleeves. Fitted mermaid silhouette flaring below the knee. Embroidered tulle bust panel with beading. Invisible center-back zipper. Long chiffon train. Emerald green.",
-  "pieceCount": 1,
-  "flatSketchBrief": "وصف إنجليزي بنيوي دقيق (6-10 جمل) يكفي لرسّام لرسم الرسمة التقنية المسطحة دون رؤية الصورة: عدد القطع وكل قطعة على حدة، شكل الرقبة/الياقة بالضبط، نوع الكتف والكم (kimono/set-in/sleeveless) وشكل فتحة الكم والكفّة، مسار كل حاشية أو شريط تباين (من أين يبدأ وإلى أين ينتهي وبأي زاوية)، خطوط الوصلات والبنسات، وجود أو غياب الخصر والحزام والإغلاق، شكل الحافة السفلية والذيل، والتناسب العام (الطول مقابل العرض). اذكري الحقائق كما تراها في الصورة حرفياً ولا تخترعي.",
-  "description": "وصف دقيق للقطعة بالعربية، سطران",
-  "garmentInfo": { "type": "بالإنجليزية مثل Strapless formal evening gown", "silhouette": "بالإنجليزية", "construction": "بالإنجليزية" },
-  "measurements": [
-    { "pom": "الاسم بالإنجليزية مع وصف كامل بين قوسين مثل: Center Front Length (top edge of bodice at CF V-point to front hem edge)", "view": "front|back", "tolerance": "+-1.0", "sizes": { "2": 130.0, "4": 131.0, "6": 132, "8": 133.0, "10": 134.0, "12": 135.0 } }
-  ],
-  "designDetails": [ "6-8 نقاط إنجليزية قصيرة تصف التصميم كما تُكتب في ورقة التيك باك، مثل: Asymmetrical one-shoulder gown with sculptural ruffle" ],
-  "collectionName": "اسم المجموعة أو سطرها التعريفي بالإنجليزية إن ذكرته المصممة في ملاحظاتها، وإلا اتركيه فارغاً",
-  "careInstructions": "تعليمات العناية بالإنجليزية مشتقّة من الخامات الفعلية، مثل: Dry Clean Only, Do Not Iron Directly on Embellishment, Do Not Bleach",
-  "specSheetLabels": {
-    "_تعليمة": "الليبلات أدناه مثال لفستان فقط. اختاري ليبلات هذه القطعة بعينها من جدول measurements الذي بنيتِه، بنفس صياغة أسمائها. بنطلون: WAIST WIDTH · SEAT WIDTH · THIGH WIDTH · KNEE WIDTH · LEG OPENING · OUTSEAM. بلوزة: ACROSS SHOULDER · CHEST WIDTH · ARMHOLE DEPTH · WAIST WIDTH · CUFF WIDTH · SLEEVE LENGTH. لا تنسخي ليبلات الفستان على قطعة ليست فستاناً.",
-    "front": [ { "label": "BUST WIDTH" }, { "label": "WAIST WIDTH" }, { "label": "LOW HIP WIDTH" }, { "label": "HFS WIDTH" }, { "label": "CFL" } ],
-    "back": [ { "label": "CB ZIPPER LENGTH" }, { "label": "CBL" }, { "label": "TRAIN LENGTH" }, { "label": "HBS WIDTH incl. TRAIN" } ]
-  },
-  "materials": [
-    { "name": "اسم الخامة بالإنجليزية مثل Duchess satin shell", "placement": "الموضع بالإنجليزية التقنية فقط مثل: Main fitted bodice, torso, waist, hip and upper skirt shell", "description": "وصف تقني إنجليزي كامل مع gsm/القياس/Pantone مثل: Heavyweight silk-blend duchess satin, approx. 180-220 gsm, emerald PANTONE 17-5641 TCX, smooth lustrous face for fitted body", "pantone": "17-5641 TCX", "hex": "#0F6B52", "qty": "2.8", "unit": "m", "photoPrompt": "برومبت إنجليزي فوتوغرافي لصورة هذه الخامة وحدها: للقماش عيّنة قماش متموّجة بلونها الدقيق، وللتريم صورة المنتج نفسه (سحاب/بكرة خيط/hook-and-eye/كريستالات). صياغة: Professional studio product photograph of ... on plain white or fabric background, macro detail, soft even lighting, photorealistic. No text, no watermark. قاعدة صارمة: كل صورة خامة يجب أن تنتمي بصرياً لهذا التصميم بالذات — استخدمي لون القطعة الفعلي بكود hex الصريح، وصوّري العنصر على خلفية من قماش التصميم نفسه بلونه حين يكون العنصر صغيراً (خرز، كريستال، سحاب، خطاف، ليبل)، واجعلي الخيوط والحواف والبطانات بألوان القطعة لا بألوان عامة. صفي العنصر المادي الواحد فقط باسمه الدقيق ولونه الدقيق (بكود hex) وخامته وشكله — invisible zipper بلون القماش، metal hook-and-eye bar closure، spool of polyester thread، rigilene boning strips، woven satin brand label — وممنوع ذكر الفستان أو شخص أو أكثر من عنصر واحد." }
-  ],
-  "calloutMap": [ { "num": 1, "target": "وصف موقع قصير بالإنجليزية مثل main satin body at hip", "view": "front|back" } ],
-  "sewingDetailLabels": [ { "label": "تسمية إنشائية قصيرة بالإنجليزية (4 كلمات كحد أقصى) مثل: CB invisible zipper", "view": "front|back" } ],
-  "colorway": [ { "part": "الجزء بالإنجليزية", "pantone": "الكود", "hex": "#XXXXXX" } ],
-  "detailViews": [ { "area": "تفصيل تصميمي ظاهر بالإنجليزية", "detail": "وصف تقني بالإنجليزية", "spec": "المواصفة/القياس بالإنجليزية", "view": "front|back" } ],
-  "artwork": [ { "name": "العنصر الزخرفي بالإنجليزية (تطريز/طباعة/أبليك/خرز/حواف زخرفية)", "placement": "الموضع بالإنجليزية التقنية", "size": "القياس بالسنتيمتر", "technique": "أسلوب التنفيذ بالإنجليزية مثل: Hand-guided chain-stitch embroidery / Heat-set crystal application / Machine satin-stitch appliqué", "notes": "ملاحظات تنفيذية بالإنجليزية" , "view": "front|back"} ],
-  "construction": [ { "section": "القسم بالإنجليزية مثل Bodice", "detailType": "نوع التفصيل بالإنجليزية مثل Seam / Closure / Support", "description": "جملة إنجليزية تقنية واحدة" } ],
-  "sewingSteps": [ "خطوات إنجليزية تقنية بصيغة أوامر المصنع، 16 خطوة على الأقل" ],
-  "fitLog": [ { "version": "v0", "date": "${today.toISOString().slice(0, 10)}", "change": "Initial sample tech pack generated", "by": "${brandName || 'BRAND NAME'}" } ]
-}
-
-قواعد إلزامية — أي إخلال بها يُفشل التيك باك:
-1. measurements: 26 نقطة على الأقل، كل pom معه وصف كامل بين قوسين، ولكل نقطة view. مفاتيح sizes هي "2","4","6","8","10","12" حصراً وقيمها أرقام (وليست نصوصاً). مقاس العيّنة 6 هو المرجع الأوسط.
-2-ح. اسم البراند: يُؤخذ حرفياً من ملاحظات المصممة إن ذكرته. ويُمنع منعاً باتاً اختراع اسم ماركة أو وضع اسم من عندك. إن لم تذكره المصممة فاكتبي في وصف الليبل العبارة الحرفية BRAND NAME كموضع يملؤه المستخدم، وفي photoPrompt اطلبي ليبلاً منسوجاً فارغاً بلا أي كتابة أو شعار.
-2-ز. إن ظهر على التصميم خرز أو لؤلؤ أو كريستال أو ترتر، فلكلٍّ منها بند مستقل باسمه. وإن ظهر دانتيل بأي نوع (chantilly، guipure، corded، تول مطرّز) فله بند مستقل باسم نوعه. لا تدمجيها داخل وصف قماش آخر ولا تتجاهليها.
-2-و. لا تُدرجي أي خامة غير مستخدمة فعلياً في هذه القطعة، ولا تكرري نفس القماش ببندين. إن ذكرت المصممة قماشاً في مواصفاتها فهو إلزامي في القائمة باسمه كما كتبته. راجعي قائمتك النهائية: كل بند إما مرئي في الصورة أو مذكور في مواصفات المصممة أو لازمة تصنيع ضرورية — وما عدا ذلك يُحذف.
-2-أ. تغطية إلزامية: امسحي صورة القطعة لوناً بلون وجزءاً بجزء، وأدرجي بنداً مستقلاً لكل قماش ولون ظاهر فعلياً (كل لون تباين، كل حاشية، كل بطانة، كل قطعة في الطقم). إن كان الطقم قطعتين فلكل قطعة أقمشتها. لا تدمجي لونين مختلفين في بند واحد ولا تتركي أي لون ظاهر بلا بند.
-2-ب. الكميات والأحجام واقعية للمقاس 6 وحسب نوع القطعة: عباية/فستان طويل تحتاج 4-6 م للقماش الرئيسي، الحواف تُحسب بالمتر الطولي حسب طولها الفعلي، وكيس التغليف يجب أن يكون بمقاس الثوب الطويل (مثل 60×90 سم أو 40×60 سم مطوياً) لا كيساً صغيراً. اذكري القياس داخل الوصف.
-2-ج. ليبل المقاس والعناية: يذكر المقاس والتركيب النسيجي الفعلي للأقمشة المستخدمة وتعليمات العناية المناسبة لها (مثلاً: صوف/كريب = Dry clean only)، ويُخاط في الدرزة الجانبية الداخلية.
-2-د. طبيعة البنود: كل بند هو مادة خام أو لازمة تصنيع فقط — قماش، بطانة، حاشية، شريط، حشوة، دعامة، سحاب، خطاف، خيط، ليبل، شمّاعة/علاقة، وكيس تغليف. ممنوع منعاً باتاً إدراج أي قطعة ملبوسة جاهزة (جاكيت، فستان، عباية) كبند خامة.
-2-هـ. الشمّاعة وكيس التغليف اختياريان: لا تُدرجيهما إلا إن طلبتهما المصممة صراحة في مواصفاتها. أما ليبل التركيب النسيجي والمقاس وليبل تعليمات العناية فبندان إلزاميان منفصلان دائماً — بندٌ لكلٍّ منهما، لا بند واحد مدموج.
-2. materials: القائمة تتبع التصميم نفسه — لا عدد ثابت. أدرجي كل خامة ظاهرة فعلياً أو لازمة للتصنيع، ولا تخترعي بنداً لتبلغي عدداً معيّناً ولا تحذفي بنداً حقيقياً لتنزلي إلى عدد معيّن. الترتيب الوظيفي: الأقمشة الرئيسية أولاً (قماش أساسي، طبقات، دانتيل وأقمشة زخرفية، بطانة)، ثم الدعم البنيوي (boning، شريط قنوات)، ثم الإغلاق (سحاب، hook-and-eye)، ثم التثبيت (حشوة لاصقة، stay tape)، ثم الزخارف (خرز، لؤلؤ، كريستال)، ثم الليبلات، ثم الخيوط. هذه القائمة نفسها هي الـ BOM، فلا تفصلي قائمتين. لكل عنصر photoPrompt خاص به.
-3. إن حدّدت المصممة خامات، فلا تضيفي أي قماش لم تذكره — أكملي فقط التريمات المنطقية اللازمة للتصنيع.
-3-ب. ممنوع اختراع أي عنصر بنائي غير ظاهر في الصورة: لا حزام ولا خصر مخيط ولا كسرات ولا أربطة ولا إغلاق إن كانت القطعة مفتوحة. إن كانت العباية مفتوحة بلا إغلاق فاذكري ذلك صراحة في garmentFacts وفي construction.
-4. calloutMap: 5 إلى 6 عناصر، num هو رقم العنصر في materials (ترتيبه من 1)، موزّعة بين front وback، تغطي القماش الرئيسي والطبقات والزخرفة والإغلاق. حقل y لكل عنصر هو الموقع العمودي الفعلي لتلك الخامة على القطعة (0 = أعلى حافة، 100 = أدنى نقطة): مثال لعباية — القماش الرئيسي عند الجذع ~35، حاشية الرقبة/الياقة ~6، حاشية الكم ~45، الذيل ~92. ضعي كل رقم عند موضع خامته الحقيقي لا عشوائياً.
-5. specSheetLabels: أسماء كبيرة قصيرة (4 كلمات كحد أقصى)، 6-8 للأمامي و4-5 للخلفي، مطابقة لنقاط قياس فعلية من الجدول (استخدمي الاختصارات CFL, CBL, BP-BP, HFS, HBS حيث تنطبق).
-6-د. كل تسمية خياطة يجب أن تكون مصطلح مصنع قياسياً لنقطة بناء ظاهرة فعلاً في هذه القطعة، مثل: Shawl collar facing، Kimono underarm seam، Bias-bound trim edge، Gold piping insert، Cuff band attachment، Blind-stitched hem، Concealed side zip، CB seam. ممنوع العبارات العامة أو الوصفية مثل NO WAIST SEAM أو FRONT NO CLOSURE — التسمية تصف عملية خياطة موجودة لا نفي شيء.
-6. sewingDetailLabels: 6-8 تسميات، كل واحدة 4 كلمات كحد أقصى، وكل تسمية عند حقل y الموافق لنقطة البناء الفعلية على القطعة: الياقة/الرقبة ~5، الكتف ~10، الإبط/بداية الكم ~22، الخصر ~35، الإغلاق حسب موضعه، حاشية الكم ~45، الهيم/الذيل ~92. لا تضعي تسمية عند موضع لا تخصه.
-6-ج. عند تقدير y انظري إلى الرسمة كما تُرسم مسطحة: أعلى حافة القطعة هي y=0 وأدنى نقطة بالهيم هي y=100. لقطعة خارجية مفتوحة (عباية/كيمونو/معطف): الياقة/الرقبة 2-6، الكتف 6-10، الصدر 14-20، أسفل الإبط/التقاء الكم 20-26، الخصر 30-36، الورك 42-48، فتحة الكم/الكفّة 45-55، الهيم 92-98. لفستان بلا حمالات: الصدر 3-6، الخصر 15-20، الورك 28-35. لا تضعي أي ليبل خارج نطاق قطعته.
-6-ب. لا تُرجعي حقل y ولا أي رقم موقع في specSheetLabels أو calloutMap أو sewingDetailLabels. مواقع الليبلات تُحسب في الكود من جدول القياسات نفسه. أرجعي اسم الليبل والخامة المشار إليها فقط.
-7. colorway: 4-8 ألوان بأكواد hex دقيقة من الصورة الفعلية.
-8. construction: 12 صفاً بالضبط. detailViews: 6 إلى 8 تفاصيل. كل تفصيل يجب أن يكون شيئاً **مرئياً بوضوح** في الرسمة الملوّنة، لأن كل لقطة تُقتطع من تلك الرسمة: بانل، تطريز، كسرات، تدرّج لوني، حافة مزخرفة، أسورة، ياقة ظاهرة، حاشية. ويُمنع اختيار ما لا يُرى في رسمة مسطّحة: السحاب المخفي، الدرزات الداخلية، البطانة، الخياطة المخفية، الدعامات. ولكل تفصيل حقل view يحدد المنظر الذي يظهر فيه — front أو back — ووزّعيها على المنظرين حسب مكان ظهورها الفعلي. designDetails: 6-8 نقاط قصيرة جداً (سطر واحد لكل نقطة) تصف السمات البارزة للتصميم: القصّة، الياقة، الأكمام، الإغلاق، البطانة، الطول.
-artwork: 2-4 عناصر زخرفية مع حقل technique إلزامي لكل عنصر، وحقل view يحدد المنظر الذي يظهر فيه العنصر (front أو back) لأن لقطته تُقتطع من رسمة ذلك المنظر؛ إن لم تكن القطعة تحوي أي زخرفة فأرجعي مصفوفة فارغة. sewingSteps: 16 خطوة على الأقل بترتيب تنفيذي حقيقي من التثبيت إلى التشطيب النهائي.
-9. كل النصوص التقنية بالإنجليزية حصراً (لغة المصانع). العربية فقط في garmentNameAr وdescription.
-10. pieceCount: عدد القطع المنفصلة في التصميم (طقم عباية وفستان = 2). flatSketchBrief إلزامي وبنفس دقة الصورة: صفي كل قطعة على حدة وبالترتيب، لا تَعُدّي الطبقات أو التنورة الخارجية أو الذيل أو البطانة قطعاً منفصلة — هذه أجزاء من قطعة واحدة. القطع المنفصلة هي ما يُلبس مستقلاً فقط (بلوزة مع تنورة، عباية فوق فستان). وفي كل الأحوال يجب أن تُظهر الرسمة شكلاً واحداً فقط في المنظر الواحد، لا شكلين متجاورين.`;
-
-    const payload = {
-      model: MODEL,
-      max_tokens: 24000,
-      // claude-sonnet-5: التفكير التكيفي مفعّل افتراضياً ويستهلك max_tokens والوقت
-      // قبل أي نص — نطفئه لأن المطلوب استخراج JSON مباشر
-      thinking: { type: 'disabled' },
-      stream: true,
-      messages: [{
+  // الطلب الأساسي: مخرجات مضبوطة بالمخطط + تفكير مطفأ.
+  // أي رفض 400 يحدث عند فحص الطلب قبل تشغيل النموذج (لا يُحتسب من الرصيد)،
+  // فيُعاد الطلب فوراً بصيغة مقبولة بدل أن يفشل التحليل:
+  //   1) رفض بسبب thinking      → نفس الطلب بدون thinking
+  //   2) رفض بسبب المخطط        → نفس المحتوى، والمخطط مكتوب داخل التعليمات
+  let useThinking = true;
+  let useSchema = true;
+  const buildBody = (mode) => {
+    const body = { model: MODEL, max_tokens: MAX_TOKENS };
+    if (mode.thinking) body.thinking = { type: 'disabled' };
+    if (mode.schema) {
+      body.output_config = { format: { type: 'json_schema', schema: SCHEMA } };
+      body.messages = [{ role: 'user', content }];
+    } else {
+      body.messages = [{
         role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: instruction },
-        ],
-      }],
-    };
+        content: content.concat([{
+          type: 'text',
+          text: 'Return ONLY one JSON object (no markdown, no code fences, no text before or after it) '
+            + 'that matches this JSON Schema exactly, with every property present:\n' + JSON.stringify(SCHEMA),
+        }]),
+      }];
+    }
+    return body;
+  };
 
-    // مهلة خمول لا مهلة ثابتة: طالما النص يتدفّق لا نقطع.
-    const IDLE_MS = 30000;
-    const HARD_MS = 240000;
-    const claudeController = new AbortController();
-    let idleTimer = null;
-    const resetIdle = () => {
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => claudeController.abort(), IDLE_MS);
-    };
-    const hardTimer = setTimeout(() => claudeController.abort(), HARD_MS);
-    const clearClaudeTimers = () => { if (idleTimer) clearTimeout(idleTimer); clearTimeout(hardTimer); };
-    resetIdle();
-
+  const deadline = Date.now() + CALL_TIMEOUT_MS;
+  let data = null;
+  let usedSchema = true;
+  for (let attempt = 0; attempt < 3 && !data; attempt++) {
+    const mode = { thinking: useThinking, schema: useSchema };
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), Math.max(5000, deadline - Date.now()));
     let response;
     try {
       response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify(payload),
-        signal: claudeController.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        signal: ctrl.signal,
+        body: JSON.stringify(buildBody(mode)),
       });
     } catch (e) {
-      if (typeof console !== "undefined") console.warn("[gh]", e && e.message);
-      clearClaudeTimers();
-      return res.status(500).json({ error: 'انتهت مهلة تحليل التصميم، حاولي مرة ثانية' });
+      clearTimeout(timer);
+      const aborted = e && e.name === 'AbortError';
+      if (typeof console !== 'undefined') console.warn('[gh] techpack call', e && e.message);
+      return res.status(504).json({ error: aborted ? 'انتهت مهلة التحليل — حاولي مرة ثانية' : 'تعذّر الاتصال بخدمة التحليل' });
+    }
+    clearTimeout(timer);
+
+    if (response.status === 400) {
+      let detail = '';
+      try { detail = (await response.text()).slice(0, 500); } catch (e) { detail = ''; }
+      if (typeof console !== 'undefined') console.warn('[gh] techpack 400', 'attempt', attempt, detail);
+      if (useThinking && /thinking/i.test(detail)) { useThinking = false; continue; }
+      if (useSchema) { useSchema = false; continue; }
+      return res.status(502).json({ error: 'فشل التحليل (400)' });
     }
 
     if (!response.ok) {
-      clearClaudeTimers();
-      const errText = await response.text();
-      return res.status(500).json({ error: 'فشل تحليل التصميم: ' + errText.slice(0, 200) });
-    }
-
-    let raw = '';
-    let streamError = '';
-    let stopReason = '';
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const consumeChunk = (chunk) => {
-      resetIdle();
-      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        const t = line.trim();
-        if (!t.startsWith('data:')) continue;
-        const payloadStr = t.slice(5).trim();
-        if (!payloadStr || payloadStr === '[DONE]') continue;
-        try {
-          const evt = JSON.parse(payloadStr);
-          if (evt.type === 'content_block_delta' && evt.delta && typeof evt.delta.text === 'string') {
-            raw += evt.delta.text;
-          } else if (evt.type === 'error' && evt.error) {
-            streamError = evt.error.message || evt.error.type || 'stream error';
-          } else if (evt.type === 'message_delta' && evt.delta && evt.delta.stop_reason) {
-            stopReason = evt.delta.stop_reason;
-          }
-        } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); /* سطر غير مكتمل — يُكمَّل في الدفعة التالية */ }
-      }
-    };
-
-    try {
-      const body = response.body;
-      if (body && typeof body.getReader === 'function') {
-        const reader = body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          consumeChunk(value);
-        }
-      } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
-        for await (const chunk of body) consumeChunk(chunk);
-      } else {
-        const full = await response.text();
-        full.split('\n').forEach((l) => consumeChunk(l + '\n'));
-      }
-    } catch (e) {
-      if (typeof console !== "undefined") console.warn("[gh]", e && e.message);
-      // انقطاع أثناء الاستلام — نكمل بما جُمِّع ويُصلَح لاحقاً
-    }
-    clearClaudeTimers();
-
-    if (!raw || raw.trim().length < 40) {
-      const reason = streamError || (stopReason ? 'stop_reason: ' + stopReason : '');
-      return res.status(500).json({
-        error: 'انقطع تحليل التصميم أثناء الاستلام' + (reason ? ' — السبب: ' + reason.slice(0, 180) : '') + '، حاولي مرة ثانية',
+      let detail = '';
+      try { detail = (await response.text()).slice(0, 300); } catch (e) { detail = ''; }
+      if (typeof console !== 'undefined') console.warn('[gh] techpack status', response.status, detail);
+      const busy = response.status === 429 || response.status === 529 || response.status === 503;
+      return res.status(502).json({
+        error: busy ? 'خدمة التحليل مشغولة الآن — انتظري دقيقة وحاولي مرة ثانية' : 'فشل التحليل (' + response.status + ')',
       });
     }
 
-    let techpack;
-    try { techpack = safeJsonParse(raw); }
-    catch (e) {
-      if (typeof console !== "undefined") console.warn("[gh]", e && e.message);
-      return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
+    try {
+      data = await response.json();
+    } catch (e) {
+      return res.status(502).json({ error: 'استجابة غير صالحة من خدمة التحليل' });
     }
-    if (!techpack || typeof techpack !== 'object' || Array.isArray(techpack)) {
-      return res.status(500).json({ error: 'تعذّر قراءة نتيجة التحليل، حاولي مرة ثانية' });
-    }
-
-    // تصحيح حتمي بالكود قبل الإرسال
-    techpack.materials = normalizeMaterials(techpack.materials, fabricInfo);
-    const matCount = techpack.materials.length;
-    if (techpack.specSheetLabels && typeof techpack.specSheetLabels === 'object') {
-      techpack.specSheetLabels = {
-        front: normalizeLabels(techpack.specSheetLabels.front, 'label'),
-        back: normalizeLabels(techpack.specSheetLabels.back, 'label'),
-      };
-    }
-    techpack.sewingDetailLabels = normalizeLabels(techpack.sewingDetailLabels, 'label');
-    // أرقام الكول أوت يجب أن تشير لخامة موجودة فعلاً
-    techpack.calloutMap = normalizeLabels(techpack.calloutMap, 'target')
-      .filter((c) => Number(c.num) >= 1 && Number(c.num) <= matCount);
-
-    techpack.brandName = brandName;
-    techpack.generatedAt = new Date().toISOString();
-    if (!techpack.sampleSize) techpack.sampleSize = '6';
-    if (!techpack.sizeRange) techpack.sizeRange = '2 - 12';
-
-    return res.status(200).json(techpack);
-  } catch (error) {
-    return res.status(500).json({ error: 'خطأ في الخادم: ' + (error.message || 'غير معروف') });
+    usedSchema = mode.schema;
   }
+  if (!data) {
+    return res.status(502).json({ error: 'فشل التحليل — حاولي مرة ثانية' });
+  }
+
+  if (data.stop_reason === 'refusal') {
+    return res.status(422).json({ error: 'تعذّر تحليل هذه الصورة — جرّبي صورة أوضح للتصميم' });
+  }
+  if (data.stop_reason === 'max_tokens') {
+    return res.status(502).json({ error: 'التحليل لم يكتمل — حاولي مرة ثانية' });
+  }
+
+  const text = (data.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('');
+  let parsed;
+  try {
+    parsed = JSON.parse(usedSchema ? text : extractJson(text));
+  } catch (e) {
+    if (typeof console !== 'undefined') console.warn('[gh] techpack parse', e && e.message);
+    return res.status(502).json({ error: 'تعذّر قراءة ناتج التحليل — حاولي مرة ثانية' });
+  }
+
+  const out = normalize(parsed);
+  if (!out.sizeRows.length || !out.specs.length || !out.details.length) {
+    return res.status(502).json({ error: 'التحليل ناقص — حاولي مرة ثانية' });
+  }
+
+  return res.status(200).json(out);
 }
