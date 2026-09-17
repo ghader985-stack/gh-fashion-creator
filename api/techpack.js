@@ -139,14 +139,18 @@ GARMENT COLOURS (garmentColors): EVERY distinct colour of the GARMENT itself (1 
 
 FABRICS (fabrics): every textile of the garment, max 4, in this order: main fabric, contrast fabric, overlay / lace / tulle / illusion, lining.
 - role: "MAIN FABRIC", "CONTRAST FABRIC", "OVERLAY", "ILLUSION", "LACE" or "LINING".
-- name: e.g. "Premium Satin", "Stretch Tulle".
-- composition: fibre content with percentages, e.g. "96% Polyester, 4% Spandex". Use the designer's specification when given, otherwise the standard composition of that fabric.
+- name: the fabric the designer named, in English (تول = Tulle, كريب = Crepe, ساتان = Satin, شيفون = Chiffon, أورجانزا = Organza, دانتيل = Lace, مخمل = Velvet, تفتا = Taffeta, جورجيت = Georgette, كريب دي شين = Crepe de Chine), with a short qualifier only when the design shows one ("Beaded Crepe", "Pleated Satin"). Never rename her fabric into another textile.
+- composition: fibre content with percentages.
+  · If the designer gave the fibre content, copy it exactly.
+  · If she named the fabric but not the fibre, use the fibre a real atelier would cut that fabric in for THIS garment class, and say so at that quality level: for evening, couture, bridal and occasion wear that means natural fibres — 100% Silk, 100% Silk (Silk Tulle / Silk Organza / Silk Georgette), 92% Silk 8% Elastane for stretch satin or crepe, 100% Viscose or a viscose blend for a heavier drape, cotton or silk-blend base for embroidered net.
+  · Use polyester, nylon or any synthetic ONLY when the designer named it, or when the piece is clearly everyday ready-to-wear, sportswear or uniform, or for parts that are synthetic by nature (invisible zipper coil, elastic, boning, tulle netting the designer asked for in synthetic).
+  Never default the whole garment to polyester.
 - weight: typical weight, e.g. "220 GSM".
 - colorName: plain colour name as seen, e.g. "Burgundy", "Nude".
 - hex: #RRGGBB of that fabric as seen. For a hidden lining use the colour it should be (normally the main fabric colour unless the designer said otherwise).
 - visible: true if this fabric can be seen on IMAGE 1 or IMAGE 2.
 - source and box: if visible, a box on the chosen source image framing a clean representative area of ONLY this fabric (texture clearly readable, no skin, no background, no other fabric, no face), at least 8 units on each side. If not visible return source "design" and x1=y1=x2=y2=0.
-If the designer specified the fabrics, use exactly those fabrics and do not add other textiles.
+If the designer specified the fabrics, use exactly those fabrics, with her names and her fibres, and do not add other textiles or swap one textile for another.
 
 TRIMS (trims): the key trims and closures, max 4, the most characteristic first (embellishment before closures).
 - kind: the closest value of the enum.
@@ -162,7 +166,8 @@ DETAILS (details): exactly 4 close-up crops of the most distinctive VISIBLE fron
 MATERIAL SPECIFICATIONS (specs): one row per material component, 6 to 10 rows, in this order: shell, overlay / lace / illusion, lining, embellishments, piping and other trims, closures, thread, label.
 - component: short name, e.g. "SHELL", "ILLUSION", "LINING", "CRYSTALS", "PIPING", "ZIPPER", "THREAD", "LABEL".
 - specification: two short lines separated by a newline character: first the material name, then composition and weight or finish, e.g. "Premium Satin" + newline + "96% Polyester, 4% Spandex – 220 GSM".
-Always include THREAD ("Polyester" / "Color Matched") and LABEL ("Woven Label" / the brand name from the notes, or "Brand Name" if none).
+Always include THREAD and LABEL. The thread fibre follows the shell: silk thread with silk shells and couture pieces, polyester thread with synthetic or everyday pieces; second line "Color Matched". LABEL: "Woven Label" and the brand name from the notes, or "Brand Name" if none.
+Every specification line in this table must repeat exactly the fabric name and composition given in FABRICS above — no different fibre, no different fabric name.
 
 CONSTRUCTION DETAILS
 - constructionFront: 4 to 6 callouts for IMAGE 3. constructionBack: 3 to 5 callouts for IMAGE 4.
