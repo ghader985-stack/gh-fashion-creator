@@ -1749,7 +1749,7 @@ function tpBuildSheet(d, imgs, input) {
 
   // الكولورواي: من بكسلات التصميم فقط، بلا تكرار.
   // أي لون يطابق خلفية الصورة يُرفض (صندوق وقع خارج القطعة).
-  const isBg = (hex, it) => cDist(tpHexRgb(hex), bgOf(it)) < 36;
+  const isBg = (hex, it) => cDist(tpHexRgb(hex), bgOf(it)) < 22 || Math.min(...tpHexRgb(hex)) > 246;
   const sample = (it) => {
     const b = it && it.box;
     if (!b || b.x2 - b.x1 <= 0 || b.y2 - b.y1 <= 0) return '';
@@ -1758,7 +1758,7 @@ function tpBuildSheet(d, imgs, input) {
   };
   const colorway = [];
   const pushColor = (hex, name) => {
-    if (!hex || colorway.length >= 3) return;
+    if (!hex || colorway.length >= 10) return;
     const pt = nearestPantone(hex);
     const rgb = tpHexRgb(hex);
     if (colorway.some((c) => cDist(tpHexRgb(c.hex), rgb) < 40)) return;
@@ -1769,11 +1769,11 @@ function tpBuildSheet(d, imgs, input) {
       hex,
     });
   };
+  // كل ألوان القطعة: صناديق الألوان أولاً، ثم ألوان الأقمشة الظاهرة، ثم
+  // ألوان الأقمشة المخفية — بلا تكرار، حتى تظهر كل درجة موجودة بالتصميم
   (d.garmentColors || []).forEach((g) => pushColor(sample(g), g.name));
-  // احتياط: إن لم يصح أي صندوق لون، تُسحب الألوان من مربعات الأقمشة الظاهرة
-  if (!colorway.length) {
-    (d.fabrics || []).forEach((f) => { if (f.visible) pushColor(sample(f), f.colorName); });
-  }
+  (d.fabrics || []).forEach((f) => { if (f.visible) pushColor(sample(f), f.colorName); });
+  (d.fabrics || []).forEach((f) => { if (tpHexOk(f.hex)) pushColor(f.hex.toUpperCase(), f.colorName); });
   const cw = colorway;
 
   const snapHex = (hex) => {
@@ -1803,8 +1803,8 @@ function tpBuildSheet(d, imgs, input) {
       desc: [t.description, t.colorName && !String(t.description || '').toLowerCase()
         .includes(String(t.colorName).toLowerCase()) ? '(' + t.colorName + ')' : ''].filter(Boolean).join(' '),
       kind: TP_TRIM_KINDS.includes(t.kind) ? t.kind : 'other',
-      hex: snapHex(t.hex),
-      asset: vis ? add(tpCrop(srcOf(t), t.box, 1, 300)) : null,
+      // اللون من بكسلات التريم نفسه إن كان ظاهراً، وإلا من تقدير التحليل
+      hex: (vis && sample(t)) || snapHex(t.hex),
     };
   });
 
@@ -2236,57 +2236,209 @@ function tpCareIcon(p, kind, x, y, s) {
   p.circle(x + s / 2, y + s / 2, s * 0.4, o);
 }
 
-// أيقونة تريم مخفي (سحاب، زر…) داخل دائرة، بلون الخامة
+// ---------------------------------------------------------------------------
+// أيقونات التريمز: كل تريم يُرسم بشكله الحقيقي (لؤلؤ، كريستال، سحاب، شريط…)
+// بلون الخامة نفسه، مع درجة فاتحة للّمعة وأخرى غامقة للحدّ. رسم متجهي نظيف
+// يطبع بأي مقاس.
+// ---------------------------------------------------------------------------
+function tpMix(hex, target, t) {
+  const a = tpHexRgb(tpHexOk(hex) ? hex : '#9A948D');
+  const b = tpHexRgb(target);
+  const m = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  return '#' + m.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+// لؤلؤة واحدة مع لمعة
+function tpPearl(p, cx, cy, rr, base, light, edge) {
+  p.circle(cx, cy, rr, { fill: base, stroke: edge, lw: 0.08 });
+  p.circle(cx - rr * 0.3, cy - rr * 0.32, rr * 0.3, { fill: light });
+  p.circle(cx - rr * 0.18, cy - rr * 0.2, rr * 0.12, { fill: tpMix(light, '#ffffff', 0.7) });
+}
+
+// وميض صغير على شكل نجمة أربعة رؤوس
+function tpSparkle(p, cx, cy, rr, col) {
+  p.poly([[cx, cy - rr], [cx + rr * 0.24, cy - rr * 0.24], [cx + rr, cy],
+    [cx + rr * 0.24, cy + rr * 0.24], [cx, cy + rr], [cx - rr * 0.24, cy + rr * 0.24],
+    [cx - rr, cy], [cx - rr * 0.24, cy - rr * 0.24]], { fill: col, closed: true, noStroke: true });
+}
+
 function tpTrimIcon(p, kind, hex, cx, cy, r) {
-  const col = tpHexOk(hex) ? hex : '#9A948D';
-  const dark = '#3b3835';
-  const o = { stroke: dark, lw: 0.18 };
-  if (kind === 'zipper') {
-    const w = r * 0.62;
-    p.rect(cx - w / 2, cy - r * 0.78, w, r * 1.56, { fill: col });
-    for (let i = 0; i < 9; i++) {
-      const yy = cy - r * 0.62 + i * r * 0.14;
-      const side = i % 2 ? 1 : -1;
-      p.poly([[cx, yy], [cx + side * r * 0.12, yy]], { stroke: '#c9c4bd', lw: 0.35 });
+  const base = tpHexOk(hex) ? hex : '#9A948D';
+  const light = tpMix(base, '#ffffff', 0.42);
+  const pale = tpMix(base, '#ffffff', 0.72);
+  const dark = tpMix(base, '#000000', 0.3);
+  const edge = tpMix(base, '#000000', 0.52);
+  const thread = '#6f6a64';
+
+  if (kind === 'pearl') {
+    tpPearl(p, cx - r * 0.46, cy + r * 0.26, r * 0.32, base, light, edge);
+    tpPearl(p, cx + r * 0.46, cy + r * 0.26, r * 0.32, base, light, edge);
+    tpPearl(p, cx, cy - r * 0.24, r * 0.44, base, light, edge);
+    return;
+  }
+
+  if (kind === 'crystal') {
+    const w = r * 0.66;
+    const top = cy - r * 0.62;
+    const shoulder = cy - r * 0.2;
+    const tip = cy + r * 0.78;
+    p.poly([[cx - w * 0.5, top], [cx + w * 0.5, top], [cx + w, shoulder], [cx, tip], [cx - w, shoulder]],
+      { fill: base, stroke: edge, lw: 0.1, closed: true });
+    p.poly([[cx - w * 0.5, top], [cx - w, shoulder], [cx, shoulder], [cx, top]],
+      { fill: light, noStroke: true, closed: true });
+    p.poly([[cx, top], [cx, tip]], { stroke: pale, lw: 0.1 });
+    p.poly([[cx - w, shoulder], [cx + w, shoulder]], { stroke: pale, lw: 0.1 });
+    p.poly([[cx + w * 0.5, top], [cx + w, shoulder], [cx, tip]], { stroke: dark, lw: 0.08 });
+    tpSparkle(p, cx + r * 0.74, cy - r * 0.66, r * 0.22, tpMix(base, '#ffffff', 0.85));
+    return;
+  }
+
+  if (kind === 'bead' || kind === 'embroidery') {
+    const arc = tpArc(cx, cy - r * 0.5, r * 0.85, r * 0.85, Math.PI * 0.2, Math.PI * 0.8, 24);
+    p.poly(arc, { stroke: thread, lw: 0.1 });
+    [0.1, 0.3, 0.5, 0.7, 0.9].forEach((t) => {
+      const i = Math.round(t * (arc.length - 1));
+      tpPearl(p, arc[i][0], arc[i][1], r * 0.2, base, light, edge);
+    });
+    if (kind === 'embroidery') {
+      p.poly([[cx - r * 0.7, cy + r * 0.66], [cx + r * 0.7, cy + r * 0.66]],
+        { stroke: thread, lw: 0.1, dash: [0.5, 0.35] });
     }
-    p.rect(cx - r * 0.12, cy - r * 0.72, r * 0.24, r * 0.3, { fill: '#b9b3ab', stroke: dark, lw: 0.12 });
     return;
   }
-  if (kind === 'button' || kind === 'snap') {
-    p.circle(cx, cy, r * 0.55, { fill: col, stroke: dark, lw: 0.15 });
-    if (kind === 'snap') { p.circle(cx, cy, r * 0.25, { stroke: '#e8e4de', lw: 0.25 }); return; }
-    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => p.circle(cx + a * r * 0.16, cy + b * r * 0.16, r * 0.07, { fill: '#f4f2ef' }));
+
+  if (kind === 'sequin') {
+    [[-0.44, 0.2], [0.44, 0.2], [0, -0.24]].forEach(([ux, uy], i) => {
+      const sx = cx + ux * r;
+      const sy = cy + uy * r;
+      p.circle(sx, sy, r * 0.42, { fill: i === 2 ? base : light, stroke: edge, lw: 0.08 });
+      p.poly(tpArc(sx, sy, r * 0.3, r * 0.3, Math.PI * 0.9, Math.PI * 1.7, 10), { stroke: pale, lw: 0.1 });
+      p.circle(sx, sy, r * 0.07, { fill: edge });
+    });
     return;
   }
+
+  if (kind === 'lace') {
+    for (let i = 0; i < 3; i++) {
+      const sx = cx - r * 0.62 + i * r * 0.62;
+      p.poly(tpArc(sx, cy + r * 0.34, r * 0.31, r * 0.31, Math.PI, Math.PI * 2, 14), { stroke: base, lw: 0.16 });
+      p.circle(sx, cy + r * 0.34, r * 0.07, { fill: base });
+    }
+    for (let i = 0; i < 5; i++) {
+      const ang = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+      p.circle(cx + Math.cos(ang) * r * 0.3, cy - r * 0.4 + Math.sin(ang) * r * 0.3, r * 0.13,
+        { fill: light, stroke: base, lw: 0.08 });
+    }
+    p.circle(cx, cy - r * 0.4, r * 0.1, { fill: base });
+    return;
+  }
+
+  if (kind === 'ribbon') {
+    p.poly(tpArc(cx - r * 0.45, cy - r * 0.1, r * 0.42, r * 0.34, 0, Math.PI * 2, 18),
+      { fill: base, stroke: edge, lw: 0.08, closed: true });
+    p.poly(tpArc(cx + r * 0.45, cy - r * 0.1, r * 0.42, r * 0.34, 0, Math.PI * 2, 18),
+      { fill: base, stroke: edge, lw: 0.08, closed: true });
+    p.poly([[cx - r * 0.16, cy + r * 0.06], [cx - r * 0.5, cy + r * 0.82], [cx - r * 0.08, cy + r * 0.6]],
+      { fill: dark, stroke: edge, lw: 0.08, closed: true });
+    p.poly([[cx + r * 0.16, cy + r * 0.06], [cx + r * 0.5, cy + r * 0.82], [cx + r * 0.08, cy + r * 0.6]],
+      { fill: dark, stroke: edge, lw: 0.08, closed: true });
+    p.circle(cx, cy - r * 0.04, r * 0.2, { fill: light, stroke: edge, lw: 0.08 });
+    return;
+  }
+
+  if (kind === 'piping') {
+    p.poly(tpArc(cx, cy + r * 1.05, r * 1.45, r * 1.45, Math.PI * 1.26, Math.PI * 1.74, 24), { stroke: dark, lw: 0.45 });
+    p.poly(tpArc(cx, cy + r * 1.16, r * 1.45, r * 1.45, Math.PI * 1.26, Math.PI * 1.74, 24), { stroke: base, lw: 0.7 });
+    p.poly(tpArc(cx, cy + r * 1.24, r * 1.45, r * 1.45, Math.PI * 1.3, Math.PI * 1.7, 24), { stroke: pale, lw: 0.18 });
+    p.poly(tpArc(cx, cy + r * 1.55, r * 1.45, r * 1.45, Math.PI * 1.26, Math.PI * 1.74, 24),
+      { stroke: thread, lw: 0.1, dash: [0.5, 0.4] });
+    return;
+  }
+
+  if (kind === 'zipper') {
+    const tw = r * 0.28;
+    const gap = r * 0.12;
+    p.rect(cx - gap - tw, cy - r * 0.86, tw, r * 1.72, { fill: base, stroke: edge, lw: 0.07 });
+    p.rect(cx + gap, cy - r * 0.86, tw, r * 1.72, { fill: base, stroke: edge, lw: 0.07 });
+    for (let i = 0; i < 6; i++) {
+      const yy = cy - r * 0.78 + i * r * 0.2;
+      p.rect(cx - gap - r * 0.02, yy, gap + r * 0.04, r * 0.09, { fill: pale, stroke: edge, lw: 0.04 });
+      p.rect(cx - r * 0.02, yy + r * 0.1, gap + r * 0.04, r * 0.09, { fill: pale, stroke: edge, lw: 0.04 });
+    }
+    p.poly([[cx - r * 0.24, cy + r * 0.3], [cx + r * 0.24, cy + r * 0.3],
+      [cx + r * 0.16, cy + r * 0.66], [cx - r * 0.16, cy + r * 0.66]],
+      { fill: dark, stroke: edge, lw: 0.07, closed: true });
+    p.poly(tpArc(cx, cy + r * 0.86, r * 0.17, r * 0.22, Math.PI * 1.15, Math.PI * 2.85, 14), { stroke: dark, lw: 0.15 });
+    return;
+  }
+
+  if (kind === 'button') {
+    p.circle(cx, cy, r * 0.62, { fill: base, stroke: edge, lw: 0.1 });
+    p.circle(cx, cy, r * 0.46, { stroke: light, lw: 0.1 });
+    p.poly(tpArc(cx, cy, r * 0.52, r * 0.52, Math.PI * 1.1, Math.PI * 1.6, 12), { stroke: pale, lw: 0.14 });
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach((q) =>
+      p.circle(cx + q[0] * r * 0.17, cy + q[1] * r * 0.17, r * 0.08, { fill: edge }));
+    return;
+  }
+
   if (kind === 'hook') {
-    p.poly([[cx - r * 0.5, cy - r * 0.2], [cx - r * 0.05, cy - r * 0.2]].concat(
-      tpArc(cx - r * 0.05, cy, r * 0.2, r * 0.2, -Math.PI / 2, Math.PI / 2, 10)).concat([[cx - r * 0.3, cy + r * 0.2]]), { stroke: dark, lw: 0.3 });
-    p.poly(tpArc(cx + r * 0.35, cy, r * 0.16, r * 0.28, Math.PI / 2, Math.PI * 1.5, 10), { stroke: dark, lw: 0.3 });
+    p.poly([[cx - r * 0.82, cy + r * 0.36], [cx - r * 0.36, cy + r * 0.36]]
+      .concat(tpArc(cx - r * 0.36, cy, r * 0.36, r * 0.36, Math.PI / 2, -Math.PI / 2, 14))
+      .concat([[cx - r * 0.12, cy - r * 0.12]]), { stroke: base, lw: 0.26 });
+    p.poly(tpArc(cx + r * 0.44, cy, r * 0.26, r * 0.4, 0, Math.PI * 2, 20), { stroke: base, lw: 0.24, closed: true });
     return;
   }
+
+  if (kind === 'snap') {
+    p.circle(cx, cy, r * 0.62, { fill: light, stroke: edge, lw: 0.1 });
+    p.circle(cx, cy, r * 0.34, { fill: base, stroke: edge, lw: 0.08 });
+    p.circle(cx, cy, r * 0.14, { fill: pale });
+    return;
+  }
+
   if (kind === 'thread') {
-    p.rect(cx - r * 0.3, cy - r * 0.5, r * 0.6, r * 1.0, { fill: col });
-    p.rect(cx - r * 0.42, cy - r * 0.62, r * 0.84, r * 0.13, { fill: '#d9cbb4', stroke: dark, lw: 0.1 });
-    p.rect(cx - r * 0.42, cy + r * 0.49, r * 0.84, r * 0.13, { fill: '#d9cbb4', stroke: dark, lw: 0.1 });
+    p.rect(cx - r * 0.34, cy - r * 0.52, r * 0.68, r * 1.04, { fill: base, stroke: edge, lw: 0.07 });
+    p.poly([[cx - r * 0.34, cy - r * 0.2], [cx + r * 0.34, cy - r * 0.32]], { stroke: light, lw: 0.12 });
+    p.poly([[cx - r * 0.34, cy + r * 0.12], [cx + r * 0.34, cy]], { stroke: light, lw: 0.12 });
+    p.rect(cx - r * 0.52, cy - r * 0.68, r * 1.04, r * 0.16, { fill: pale, stroke: edge, lw: 0.07 });
+    p.rect(cx - r * 0.52, cy + r * 0.52, r * 1.04, r * 0.16, { fill: pale, stroke: edge, lw: 0.07 });
+    p.poly(tpArc(cx + r * 0.72, cy + r * 0.12, r * 0.3, r * 0.44, Math.PI * 1.4, Math.PI * 2.4, 16), { stroke: base, lw: 0.1 });
     return;
   }
+
   if (kind === 'label') {
-    p.rect(cx - r * 0.55, cy - r * 0.32, r * 1.1, r * 0.64, { fill: '#fbfaf7', stroke: dark, lw: 0.15 });
-    [-0.12, 0.02, 0.16].forEach((v, i) => p.poly([[cx - r * 0.35, cy + v * r], [cx + r * (i === 1 ? 0.2 : 0.35), cy + v * r]], { stroke: col, lw: 0.3 }));
+    p.poly([[cx - r * 0.7, cy - r * 0.42], [cx + r * 0.42, cy - r * 0.42], [cx + r * 0.78, cy],
+      [cx + r * 0.42, cy + r * 0.42], [cx - r * 0.7, cy + r * 0.42]],
+      { fill: pale, stroke: edge, lw: 0.08, closed: true });
+    p.circle(cx + r * 0.5, cy, r * 0.09, { fill: edge });
+    [-0.16, 0.02, 0.2].forEach((v, i) => p.poly([[cx - r * 0.54, cy + v * r],
+      [cx + r * (i === 1 ? 0.12 : 0.24), cy + v * r]], { stroke: base, lw: 0.14 }));
     return;
   }
+
   if (kind === 'elastic') {
-    p.rect(cx - r * 0.7, cy - r * 0.22, r * 1.4, r * 0.44, { fill: col });
-    const wv = [];
-    for (let i = 0; i <= 16; i++) wv.push([cx - r * 0.7 + (r * 1.4 * i) / 16, cy + Math.sin(i * Math.PI / 2) * r * 0.1]);
-    p.poly(wv, { stroke: '#f4f2ef', lw: 0.2 });
+    p.rect(cx - r * 0.82, cy - r * 0.3, r * 1.64, r * 0.6, { fill: base, stroke: edge, lw: 0.08 });
+    const zig = [];
+    for (let i = 0; i <= 12; i++) {
+      zig.push([cx - r * 0.74 + (r * 1.48 * i) / 12, cy + (i % 2 ? r * 0.16 : -r * 0.16)]);
+    }
+    p.poly(zig, { stroke: pale, lw: 0.14 });
     return;
   }
+
   if (kind === 'boning') {
-    [-0.3, 0, 0.3].forEach((u) => p.rect(cx + u * r - r * 0.07, cy - r * 0.6, r * 0.14, r * 1.2, { fill: col, stroke: dark, lw: 0.08 }));
+    [-0.44, 0, 0.44].forEach((u) => {
+      const bx = cx + u * r;
+      p.rect(bx - r * 0.11, cy - r * 0.68, r * 0.22, r * 1.36, { fill: base, stroke: edge, lw: 0.07 });
+      p.poly([[bx, cy - r * 0.56], [bx, cy + r * 0.56]], { stroke: pale, lw: 0.1 });
+    });
     return;
   }
-  p.circle(cx, cy, r * 0.62, { fill: col, stroke: o.stroke, lw: 0.1 });
+
+  // أي تريم آخر: حجر صغير بلون الخامة
+  p.poly([[cx, cy - r * 0.62], [cx + r * 0.58, cy], [cx, cy + r * 0.62], [cx - r * 0.58, cy]],
+    { fill: base, stroke: edge, lw: 0.1, closed: true });
+  p.poly([[cx, cy - r * 0.62], [cx - r * 0.58, cy], [cx, cy]], { fill: light, noStroke: true, closed: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -2455,20 +2607,20 @@ function tpDrawSheet(p, d, A) {
     const cx = L.x2 + tcw * (i + 0.5);
     const cy = tY + 7.6;
     p.circle(cx, cy, tr, { fill: TP_SOFT });
-    if (t.asset && get(t.asset)) {
-      p.clipCircle(cx, cy, tr, () => {
-        const a = get(t.asset);
-        const s = Math.max((tr * 2) / a.w, (tr * 2) / a.h);
-        p.img(a, cx - (a.w * s) / 2, cy - (a.h * s) / 2, a.w * s, a.h * s);
-      });
-    } else {
-      tpTrimIcon(p, t.kind, t.hex, cx, cy, tr);
-    }
     p.circle(cx, cy, tr, { stroke: TP_RULE, lw: 0.25 });
+    tpTrimIcon(p, t.kind, t.hex, cx, cy, tr * 0.82);
     p.setFont('sans', 'b', 4.4);
-    p.textFit(tpUp(t.name), cx, cy + tr + 3, { align: 'center', maxW: tcw - 1.5, minSize: 3.2, cs: 0.1 });
-    p.setFont('sans', 'r', 3.9);
-    p.wrap(t.desc, tcw - 2, 0).slice(0, 2).forEach((ln, j) => {
+    p.textFit(tpUp(t.name), cx, cy + tr + 3, { align: 'center', maxW: tcw - 1.2, minSize: 3, cs: 0.1 });
+    // الوصف يُصغَّر حتى يكتمل في ثلاثة أسطر بلا قطع
+    let ds = 3.9;
+    let dl = [];
+    for (;;) {
+      p.setFont('sans', 'r', ds);
+      dl = p.wrap(t.desc, tcw - 2, 0);
+      if (dl.length <= 3 || ds <= 2.9) break;
+      ds -= 0.2;
+    }
+    dl.slice(0, 3).forEach((ln, j) => {
       p.text(ln, cx, cy + tr + 5 + j * p.lh(1.2), { align: 'center', color: '#3d3a37' });
     });
   });
@@ -2631,20 +2783,41 @@ function tpDrawSheet(p, d, A) {
   p.textFit(d.note2 || '', L.xSize - 2.5, L.yBot - 1.8, { align: 'right', maxW: 34, minSize: 2.6, color: TP_MUTED });
 
   // ===== COLORWAY =====
+  // كل ألوان التصميم بلا حدّ: الصفوف والمربعات تتوزّع لوحدها حسب العدد
   tpTitle(p, 'COLORWAY', L.xSize, L.x3, L.yRow3 + 5.6);
-  const cws = (d.colorway || []).slice(0, 3);
-  const bw = 22, bh = 17, gap = 5;
-  const totalW = cws.length * bw + Math.max(cws.length - 1, 0) * gap;
-  const bx0 = (L.xSize + L.x3) / 2 - totalW / 2;
-  cws.forEach((c, i) => {
-    const x = bx0 + i * (bw + gap);
-    p.rect(x, L.yRow3 + 9, bw, bh, { fill: tpHexOk(c.hex) ? c.hex : '#CCCCCC' });
-    p.rect(x, L.yRow3 + 9, bw, bh, { stroke: '#e3dfd9', lw: 0.15 });
-    p.setFont('sans', 'b', 4.5);
-    p.textFit(tpUp(c.name), x + bw / 2, L.yRow3 + 30.2, { align: 'center', maxW: bw + gap - 1, minSize: 3, cs: 0.12 });
-    p.setFont('sans', 'r', 4);
-    p.textFit(c.code || '', x + bw / 2, L.yRow3 + 32.8, { align: 'center', maxW: bw + gap - 1, minSize: 2.8, color: '#3d3a37' });
-  });
+  const cws = (d.colorway || []).slice(0, 12);
+  if (cws.length) {
+    const areaX = L.xSize + 3;
+    const areaW = L.x3 - L.xSize - 6;
+    const areaY = L.yRow3 + 8.5;
+    const areaH = L.yBot - areaY - 1.5;
+    const rows = cws.length <= 4 ? 1 : (cws.length <= 8 ? 2 : 3);
+    const cols = Math.ceil(cws.length / rows);
+    const cellW = areaW / cols;
+    const rowH = areaH / rows;
+    const gap = Math.min(4, cellW * 0.16);
+    const bw = cellW - gap;
+    const nameSize = rows === 1 ? 4.5 : (rows === 2 ? 3.7 : 3.2);
+    const codeSize = rows === 1 ? 4 : (rows === 2 ? 3.2 : 2.8);
+    const textH = nameSize * 0.42 + codeSize * 0.42 + (rows === 1 ? 4 : 3.6);
+    const bh = Math.max(4, rowH - textH);
+    cws.forEach((c, i) => {
+      const r0 = Math.floor(i / cols);
+      const c0 = i % cols;
+      const inRow = Math.min(cols, cws.length - r0 * cols);
+      const rowW = inRow * cellW;
+      const x = areaX + (areaW - rowW) / 2 + c0 * cellW + gap / 2;
+      const y = areaY + r0 * rowH;
+      p.rect(x, y, bw, bh, { fill: tpHexOk(c.hex) ? c.hex : '#CCCCCC' });
+      p.rect(x, y, bw, bh, { stroke: '#e3dfd9', lw: 0.15 });
+      p.setFont('sans', 'b', nameSize);
+      p.textFit(tpUp(c.name), x + bw / 2, y + bh + nameSize * 0.42 + 1.4,
+        { align: 'center', maxW: cellW - 0.5, minSize: 2.6, cs: 0.1 });
+      p.setFont('sans', 'r', codeSize);
+      p.textFit(c.code || '', x + bw / 2, y + bh + nameSize * 0.42 + codeSize * 0.42 + 2.5,
+        { align: 'center', maxW: cellW - 0.3, minSize: 2.4, color: '#3d3a37' });
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
