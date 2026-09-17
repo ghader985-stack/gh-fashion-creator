@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext } from 'react';
+import { useState, useEffect, useRef, createContext, useContext } from 'react';
 import Head from 'next/head';
 
 
@@ -48,79 +48,6 @@ async function downloadFlat(url, baseName) {
 const cDist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
 const toHex = (c) => '#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
 
-// سحب أغلب ألوان التصميم من بكسلات الصورة قبل توليد صور الخامات،
-// حتى تُولَّد كل خامة بلون القطعة الحقيقي لا بلون خمّنه النموذج.
-async function sampleDesignColors(objectUrl, maxColors) {
-  try {
-    const img = await new Promise((res, rej) => {
-      const im = new window.Image();
-      im.onload = () => res(im);
-      im.onerror = () => rej(new Error('load'));
-      im.src = objectUrl;
-    });
-    const W = 200;
-    const H = Math.max(60, Math.round((img.height / img.width) * W));
-    const c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    const ctx = c.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0, W, H);
-    const data = ctx.getImageData(0, 0, W, H).data;
-
-    const bag = new Map();
-    const push = (x, y) => {
-      const i = (y * W + x) * 4;
-      const k = (data[i] >> 4) + ',' + (data[i + 1] >> 4) + ',' + (data[i + 2] >> 4);
-      const e = bag.get(k) || { n: 0, s: [0, 0, 0] };
-      e.n++; e.s[0] += data[i]; e.s[1] += data[i + 1]; e.s[2] += data[i + 2];
-      bag.set(k, e);
-    };
-    for (let x = 0; x < W; x++) { push(x, 0); push(x, H - 1); }
-    for (let y = 0; y < H; y++) { push(0, y); push(W - 1, y); }
-    let bg = [255, 255, 255], best = null;
-    bag.forEach((e) => { if (!best || e.n > best.n) best = e; });
-    if (best) bg = best.s.map((v) => v / best.n);
-
-    const pts = [];
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 200) continue;
-      const p = [data[i], data[i + 1], data[i + 2]];
-      if (cDist(p, bg) < 70) continue;
-      if (Math.max(p[0], p[1], p[2]) < 28) continue;
-      if (Math.min(p[0], p[1], p[2]) > 238) continue;
-      pts.push(p);
-    }
-    return clusterColors(pts, maxColors || 6)
-      .map((x) => ({ hex: toHex(x.rgb), share: Math.round(x.share * 1000) / 10 }));
-  } catch (e) {
-    if (typeof console !== 'undefined') console.warn('[gh] sample', e && e.message);
-    return [];
-  }
-}
-
-
-// أقرب لون مسحوب فعلياً للون الذي خمّنه النموذج: يبقى وصف الجزء صحيحاً
-// ويصبح كود اللون مضبوطاً.
-function nearestSampled(guessHex, sampled) {
-  if (!Array.isArray(sampled) || !sampled.length) return '';
-  const valid = sampled.filter((x) => x && /^#?[0-9a-f]{6}$/i.test(String(x.hex || '')));
-  if (!valid.length) return '';
-  sampled = valid;
-  const m = /^#?([0-9a-f]{6})$/i.exec(String(guessHex || ''));
-  if (!m) return sampled[0].hex;
-  const v = parseInt(m[1], 16);
-  const g = [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-  let best = null, bd = Infinity;
-  sampled.forEach((sc) => {
-    // لون مستخرج تالف يُنتج NaN فتنهار المقارنة بصمت ويخرج لون غلط للخامة
-    const mm = /^#?([0-9a-f]{6})$/i.exec(String((sc && sc.hex) || ''));
-    if (!mm) return;
-    const n2 = parseInt(mm[1], 16);
-    const d = cDist(g, [(n2 >> 16) & 255, (n2 >> 8) & 255, n2 & 255]);
-    if (d < bd) { bd = d; best = sc; }
-  });
-  return best ? best.hex : '';
-}
-
 export default function Home() {
   const [activeTab, setActiveTab] = useState('moodboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -151,8 +78,8 @@ export default function Home() {
   const [tpImage, setTpImage] = useState(null);
   const [tpPreview, setTpPreview] = useState('');
 
-  // رسمات ترفعها المصممة بنفسها. من رفعت رسمتها لا يُولَّد لها شيء مكانها،
-  // ومن تركت الخانة فارغة تُولَّد لها. الاثنتان مدعومتان بلا إجبار.
+  // الرسمات الأربع التي ترفعها المصممة: التقنية والملوّنة، أماماً وخلفاً.
+  // زر البناء مقفول حتى تكتمل.
   const [upLineFront, setUpLineFront] = useState(null);
   const [upLineBack, setUpLineBack] = useState(null);
   const [upColorFront, setUpColorFront] = useState(null);
@@ -161,7 +88,6 @@ export default function Home() {
   const [upLineBackPrev, setUpLineBackPrev] = useState('');
   const [upColorFrontPrev, setUpColorFrontPrev] = useState('');
   const [upColorBackPrev, setUpColorBackPrev] = useState('');
-
 
   const flatsReady = Boolean(upLineFront && upLineBack && upColorFront && upColorBack);
   const revokeLater = (u) => { if (u) setTimeout(() => URL.revokeObjectURL(u), 60000); };
@@ -173,9 +99,8 @@ export default function Home() {
   ].filter(Boolean);
 
   // ===== فلات سكتش (الرسمة التقنية) =====
-  // قسم مستقل: المصممة تولّد رسمتها هنا وتعتمدها، ثم تُستخدم في التيك باك.
-  // الاعتماد شرط — التيك باك لا يبني صفحات القياسات والكول أوت على رسمة
-  // لم تُعتمَد، فلا تذهب توليدة كاملة على رسمة غلط.
+  // قسم مستقل: المصممة ترفع سكتشها هنا فيولّد أربع رسمات — ملوّنة وخطّية،
+  // أماماً وخلفاً — تنزّلها وترفعها في ورقة التيك باك.
   const [flatImage, setFlatImage] = useState(null);
   const [flatPreview, setFlatPreview] = useState('');
   const [flatDesc, setFlatDesc] = useState('');
@@ -192,6 +117,8 @@ export default function Home() {
   const [tpLoading, setTpLoading] = useState(false);
   const [tpStage, setTpStage] = useState('');
   const [techpack, setTechpack] = useState(null);
+  const [tpAssets, setTpAssets] = useState(null);
+  const [tpEditOpen, setTpEditOpen] = useState(false);
   const [tpError, setTpError] = useState('');
   const [tpDownloading, setTpDownloading] = useState(false);
 
@@ -438,122 +365,88 @@ export default function Home() {
     setFlatLoading(false);
   };
 
+  // ===== بناء ورقة التيك باك =====
+  // الترتيب: تجهيز الصور وأداة الـ PDF محلياً أولاً (بلا أي كلفة)، ثم استدعاء
+  // تحليل واحد، ثم بناء الورقة في المتصفح. أي فشل قبل التحليل لا يستهلك رصيداً.
   const handleTechpack = async () => {
     if (!gate()) return;
     if (!tpImage) { setTpError('ارفعي صورة التصميم أولاً'); return; }
-    // حارس ثانٍ: لا يُبنى تيك باك بلا رسمات مهما كان مسار الاستدعاء
-    if (!flatsReady) {
-      setTpError('ارفعي الرسمات التقنية الأربع أولاً');
-      return;
-    }
-    setTpLoading(true); setTechpack(null); setTpError('');
+    if (!flatsReady) { setTpError('ارفعي الرسمات الأربع أولاً'); return; }
+    setTpLoading(true); setTpError(''); setTechpack(null); setTpAssets(null); setTpEditOpen(false);
     try {
-      // ===== الطور 1: التحليل (نص + جداول) =====
-      setTpStage('جارٍ تحليل التصميم…');
+      setTpStage('جارٍ تجهيز الصور…');
+      try { await tpEnsureEngine(); }
+      catch (e) { throw tpUserError('تعذّر تحميل أداة ملف PDF — حدّثي الصفحة وحاولي مرة ثانية'); }
+
+      const [design, colorFront, lineFront, lineBack, colorBack] = await Promise.all([
+        tpFileToCanvas(tpImage, 2400),
+        tpFileToCanvas(upColorFront, 2400),
+        tpFileToCanvas(upLineFront, 1800),
+        tpFileToCanvas(upLineBack, 1800),
+        tpFileToCanvas(upColorBack, 1800),
+      ]);
+      const dTrim = tpTrim(design);
+      const cfTrim = tpTrim(colorFront);
+      const imgs = {
+        design: dTrim.canvas,
+        designBg: dTrim.bg,
+        colorFront: cfTrim.canvas,
+        colorFrontBg: cfTrim.bg,
+        lineFront: tpTrim(lineFront).canvas,
+        lineBack: tpTrim(lineBack).canvas,
+        colorBack: tpTrim(colorBack).canvas,
+      };
+      const [gDesign, gColorFront, gFront, gBack] = await Promise.all([
+        tpGridBlob(imgs.design, 1300),
+        tpGridBlob(imgs.colorFront, 1300),
+        tpGridBlob(imgs.lineFront, 1100),
+        tpGridBlob(imgs.lineBack, 1100),
+      ]);
+
+      setTpStage('جارٍ تحليل التصميم… (حتى دقيقتين)');
       const fd = new FormData();
-      fd.append('image', tpImage);
+      fd.append('design', gDesign, 'design.jpg');
+      fd.append('colorFront', gColorFront, 'color-front.jpg');
+      fd.append('lineFront', gFront, 'line-front.jpg');
+      fd.append('lineBack', gBack, 'line-back.jpg');
       fd.append('garmentName', tpName);
       fd.append('fabricInfo', tpFabric);
       fd.append('season', tpSeason);
       fd.append('notes', tpNotes);
-      // اسم البراند يُستخرج من ملاحظات العميلة. إن لم تذكره يبقى فارغاً
-      // فيُكتب BRAND NAME كموضع تملؤه، ولا يُوضع اسم المنصّة مكانه.
-      fd.append('brandName', extractBrandName(tpNotes));
       const r = await fetch('/api/techpack', { method: 'POST', body: fd });
-      const d = await r.json();
-      if (d.error) { setTpError(d.error); setTpLoading(false); setTpStage(''); return; }
-
-      // ===== الطور 2: الصور (5 صفحات + صورة لكل خامة) =====
-      // طلب مستقل بسقف زمني مستقل، فلا يزاحم التحليلَ على الوقت.
-      setTpStage('جارٍ توليد صور التيك باك… (قد يستغرق حتى 4 دقائق)');
-      let images = {};
-      let imgError = '';
-      // تُسحب قبل إرسال الخامات لتُولَّد صورها بلون التصميم الحقيقي
-      const sampled = await sampleDesignColors(tpPreview, 6);
-
-      // القائمة تُصحَّح مرة واحدة هنا: نفس القائمة تُولَّد صورها وتُعرض،
-      // فلا يختلف ما في الصورة عمّا هو مكتوب تحتها.
-      const designCues = [d.description, d.garmentFacts, d.flatSketchBrief, tpNotes,
-        (d.artwork || []).map((a) => [a.name, a.technique, a.description].join(' ')).join(' ')];
-      const fixedMaterials = normalizeMaterials(
-        (d.materials || []).map((m) => ({ ...m, hex: nearestSampled(m.hex, sampled) || m.hex })),
-        designCues, (sampled[0] && sampled[0].hex) || '',
-        (d.colorway && d.colorway[0] && d.colorway[0].pantone) || '',
-        extractBrandName(tpNotes), d.careInstructions || '');
-      try {
-        const fd2 = new FormData();
-        fd2.append('image', tpImage);
-        // الرسمات التي رفعتها المصممة هي المصدر الوحيد؛ الأربع مطلوبة
-        // فلا يصل هذا السطر إلا وهي كاملة، ولا يُولَّد شيء مكانها.
-        // ترسَل كملفات لا كنصوص base64: الأخيرة تضخّم الحجم وتتجاوز حدّ الطلب
-        fd2.append('flatLineFront', upLineFront);
-        fd2.append('flatLineBack', upLineBack);
-        fd2.append('flatColorFront', upColorFront);
-        fd2.append('flatColorBack', upColorBack);
-        fd2.append('meta', JSON.stringify({
-          garmentFacts: d.garmentFacts || '',
-          flatSketchBrief: d.flatSketchBrief || '',
-          pieceCount: d.pieceCount || 1,
-          // الليبلات وأرقام الكول أوت تُحسب في الواجهة ولا تدخل التوليد:
-          // إرسالها كان يزيد حجم الطلب بلا أي استعمال في الخلفية.
-          colorway: d.colorway || [],
-          detailAreas: (d.detailViews || []).map((x) => x.area),
-          materials: fixedMaterials.map((m) => ({
-            num: m.num, name: m.name, pantone: m.pantone,
-            hex: m.hex, photoPrompt: m.photoPrompt,
-          })),
-        }));
-        const r2 = await fetch('/api/techpack-images', { method: 'POST', body: fd2 });
-        // الطلب قد يُرفض قبل أن يصل (حجم أو مهلة) فلا يعود JSON أصلاً؛
-        // ابتلاع ذلك بصمت كان يُخرج تيك باك بلا صور ولا سبب ظاهر.
-        if (!r2.ok) {
-          imgError = 'تعذّر توليد الصور: استجابة ' + r2.status +
-            (r2.status === 413 ? ' — حجم الملفات المرفوعة كبير' : '');
-        } else {
-          const d2 = await r2.json();
-          if (d2.error) imgError = 'تعذّر توليد الصور: ' + d2.error;
-          else images = d2;
-        }
-      } catch (e) {
-        if (typeof console !== 'undefined') console.warn('[gh] images', e && e.message);
-        imgError = 'تعذّر الوصول لخدمة الصور: ' + (e && e.message ? e.message : 'خطأ غير معروف');
+      let d = null;
+      try { d = await r.json(); } catch (e) { d = null; }
+      if (!r.ok || !d || d.error) {
+        throw tpUserError((d && d.error) || ('تعذّر التحليل (' + r.status + ') — حاولي مرة ثانية'));
       }
 
-      if (imgError) setTpError(imgError);
-      // عرض النتيجة مرة واحدة كاملة — بنفس القائمة التي وُلِّدت صورها
-      setTechpack({ ...d, ...images, materials: fixedMaterials });
+      setTpStage('جارٍ بناء الورقة…');
+      const built = tpBuildSheet(d, imgs, {
+        brand: extractBrandName(tpNotes),
+        garmentName: tpName,
+        season: tpSeason,
+      });
+      setTpAssets(built.assets);
+      setTechpack(built.sheet);
       incrementUsage();
-    } catch { setTpError('خطأ في الاتصال، حاولي مرة ثانية'); }
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] techpack', e && e.message);
+      setTpError((e && e.userMessage) || 'خطأ في الاتصال، حاولي مرة ثانية');
+    }
     setTpLoading(false);
     setTpStage('');
   };
 
-  // التصدير كـ PDF نصّي لا كصورة.
-  // html2canvas كان يحوّل التيك باك كلّه إلى PNG واحد: كل النصوص تصير بكسلات،
-  // فلا بحث ولا نسخ ولا طباعة نظيفة، والمصنع لا يستطيع أخذ رقم من جدول القياسات.
-  // طباعة المتصفح تُخرج PDF متجهاً: النص يبقى نصاً وكل صفحة على ورقة مستقلة.
+  // حفظ PDF نصّي بضغطة واحدة: نفس رسم المعاينة، بخطوط مضمّنة ونص قابل للتعديل
   const downloadTechpack = async () => {
+    if (!techpack || !tpAssets) return;
     setTpDownloading(true);
     try {
-      const title = (techpack?.garmentName || 'techpack').replace(/\s+/g, '-');
-      const prev = document.title;
-      document.title = title;              // اسم الملف المقترح في حوار الطباعة
-      document.body.classList.add('printing-techpack');
-      // مهلة إطار واحد حتى تُطبَّق أنماط الطباعة قبل فتح الحوار
-      await new Promise((r) => setTimeout(r, 120));
-      window.print();
-      document.body.classList.remove('printing-techpack');
-      document.title = prev;
-    } catch { alert('تعذّر فتح نافذة الحفظ، جرّبي مرة ثانية'); }
-    setTpDownloading(false);
-  };
-
-  // حفظ نسخة صورة للمعاينة السريعة — يبقى متاحاً كخيار ثانوي
-  const downloadTechpackImage = async () => {
-    setTpDownloading(true);
-    try {
-      await downloadNode('techpack-canvas', (techpack?.garmentName || 'techpack').replace(/\s+/g, '-') + '.png', '#ffffff');
-    } catch { alert('تعذّر الحفظ، جرّبي مرة ثانية'); }
+      await tpSavePdf(techpack, tpAssets);
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] pdf', e && e.message);
+      alert('تعذّر إنشاء ملف PDF، جرّبي مرة ثانية');
+    }
     setTpDownloading(false);
   };
 
@@ -937,7 +830,8 @@ export default function Home() {
                     </div>
                     <div className="tp-save-hint">
                       نزّلي الرسمات الأربع، ثم ارفعيها في خاناتها بقسم <strong>التيك باك</strong>:
-                      التقنية تُستخدم في صفحات القياسات والكول أوت والخياطة، والملوّنة في الكولورويز.
+                      التقنية تظهر في خانة TECHNICAL FLAT وتُرسم عليها تسميات البناء،
+                      والملوّنة تظهر في خانة LOOK وتُقتطع منها لقطات التفاصيل والكولورواي.
                     </div>
                   </div>
                 )}
@@ -947,9 +841,9 @@ export default function Home() {
             {activeTab === 'techpack' && (
               <div className="tool">
                 <section className="card">
-                  <p className="card-hint">ارفعي صورة التصميم (سكتش، صورة AI، أو قطعة)، وأضيفي مواصفات القماش. تُبنى لكِ حزمة تقنية كاملة للمصنع.</p>
+                  <p className="card-hint">ارفعي صورة تصميمك الملوّنة والرسمات، وأضيفي مواصفات القماش. تُبنى لكِ ورقة تيك باك كاملة للمصنع، وتنزل كملف PDF قابل للتعديل.</p>
                   <div className="field">
-                    <label>صورة التصميم</label>
+                    <label>صورة التصميم الملوّنة</label>
                     <div className="upload-area">
                       {tpPreview ? (
                         <div className="img-preview">
@@ -965,9 +859,11 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="field">
-                    <label>الرسمات التقنية — مطلوبة</label>
+                    <label>الرسمات — مطلوبة</label>
                     <div className="tp-save-hint" style={{ margin: '0 0 0.7rem' }}>
-                      الأربع مطلوبة: عليها تُرسم الليبلات والقياسات وأرقام الكول أوت.
+                      الأربع مطلوبة: التقنيتان تظهران في خانتي TECHNICAL FLAT و CONSTRUCTION DETAILS،
+                      والملوّنة الأمامية مصدر لقطات التفاصيل والأقمشة والتريمز مع صورة التصميم،
+                      والملوّنة الخلفية تظهر في خانة BACK VIEW.
                       ارفعي رسماتك، أو نزّليها من قسم <strong>فلات سكتش (الرسمة التقنية)</strong> وارفعيها هنا.
                     </div>
                     <div className="flat-upload-grid">
@@ -1008,49 +904,50 @@ export default function Home() {
                   <div className="field">
                     <label>مواصفات القماش</label>
                     <textarea value={tpFabric} onChange={(e) => setTpFabric(e.target.value)}
-                      placeholder="مثال: حرير شيفون 60 غرام، بطانة ساتان، تطريز يدوي بالخرز. إن تركتيها فارغة فسنقترح خامات منطقية."></textarea>
+                      placeholder="مثال: ساتان 96% بوليستر 4% سباندكس، تول مطاطي نود، بطانة ساتان. إن تركتيها فارغة تُقترح خامات منطقية حسب التصميم."></textarea>
                   </div>
                   <div className="two-col">
                     <div className="field">
                       <label>الموسم (اختياري)</label>
-                      <input type="text" value={tpSeason} onChange={(e) => setTpSeason(e.target.value)} placeholder="SS26" />
+                      <input type="text" value={tpSeason} onChange={(e) => setTpSeason(e.target.value)} placeholder="FALL / WINTER 2026" />
                     </div>
                     <div className="field">
                       <label>ملاحظات (اختياري)</label>
-                      <input type="text" value={tpNotes} onChange={(e) => setTpNotes(e.target.value)} placeholder="اسم البراند، وأي تفاصيل خاصة" />
+                      <input type="text" value={tpNotes} onChange={(e) => setTpNotes(e.target.value)} placeholder="اسم البراند: ...، وأي تفاصيل خاصة" />
                     </div>
                   </div>
-                  <button onClick={handleTechpack} disabled={tpLoading || !flatsReady} className="cta">
+                  <button onClick={handleTechpack} disabled={tpLoading || !flatsReady || !tpImage} className="cta">
                     {tpLoading ? <><span className="spinner"></span> {tpStage || 'جارٍ بناء التيك باك…'}</> : 'أنشئي التيك باك'}
                   </button>
-                  {!flatsReady && !tpLoading && (
+                  {(!flatsReady || !tpImage) && !tpLoading && (
                     <div className="tp-audit" style={{ marginTop: '0.8rem' }}>
-                      لبناء التيك باك، ارفعي {missingFlats.length === 4 ? 'الرسمات التقنية الأربع' : 'ما ينقص:'}
-                      {missingFlats.length < 4 && <> <strong>{missingFlats.join(' · ')}</strong></>}
-                      {' — '}من ملفاتك أو من قسم <strong>فلات سكتش (الرسمة التقنية)</strong>.
+                      لبناء التيك باك ارفعي: <strong>{[!tpImage && 'صورة التصميم'].concat(missingFlats).filter(Boolean).join(' · ')}</strong>
                     </div>
                   )}
                   {tpError && <div className="err">{tpError}</div>}
                 </section>
 
-                {tpLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{tpStage || 'يتم بناء التيك باك…'}</p><p className="loading-note">التيك باك سيظهر كاملاً عند الانتهاء</p></div>}
+                {tpLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{tpStage || 'يتم بناء التيك باك…'}</p><p className="loading-note">الورقة ستظهر كاملة عند الانتهاء</p></div>}
                 {!tpLoading && !techpack && <p className="placeholder">التيك باك سيظهر هنا</p>}
 
-                {techpack && (
+                {techpack && tpAssets && (
                   <>
                     <div className="board-actions">
                       <button onClick={downloadTechpack} disabled={tpDownloading} className="download-btn">
-                        {tpDownloading ? <><span className="spinner"></span> جاري التجهيز...</> : 'حفظ PDF'}
+                        {tpDownloading ? <><span className="spinner"></span> جارٍ التجهيز...</> : 'حفظ PDF'}
                       </button>
-                      <button onClick={downloadTechpackImage} disabled={tpDownloading} className="download-btn secondary">
-                        حفظ كصورة
+                      <button onClick={() => setTpEditOpen((v) => !v)} className="download-btn secondary">
+                        {tpEditOpen ? 'إغلاق التعديل' : 'تعديل الورقة'}
                       </button>
                     </div>
                     <div className="tp-save-hint">
-                      حفظ PDF: النص يبقى نصاً — قابل للبحث والنسخ والطباعة بأي مقاس.
-                      في نافذة الطباعة اختاري «حفظ كـ PDF».
+                      الملف نصّي: كل الكتابة فيه قابلة للنسخ والبحث والتعديل ببرامج PDF.
+                      وأي نص تقدرين تعدّليه من «تعديل الورقة» قبل الحفظ، والمعاينة تتحدّث مباشرة.
                     </div>
-                    <TechpackSheet tp={techpack} preview={tpPreview} />
+                    <div className={'tp-work' + (tpEditOpen ? ' editing' : '')}>
+                      {tpEditOpen && <TechpackEditor sheet={techpack} onChange={setTechpack} />}
+                      <TechpackPreview sheet={techpack} assets={tpAssets} />
+                    </div>
                   </>
                 )}
               </div>
@@ -1227,7 +1124,6 @@ export default function Home() {
   );
 }
 // ===== بناء برومبتات المحتوى والفيديو =====
-const TpMetaContext = createContext({});
 
 function buildMarketingPrompt(platform, tone, text, hasImage) {
   const imageContext = hasImage ? '\n\nصورة مرفقة — حللها بدقة واستخدميها كمرجع أساسي.' : '';
@@ -1302,802 +1198,14 @@ function buildVideoPrompt(videoType, mood, text, hasImage) {
 }
 
 // ============================================================================
-// ===== عرض التيك باك — هيكل Adstronaut الحرفي: 15 صفحة بهيدر موحّد =====
+// ===== وسيط الصور =====
 // ============================================================================
-// كل صور Replicate تُعرض عبر وسيط بنفس النطاق: يضمن قراءة البكسلات على كانفاس
-// (اشتقاق الرسمة الخطية وكشف حدود القطعة) ويضمن نجاح حفظ التيك باك كصورة.
+// صور Replicate تمرّ عبر وسيط بنفس النطاق عند قراءة بكسلاتها أو تنزيلها.
 function proxied(url) {
   if (!url || typeof url !== 'string') return url;
   if (!/^https:\/\/([a-z0-9-]+\.)*(replicate\.delivery|api\.replicate\.com|blob\.vercel-storage\.com|public\.blob\.vercel-storage\.com)\//i.test(url)) return url;
   return '/api/img?u=' + encodeURIComponent(url);
 }
-
-const GRADE_SIZES = ['2', '4', '6', '8', '10', '12'];
-// عدد صفوف القياس في الصفحة الواحدة. الجدول يُقسَّم على عدد الصفحات الذي
-// يلزمه فعلاً، لا على صفحتين فقط: قطعة بأربعين قياساً كانت تحشر خمسة
-// وعشرين صفاً في صفحة واحدة.
-const GRADE_SPLIT = 15;
-
-
-// ===========================================================================
-// فحص سلامة البيانات قبل بناء الصفحات.
-// الغرض: ألّا يُعرض تيك باك يبدو سليماً وهو ناقص. كل خلل يُذكر صراحةً
-// بدل أن يُملأ مكانه بقيمة مخترعة.
-// ===========================================================================
-function auditTechpack(tp, materials, measurements) {
-  const issues = [];
-  const rows = Array.isArray(measurements) ? measurements : [];
-
-  if (!rows.length) issues.push('جدول القياسات فارغ — مواقع الليبلات ستكون تقريبية');
-  else {
-    const noSizes = rows.filter((r) => !r || !r.sizes || !Object.keys(r.sizes).length).length;
-    if (noSizes) issues.push(noSizes + ' من صفوف القياس بلا أرقام مقاسات');
-    const sample = tp.sampleSize || '6';
-    const noSample = rows.filter((r) => r && r.sizes && (r.sizes[String(sample)] === undefined)).length;
-    if (noSample) issues.push(noSample + ' صف قياس بلا قيمة لمقاس العيّنة ' + sample);
-    if (!buildAnchors(rows, sample, 'front')) {
-      issues.push('تعذّر إيجاد طول مرجعي للقطعة — لا قياس طول كامل في الجدول');
-    }
-  }
-
-  if (!materials.length) issues.push('قائمة الخامات فارغة');
-  else {
-    const noQty = materials.filter((m) => m.qty === '' || m.qty == null).length;
-    if (noQty) issues.push(noQty + ' خامة بلا كمية');
-    const noPlace = materials.filter((m) => !m.placement).length;
-    if (noPlace) issues.push(noPlace + ' خامة بلا موضع');
-  }
-
-  if (!tp.lineFrontImage) issues.push('الرسمة التقنية الأمامية غير متوفّرة');
-  if (!tp.lineBackImage) issues.push('الرسمة التقنية الخلفية غير متوفّرة');
-
-  const photos = Array.isArray(tp.materialPhotos) ? tp.materialPhotos.filter(Boolean).length : 0;
-  if (materials.length && photos < materials.length) {
-    issues.push((materials.length - photos) + ' خامة بلا صورة');
-  }
-
-  const steps = Array.isArray(tp.sewingSteps) ? tp.sewingSteps.length : 0;
-  if (steps && steps < 8) issues.push('تعليمات الخياطة ' + steps + ' خطوة فقط');
-
-  return issues;
-}
-
-// ============================================================================
-// ورقة تيك باك بصفحة واحدة — على بنية نموذج RK Fashion.
-//
-// كل الصور من الأربع التي ترفعها المصممة: التصميم الملوّن أماماً وخلفاً،
-// والرسمة التقنية أماماً وخلفاً. لا توليد صور في هذه الورقة إطلاقاً:
-//   · لقطات DETAILS & CLOSE-UP تُقتطع من الصورة الملوّنة
-//   · CONSTRUCTION DETAILS تُبنى فوق الرسمة التقنية بليبلات محسوبة
-//   · مربعات الأقمشة والكولورواي سواتشات ملوّنة من بكسل التصميم
-// عدد الأقمشة والتريمات يتبع التصميم، لا رقماً ثابتاً.
-// ============================================================================
-
-// أيقونات العناية مرسومة بالكود: أشكال هندسية بسيطة لا صور مولّدة.
-function CareIcon({ kind }) {
-  const S = { width: 34, height: 34, viewBox: '0 0 40 40', fill: 'none',
-    stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' };
-  const cross = <><line x1="6" y1="8" x2="34" y2="32" /><line x1="34" y1="8" x2="6" y2="32" /></>;
-  if (kind === 'dryclean') return <svg {...S}><circle cx="20" cy="20" r="13" /></svg>;
-  if (kind === 'nowash') return <svg {...S}><path d="M5 14 L35 14 L31 31 L9 31 Z" /><path d="M5 14 Q12 8 20 13 Q28 18 35 14" />{cross}</svg>;
-  if (kind === 'nobleach') return <svg {...S}><path d="M20 7 L34 31 L6 31 Z" />{cross}</svg>;
-  if (kind === 'steamlow') return <svg {...S}><path d="M6 27 Q6 15 20 15 Q34 15 34 27 Z" /><circle cx="20" cy="23" r="1.4" fill="currentColor" stroke="none" /></svg>;
-  if (kind === 'noiron') return <svg {...S}><path d="M6 27 Q6 15 20 15 Q34 15 34 27 Z" />{cross}</svg>;
-  if (kind === 'notumble') return <svg {...S}><rect x="6" y="8" width="28" height="24" rx="2" /><circle cx="20" cy="20" r="8" />{cross}</svg>;
-  if (kind === 'hangbag') return <svg {...S}><path d="M20 8 L20 12" /><path d="M11 12 L29 12 L31 32 L9 32 Z" /><path d="M17 8 Q20 5 23 8" /></svg>;
-  return <svg {...S}><circle cx="20" cy="20" r="13" /></svg>;
-}
-
-// اشتقاق رموز العناية من الخامات الفعلية لا من نص عام
-function careIcons(materials) {
-  const hay = (materials || []).map((m) => [m.name, m.description].join(' ')).join(' ').toLowerCase();
-  const delicate = /bead|pearl|sequin|crystal|embroider|lace|tulle|silk|chiffon|organza|velvet|satin/.test(hay);
-  const out = [];
-  out.push(delicate
-    ? { kind: 'dryclean', label: ['DRY CLEAN', 'ONLY'] }
-    : { kind: 'dryclean', label: ['GENTLE', 'WASH'] });
-  out.push({ kind: 'nowash', label: ['DO NOT', 'WASH'] });
-  out.push({ kind: 'nobleach', label: ['DO NOT', 'BLEACH'] });
-  out.push(/bead|pearl|sequin|crystal|embroider/.test(hay)
-    ? { kind: 'noiron', label: ['DO NOT IRON', 'ON BEADING'] }
-    : { kind: 'steamlow', label: ['STEAM', 'LOW'] });
-  out.push({ kind: 'hangbag', label: ['STORE HANGING', 'IN GARMENT BAG'] });
-  return out;
-}
-
-// توزيع الخامات على أقمشة وتريمات — يتبع التصميم لا عدداً ثابتاً
-function splitFabricsTrims(materials) {
-  const isFabric = /fabric|shell|tulle|satin|silk|crepe|chiffon|organza|lace|mesh|lining|velvet|jacquard|taffeta|georgette|cotton|linen|wool|denim|twill/i;
-  const isTrim = /zipper|button|hook|snap|bead|pearl|crystal|sequin|piping|boning|elastic|tape|thread|label|interfacing|trim|clasp|buckle/i;
-  const fabrics = [], trims = [];
-  (materials || []).forEach((m) => {
-    const hay = [m.name, m.description].filter(Boolean).join(' ');
-    if (isTrim.test(m.name || '') && !/fabric$/i.test(m.name || '')) trims.push(m);
-    else if (isFabric.test(hay)) fabrics.push(m);
-    else trims.push(m);
-  });
-  return { fabrics, trims };
-}
-
-// استخراج التركيب النسيجي والوزن من وصف الخامة إن ذُكرا
-function fibreOf(desc) {
-  const m = /(\d{1,3}%\s*[A-Za-z]+(?:\s*,\s*\d{1,3}%\s*[A-Za-z]+)*)/.exec(String(desc || ''));
-  return m ? m[1] : '';
-}
-function gsmOf(desc) {
-  const m = /(\d{2,3})\s*[-–]?\s*(\d{2,3})?\s*gsm/i.exec(String(desc || ''));
-  return m ? (m[2] ? m[1] + '-' + m[2] + ' GSM' : m[1] + ' GSM') : '';
-}
-
-// القياسات تبقى بالسنتيمتر كما في بقية الأداة وكما تعمل المصممة
-const sizeVal = (cm) => (Number.isFinite(+cm) ? Math.round(+cm * 10) / 10 : null);
-const SHEET_SIZES = [
-  ['XS', '0-2'], ['S', '4-6'], ['M', '8-10'],
-  ['L', '12-14'], ['XL', '16-18'], ['XXL', '20-22'],
-];
-
-// صفوف جدول المقاسات: الخمسة التي يعرضها النموذج، مأخوذة من الجدول الكامل
-const SHEET_ROWS = [
-  ['BUST', /\bbust\s*width\b|\bchest\s*width\b/i],
-  ['WAIST', /\bwaist\s*width\b/i],
-  ['HIP', /\blow\s*hip\s*width\b|\bhip\s*width\b|\bseat\s*width\b/i],
-  ['FRONT LENGTH\n(SHOULDER TO HEM)', /center\s*front\s*length|\bfront\s*length\b/i],
-  ['BACK LENGTH\n(SHOULDER TO HEM)', /center\s*back\s*length|\bback\s*length\b/i],
-];
-
-function sheetSizeChart(measurements, sizeKeys) {
-  const rows = Array.isArray(measurements) ? measurements : [];
-  const keys = (sizeKeys && sizeKeys.length ? sizeKeys : GRADE_SIZES);
-  return SHEET_ROWS.map(([label, re]) => {
-    const hit = rows.find((r) => re.test(r.pom || ''));
-    const vals = keys.map((k) => {
-      if (!hit || !hit.sizes) return '—';
-      const v = sizeVal(hit.sizes[k]);
-      return v == null ? '—' : String(v);
-    });
-    return { label, vals };
-  });
-}
-
-function TechpackSheet({ tp, preview }) {
-  const alreadyFixed = Array.isArray(tp.materials) && tp.materials.length > 0 && tp.materials[0].num != null;
-  const designCues = [tp.description, tp.garmentFacts, tp.flatSketchBrief, tp.notes,
-    (tp.artwork || []).map((a) => [a.name, a.technique, a.description].join(' ')).join(' ')];
-  const materials = alreadyFixed
-    ? tp.materials
-    : normalizeMaterials(tp.materials, designCues, (tp.colorway || [])[0]?.hex, (tp.colorway || [])[0]?.pantone,
-        tp.brandName, tp.careInstructions);
-
-  const measurements = tp.measurements || [];
-  const extractedColors = useExtractedColors(preview || proxied(tp.coloredFrontImage), 6);
-  const colorway = mergeColorway(tp.colorway || [], extractedColors);
-  const { fabrics, trims } = splitFabricsTrims(materials);
-  const detailViews = visibleDetails(tp.detailViews);
-  const anchors = buildAnchors(measurements, tp.sampleSize || '6', 'front');
-  const icons = careIcons(materials);
-  const sizeRows = sheetSizeChart(measurements, GRADE_SIZES);
-
-  const styleCode = tp.styleCode || ('STY-' + (tp.generatedAt || '').slice(2, 10).replace(/-/g, ''));
-  const brand = tp.brandName || 'BRAND NAME';
-  const collection = tp.collectionName || tp.season || '';
-
-  const sewLabels = Array.isArray(tp.sewingDetailLabels) ? tp.sewingDetailLabels : [];
-
-  return (
-    <div id="techpack-canvas" className="sheet">
-      {/* ===== الهيدر ===== */}
-      <div className="sh-head">
-        <div className="sh-brand">
-          <div className="sh-brand-name">{brand}</div>
-          {collection ? <div className="sh-brand-sub">{collection}</div> : null}
-        </div>
-        <div className="sh-meta">
-          <div><span>STYLE NO.</span><b>{styleCode}</b></div>
-          <div><span>STYLE NAME</span><b>{tp.garmentName || '—'}</b></div>
-        </div>
-        <div className="sh-meta">
-          <div><span>SEASON</span><b>{tp.season || '—'}</b></div>
-          <div><span>CATEGORY</span><b>{tp.category || '—'}</b></div>
-          <div><span>DATE</span><b>{(tp.generatedAt || '').slice(0, 10)}</b></div>
-        </div>
-      </div>
-
-      {/* ===== الصف الأول: اللوك · الرسمة التقنية · التفاصيل ===== */}
-      <div className="sh-row sh-row-1">
-        <div className="sh-cell">
-          <div className="sh-corner">LOOK<br /><i>FRONT</i></div>
-          <div className="sh-look">
-            {tp.coloredFrontImage ? <img src={tp.coloredFrontImage} alt="look front" /> : <div className="sh-ph" />}
-          </div>
-          <div className="sh-corner sh-corner-b">BACK VIEW</div>
-          <div className="sh-look sh-look-sm">
-            {tp.coloredBackImage ? <img src={tp.coloredBackImage} alt="look back" /> : <div className="sh-ph" />}
-          </div>
-        </div>
-
-        <div className="sh-cell">
-          <div className="sh-title">TECHNICAL FLAT</div>
-          <div className="sh-flats">
-            <div className="sh-flat">
-              <div className="sh-cap">FRONT</div>
-              {tp.lineFrontImage ? <img src={tp.lineFrontImage} alt="flat front" /> : <div className="sh-ph" />}
-            </div>
-            <div className="sh-flat">
-              <div className="sh-cap">BACK</div>
-              {tp.lineBackImage ? <img src={tp.lineBackImage} alt="flat back" /> : <div className="sh-ph" />}
-            </div>
-          </div>
-        </div>
-
-        <div className="sh-cell">
-          <div className="sh-title">DETAILS &amp; CLOSE-UP</div>
-          <SheetCrops
-            frontImage={tp.coloredFrontImage}
-            backImage={tp.coloredBackImage}
-            items={detailViews.slice(0, 4)}
-            anchors={anchors} />
-        </div>
-      </div>
-
-      {/* ===== الصف الثاني: تفاصيل التصميم · الأقمشة والتريمات ===== */}
-      <div className="sh-row sh-row-2">
-        <div className="sh-cell sh-span2">
-          <div className="sh-title">DESIGN DETAILS</div>
-          <ul className="sh-bullets">
-            {(tp.designDetails && tp.designDetails.length
-              ? tp.designDetails
-              : (tp.construction || []).slice(0, 8).map((c) => c.description)
-            ).slice(0, 8).map((d, i) => <li key={'dd' + i}>{d}</li>)}
-          </ul>
-        </div>
-
-        <div className="sh-cell">
-          <div className="sh-title">FABRICS &amp; TRIMS</div>
-          <div className="sh-sub">FABRIC</div>
-          {fabrics.map((f, i) => (
-            <div className="sh-fab" key={'fb' + i}>
-              <div className="sh-fab-txt">
-                <b>{(f.name || '').toUpperCase()}</b>
-                {fibreOf(f.description) ? <span>({fibreOf(f.description)})</span> : null}
-                {gsmOf(f.description) ? <span>{gsmOf(f.description)}</span> : null}
-                <span>COLOR: {f.pantoneName || f.hex || '—'}</span>
-              </div>
-              <div className="sh-swatch" style={{ background: f.hex || '#ddd' }} />
-            </div>
-          ))}
-          {trims.length ? <div className="sh-sub">TRIMS</div> : null}
-          <div className="sh-trims">
-            {trims.slice(0, 6).map((t, i) => (
-              <div className="sh-trim" key={'tr' + i}>
-                <div className="sh-trim-dot" style={{ background: t.hex || '#eee' }} />
-                <b>{(t.name || '').toUpperCase()}</b>
-                <span>{t.placement || ''}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ===== الصف الثالث: البناء · المواصفات · العناية ===== */}
-      <div className="sh-row sh-row-3">
-        <div className="sh-cell">
-          <div className="sh-title">CONSTRUCTION DETAILS</div>
-          <AnnotatedPair
-            frontImage={tp.lineFrontImage}
-            backImage={tp.lineBackImage}
-            mode="sewing"
-            front={sewLabels.filter((s) => (s.view || 'front') !== 'back')}
-            back={sewLabels.filter((s) => s.view === 'back')}
-            measurements={measurements}
-            sampleSize={tp.sampleSize || '6'} />
-        </div>
-
-        <div className="sh-cell">
-          <div className="sh-title">MATERIAL SPECIFICATIONS</div>
-          <table className="sh-table">
-            <thead><tr><th>COMPONENT</th><th>SPECIFICATION</th></tr></thead>
-            <tbody>
-              {materials.map((m, i) => (
-                <tr key={'ms' + i}>
-                  <td className="sh-comp">{(m.name || '').toUpperCase()}</td>
-                  <td>{m.description || ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="sh-cell">
-          <div className="sh-title">CARE INSTRUCTIONS</div>
-          <div className="sh-care">
-            {icons.map((ic, i) => (
-              <div className="sh-care-i" key={'ci' + i}>
-                <CareIcon kind={ic.kind} />
-                <span>{ic.label[0]}<br />{ic.label[1]}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ===== الصف الأخير: جدول المقاسات · الكولورواي ===== */}
-      <div className="sh-row sh-row-4">
-        <div className="sh-cell sh-span2">
-          <div className="sh-title">SIZE CHART (CM)</div>
-          <table className="sh-table sh-size">
-            <thead>
-              <tr>
-                <th>SIZE</th>
-                {SHEET_SIZES.map(([n, r]) => <th key={n}>{n} ({r})</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {sizeRows.map((r, i) => (
-                <tr key={'sz' + i}>
-                  <td className="sh-comp">{r.label.split('\n').map((t, j) => <div key={j}>{t}</div>)}</td>
-                  {r.vals.map((v, j) => <td key={j}>{v}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="sh-note">
-            <span>* ALL MEASUREMENTS ARE IN CM AND SUBJECT TO ±1 CM TOLERANCE.</span>
-            <span>* SAMPLE SIZE: SMALL (4-6)</span>
-          </div>
-        </div>
-
-        <div className="sh-cell">
-          <div className="sh-title">COLORWAY</div>
-          <div className="sh-colorway">
-            {colorway.slice(0, 4).map((c, i) => (
-              <div className="sh-cw" key={'cw' + i}>
-                <div className="sh-cw-box" style={{ background: c.hex }} />
-                <b>{(c.pantoneName || c.part || '').toUpperCase()}</b>
-                <span>{c.pantone || ''}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// لقطات DETAILS & CLOSE-UP — تُقتطع من الصورة الملوّنة المرفوعة، بلا توليد
-function SheetCrops({ frontImage, backImage, items, anchors }) {
-  const list = (items && items.length ? items : []).slice(0, 4);
-  if (!list.length) {
-    return <div className="sh-ph" style={{ aspectRatio: '1/1' }} />;
-  }
-  const srcFor = (it) => (String((it && it.view) || '').toLowerCase() === 'back' && backImage)
-    ? backImage : (frontImage || backImage);
-  const posFor = (it, i) => {
-    const area = (it && it.area) || '';
-    const lm = landmarkOf(area, true);
-    const x = Math.max(10, Math.min(90, Math.round(zoneX(area, 'left') * 100)));
-    if (lm && anchors && anchors[lm] != null && anchors.__total) {
-      const y = Math.max(6, Math.min(94, (anchors[lm] / anchors.__total) * 100));
-      return x + '% ' + Math.round(y) + '%';
-    }
-    return x + '% ' + [16, 38, 62, 84][i % 4] + '%';
-  };
-  const zoomFor = (it) => {
-    const a = String((it && it.area) || '');
-    if (/cuff|collar|zipper|button|hook|label|neckline|wrist/i.test(a)) return '360%';
-    if (/seam|panel|insert|pleat|dart|hem\s*finish/i.test(a)) return '290%';
-    if (/skirt|train|sweep|overlay|tier|layer/i.test(a)) return '210%';
-    return '270%';
-  };
-  return (
-    <div className="sh-details">
-      {list.map((it, i) => (
-        <div className="sh-detail" key={'sd' + i}>
-          <div className="sh-detail-img" style={{
-            backgroundImage: 'url(' + srcFor(it) + ')',
-            backgroundPosition: posFor(it, i),
-            backgroundSize: zoomFor(it),
-          }} />
-          <div className="sh-detail-cap">{it.area || ''}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TechpackView({ tp, preview }) {
-  // كود ستايل احتياطي مشتقّ من الاسم والتاريخ: الفراغ في هذا الحقل يعني
-  // أن المصنع لا يملك مرجعاً يربط به الصفحات والعيّنات.
-  const fallbackStyleCode = () => {
-    const base = String(tp.garmentName || 'STYLE').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) || 'STYLE';
-    const d = (tp.generatedAt || new Date().toISOString()).slice(2, 10).replace(/-/g, '');
-    return 'STY_' + base + '_' + d;
-  };
-
-  const meta = {
-    styleCode: tp.styleCode || fallbackStyleCode(),
-    garmentName: tp.garmentName || 'Untitled Design',
-    season: tp.season || '—',
-    sampleSize: tp.sampleSize || '6',
-    sizeRange: tp.sizeRange || '2 - 12',
-    category: tp.category || 'Apparel',
-    fabricSummary: tp.fabricSummary || '',
-    brandName: tp.brandName || 'BRAND NAME',   // موضع تملؤه العميلة
-    version: 'v0',
-    date: (tp.generatedAt || new Date().toISOString()).slice(0, 10),
-    preview,
-  };
-
-  // القائمة تمرّ بالتصحيح الحتمي قبل العرض: دمج المكرّر، إضافة ما رآه التحليل
-  // في التصميم (خرز/لؤلؤ/دانتيل)، إلزام التاغين، ترتيب وظيفي، ثم ترقيم.
-  // القائمة صُحّحت مرة واحدة قبل التوليد وجاءت مرقّمة؛ تُعاد المعالجة فقط
-  // إن وصلت خاماً (مسار قديم أو تيك باك محفوظ سابقاً).
-  const alreadyFixed = Array.isArray(tp.materials) && tp.materials.length > 0 && tp.materials[0].num != null;
-  const designCues = [tp.description, tp.garmentFacts, tp.flatSketchBrief, tp.notes,
-    (tp.artwork || []).map((a) => [a.name, a.technique, a.description].join(' ')).join(' ')];
-  const materials = alreadyFixed
-    ? tp.materials
-    : normalizeMaterials(tp.materials, designCues, (tp.colorway || [])[0]?.hex, (tp.colorway || [])[0]?.pantone,
-        tp.brandName, tp.careInstructions);
-  const matPhotos = tp.materialPhotos || [];
-  const measurements = tp.measurements || [];
-  const gradePages = [];
-  for (let i = 0; i < measurements.length; i += GRADE_SPLIT) {
-    gradePages.push(measurements.slice(i, i + GRADE_SPLIT));
-  }
-  if (gradePages.length === 0) gradePages.push([]);
-  // الخامات تُقسَّم إلى صفحات من ثمانية حسب عددها الفعلي — لا صفحة فارغة
-  // إن كانت ثمانية أو أقل، ولا تكدّس إن زادت عن ستّ عشرة.
-  const MAT_PER_PAGE = 8;
-  const matPages = [];
-  for (let i = 0; i < materials.length; i += MAT_PER_PAGE) {
-    matPages.push({ items: materials.slice(i, i + MAT_PER_PAGE), offset: i });
-  }
-  // أكواد الألوان تُسحب من بكسلات التصميم الملوّن؛ أسماء الأجزاء تبقى من التحليل
-  const extractedColors = useExtractedColors(preview || proxied(tp.coloredFrontImage), 6);
-  const colorway = mergeColorway(tp.colorway || [], extractedColors);
-  const specLabels = tp.specSheetLabels || {};
-  const calloutMap = pruneCallouts(tp.calloutMap, materials);
-  const auditIssues = auditTechpack(tp, materials, measurements);
-  const sewLabels = tp.sewingDetailLabels || [];
-  const detailViews = visibleDetails(tp.detailViews);
-  const artwork = tp.artwork || [];
-  const construction = tp.construction || [];
-  const sewingSteps = tp.sewingSteps || [];
-  const fitLog = (tp.fitLog && tp.fitLog.length > 0) ? tp.fitLog : [
-    { version: 'v0', date: (tp.generatedAt || '').slice(0, 10), change: 'Initial sample tech pack generated', by: tp.brandName },
-  ];
-
-  const gradeTable = (rows, cont) => (
-    <>
-      <table className="tp-table tp-grade">
-        <thead>
-          <tr>
-            <th className="ltr left-h">POINT OF MEASURE</th>
-            <th className="ltr">TOLERANCE</th>
-            {GRADE_SIZES.map((s) => (
-              <th key={s} className={s === meta.sampleSize ? 'hl' : ''}>{s}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((m, i) => (
-            <tr key={i}>
-              <td className="left ltr sm">{m.pom}</td>
-              <td className="ltr">{m.tolerance}</td>
-              {GRADE_SIZES.map((s) => (
-                <td key={s} className={s === meta.sampleSize ? 'hl' : ''}>{m.sizes ? m.sizes[s] : ''}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="tp-grade-note">Sample Size: {meta.sampleSize} (highlighted) · cm{cont ? ' · Continued on next page' : ''}</div>
-    </>
-  );
-
-  const matCards = (list, offset) => (
-    <div className="tp-matcards">
-      {list.map((m, i) => (
-        <div className="tp-matcard" key={i}>
-          {matPhotos[offset + i]
-            ? <img src={matPhotos[offset + i]} alt={m.name} />
-            : <div className="tp-matcard-ph"></div>}
-          <div className="tp-matcard-body">
-            <div className="tp-matcard-name">{m.name}</div>
-            <div className="tp-matcard-place">{m.placement}</div>
-            <div className="tp-matcard-desc">{m.description}</div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
-
-  // بناء الصفحات بترتيب النموذج الحرفي
-  const pages = [];
-
-  pages.push(['REFERENCE IMAGES', (
-    <div className="tp-ref-frame">
-      {preview
-        ? <img src={preview} alt="design reference" />
-        : <div className="tp-img-ph" style={{ aspectRatio: '3/4' }}></div>}
-    </div>
-  )]);
-
-  pages.push(['SAMPLE MEASUREMENTS', (
-    <div className="tp-spec-frame">
-      <div className="tp-spec-title">GARMENT SPEC SHEET — {(tp.garmentName || '').toUpperCase()}</div>
-      <div className="tp-spec-key">Garment Details: <b>BLACK</b>; <span className="red">Measurement Lines and Labels: RED</span></div>
-      <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={tp.lineFrontImage} backImage={tp.lineBackImage} mode="measure"
-        front={specLabels.front || []} back={specLabels.back || []} />
-    </div>
-  )]);
-
-  gradePages.forEach((rows, i) => {
-    const more = i < gradePages.length - 1;
-    pages.push([i === 0 ? 'SIZE GRADING CHART' : 'SIZE GRADING CHART (CONTINUED)', gradeTable(rows, more)]);
-  });
-
-  matPages.forEach((pg, i) => {
-    pages.push([i === 0 ? 'MATERIALS' : 'MATERIALS (CONTINUED)', matCards(pg.items, pg.offset)]);
-  });
-
-  pages.push(['MATERIALS CALLOUT', (
-    <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={tp.lineFrontImage} backImage={tp.lineBackImage} mode="callout"
-      front={calloutMap.filter((c) => (c.view || 'front') !== 'back')}
-      back={calloutMap.filter((c) => c.view === 'back')} />
-  )]);
-
-  pages.push(['BILL OF MATERIALS', (
-    <table className="tp-table tp-bom">
-      <thead>
-        <tr>
-          <th>#</th><th className="ltr left-h">ITEM NAME</th><th className="ltr left-h">DESCRIPTION</th>
-          <th className="ltr left-h">PLACEMENT</th><th className="ltr">QTY</th><th className="ltr">UNIT</th>
-        </tr>
-      </thead>
-      <tbody>
-        {materials.map((m, i) => (
-          <tr key={i}>
-            <td className="ref-code">{i + 1}</td>
-            <td className="left ltr"><b>{m.name}</b></td>
-            <td className="left ltr sm">{m.description}</td>
-            <td className="left ltr sm">{m.placement}</td>
-            <td className="ltr">{m.qty}</td>
-            <td className="ltr">{m.unit}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )]);
-
-  pages.push(['SEWING DETAILS', (
-    <AnnotatedPair measurements={measurements} sampleSize={meta.sampleSize} frontImage={tp.lineFrontImage} backImage={tp.lineBackImage} mode="sewing"
-      front={sewLabels.filter((s) => (s.view || 'front') !== 'back')}
-      back={sewLabels.filter((s) => s.view === 'back')} />
-  )]);
-
-  pages.push(['COLORWAYS & PANTONE', (
-    <div className="tp-colorways">
-      <div className="tp-img-frame">
-        <div className="tp-pair">
-          <div className="tp-view">{(tp.coloredFrontImage || tp.lineFrontImage) ? <img src={tp.coloredFrontImage || tp.lineFrontImage} alt="front colorway" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">FRONT</div></div>
-          <div className="tp-view">{(tp.coloredBackImage || tp.lineBackImage) ? <img src={tp.coloredBackImage || tp.lineBackImage} alt="back colorway" /> : <div className="tp-img-ph" style={{ aspectRatio: '2/3' }}></div>}<div className="tp-view-cap">BACK</div></div>
-        </div>
-      </div>
-      <div>
-        <div className="tp-pantone-title">Pantone Color Palette</div>
-        {colorway.map((c, i) => (
-          <div className="tp-pantone-row" key={i}>
-            <div className="tp-pantone-sw" style={{ background: c.hex }}></div>
-            <div>
-              <div className="tp-pantone-part">{c.part}</div>
-              <div className="tp-pantone-code">
-                {c.pantone}{c.pantoneName ? ' ' + c.pantoneName : ''} · {c.hex}
-                {c.deltaE > 5 ? <span className="tp-pantone-warn"> · approx. ΔE {c.deltaE}</span> : null}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )]);
-
-  pages.push(['DETAILED VIEWS', (
-    <>
-      <RefCrops
-        frontImage={tp.coloredFrontImage}
-        backImage={tp.coloredBackImage}
-        items={detailViews}
-        anchors={buildAnchors(measurements, meta.sampleSize, 'front')} />
-      {detailViews.length > 0 && (
-        <table className="tp-table" style={{ marginTop: '1rem' }}>
-          <thead><tr><th className="ltr left-h">AREA</th><th className="ltr left-h">DETAIL</th><th className="ltr left-h">SPEC</th></tr></thead>
-          <tbody>
-            {detailViews.map((d, i) => (
-              <tr key={i}>
-                <td className="left ltr"><b>{d.area}</b></td>
-                <td className="left ltr sm">{d.detail}</td>
-                <td className="left ltr sm">{d.spec}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </>
-  )]);
-
-  if (artwork.length > 0) {
-    pages.push(['ARTWORK DETAILS', (
-      <>
-      {/* لقطات الزخرفة تُقتطع من الرسمة الملوّنة نفسها — بلا توليد إضافي.
-          النموذج المرجعي يعرض هذه الصفحة كصور زخرفة مع ملاحظات، لا كجدول
-          مجرّد؛ والمصنع يحتاج أن يرى العنصر لا أن يقرأ عنه فقط. */}
-      <RefCrops
-        frontImage={tp.coloredFrontImage}
-        backImage={tp.coloredBackImage}
-        items={artwork.map((a) => ({ area: a.name, view: a.view || 'front' }))}
-        anchors={buildAnchors(measurements, meta.sampleSize, 'front')} />
-      <table className="tp-table" style={{ marginTop: '1rem' }}>
-        <thead><tr><th className="ltr left-h">ELEMENT</th><th className="ltr left-h">PLACEMENT</th><th className="ltr left-h">SIZE</th><th className="ltr left-h">TECHNIQUE</th><th className="ltr left-h">NOTES</th></tr></thead>
-        <tbody>
-          {artwork.map((a, i) => (
-            <tr key={i}>
-              <td className="left ltr"><b>{a.name}</b></td>
-              <td className="left ltr sm">{a.placement}</td>
-              <td className="left ltr sm">{a.size}</td>
-              <td className="left ltr sm">{a.technique}</td>
-              <td className="left ltr sm">{a.notes}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      </>
-    )]);
-  }
-
-  pages.push(['CONSTRUCTION GUIDE', (
-    <>
-      <div className="tp-gi-head">Garment Information</div>
-      <div className="tp-gi">
-        <div><b>Type:</b> {tp.garmentInfo?.type}</div>
-        <div><b>Silhouette:</b> {tp.garmentInfo?.silhouette}</div>
-        <div><b>Construction:</b> {tp.garmentInfo?.construction}</div>
-      </div>
-      <div className="tp-gi-head">Construction &amp; Trim Details <span className="tp-count">{construction.length} items</span></div>
-      <table className="tp-table">
-        <thead><tr><th>#</th><th className="ltr left-h">SECTION</th><th className="ltr left-h">DETAIL TYPE</th><th className="ltr left-h">DESCRIPTION</th></tr></thead>
-        <tbody>
-          {construction.map((c, i) => (
-            <tr key={i}>
-              <td className="ref-code">{i + 1}</td>
-              <td className="left ltr"><b>{c.section}</b></td>
-              <td className="left ltr sm">{c.detailType || c.detail}</td>
-              <td className="left ltr sm">{c.description}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  )]);
-
-  pages.push(['SEWING INSTRUCTIONS', (
-    <>
-      <div className="tp-gi-head">Sewing Instructions <span className="tp-count">{sewingSteps.length} instructions</span></div>
-      <ol className="tp-steps">
-        {sewingSteps.map((s, i) => (<li key={i} dir="ltr">{s}</li>))}
-      </ol>
-    </>
-  )]);
-
-  pages.push(['FIT LOG & REVISION HISTORY', (
-    <table className="tp-table">
-      <thead><tr><th>#</th><th className="ltr left-h">VERSION</th><th className="ltr left-h">DATE</th><th className="ltr left-h">CHANGE / FIT COMMENT</th><th className="ltr left-h">BY</th></tr></thead>
-      <tbody>
-        {fitLog.map((f, i) => (
-          <tr key={i}>
-            <td className="ref-code">{i + 1}</td>
-            <td className="left ltr">{f.version}</td>
-            <td className="left ltr sm">{f.date}</td>
-            <td className="left ltr sm">{f.change}</td>
-            <td className="left ltr sm">{f.by}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )]);
-
-  const total = pages.length;
-
-  return (
-    <TpMetaContext.Provider value={meta}>
-      {auditIssues.length > 0 && (
-        <div className="tp-audit">
-          <strong>تنبيه — نواقص في هذا التيك باك:</strong>
-          <ul>{auditIssues.map((x, i) => <li key={i}>{x}</li>)}</ul>
-        </div>
-      )}
-      <div id="techpack-canvas" className="tp">
-        {pages.map(([title, body], i) => (
-          <TpPage key={i} n={i + 1} total={total} title={title}>
-            {body}
-          </TpPage>
-        ))}
-        <div className="tp-foot">{tp.brandName} · Technical Package</div>
-      </div>
-    </TpMetaContext.Provider>
-  );
-}
-
-// ============================================================================
-// ===== طبقة الشرح المرسومة بالكود فوق الرسمات =====
-// النص والأرقام تُرسم كـ HTML حاد (لا نطلب من نماذج الصور كتابة نصوص).
-// كل منظر (أمامي/خلفي) صورة مستقلة، وخطوط القياس تمتد عبر جسم القطعة نفسه.
-// ============================================================================
-
-
-
-// كشف الصندوق المحيط للقطعة في صورة منظر واحد (خطوط داكنة على أبيض).
-// يعمل محلياً على كانفاس — بلا أي استدعاء API وبلا أي كلفة.
-function useImgBox(image) {
-  const [box, setBox] = useState(null);
-  useEffect(() => {
-    if (!image) { setBox(null); return; }
-    let cancelled = false;
-    const img = new window.Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const W = 140;   // قراءة مصغّرة تكفي لكشف حدود القطعة
-        const H = Math.max(60, Math.round((img.height / img.width) * W));
-        const c = document.createElement('canvas');
-        c.width = W; c.height = H;
-        const ctx = c.getContext('2d');
-        ctx.drawImage(img, 0, 0, W, H);
-        const data = ctx.getImageData(0, 0, W, H).data;
-
-        // كشف الحدود بعدّ البكسلات لكل صف وعمود، لا بأول بكسل داكن.
-        // الرسمة التقنية مليئة بنقاط الخرز الرمادية المتناثرة، والعتبة
-        // المتساهلة كانت تعدّ نقطة واحدة حدّاً للقطعة فيزيح الإطار كلّه
-        // وتخطئ كل مواقع الليبلات المحسوبة.
-        const rowCount = new Array(H).fill(0);
-        const colCount = new Array(W).fill(0);
-        for (let y = 0; y < H; y++) {
-          for (let x = 0; x < W; x++) {
-            const p = (y * W + x) * 4;
-            if (data[p + 3] < 40) continue;
-            const lum = (data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114);
-            if (lum < 205) { rowCount[y]++; colCount[x]++; }   // أي حبر غير الخلفية
-          }
-        }
-        // صفٌّ يُعدّ جزءاً من القطعة إن حمل حبراً يتجاوز ضجيج النقاط المتناثرة
-        const rowMin = Math.max(2, Math.round(W * 0.02));
-        const colMin = Math.max(2, Math.round(H * 0.02));
-        let top = -1, bot = -1, left = -1, right = -1;
-        for (let y = 0; y < H; y++) if (rowCount[y] >= rowMin) { if (top < 0) top = y; bot = y; }
-        for (let x = 0; x < W; x++) if (colCount[x] >= colMin) { if (left < 0) left = x; right = x; }
-
-        const found = top >= 0 && bot > top && bot - top > H * 0.2 && right > left;
-        if (!cancelled) setBox(found ? {
-          top: (top / H) * 100, bottom: (bot / H) * 100,
-          left: (left / W) * 100, right: (right / W) * 100,
-        } : null);
-      } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); if (!cancelled) setBox(null); }
-    };
-    img.onerror = () => { if (!cancelled) setBox(null); };
-    // مسار القراءة وحده يمرّ بالوسيط لأن canvas يحتاج رؤوس CORS.
-    // فشل القراءة لا يكسر العرض: يسقط إلى إطار افتراضي فقط.
-    img.src = proxied(image);
-    return () => { cancelled = true; };
-  }, [image]);
-  return box;
-}
-
-
-// ===========================================================================
-// ألوان الكولورويز تُسحب من بكسلات صورة التصميم، لا من وصف النموذج.
-// تمرّ الصورة عبر /api/img لأن قراءة البكسلات من نطاق آخر تفشل بلا وسيط.
-// ===========================================================================
 
 // ===========================================================================
 // جدول بانتون TCX/TPG — مجموعة الأزياء والمفروشات، 2310 لوناً.
@@ -2191,709 +1299,1618 @@ function clusterColors(points, k) {
     .filter((x) => x.share > 0.02).sort((a, b) => b.share - a.share);
 }
 
-function useExtractedColors(image, maxColors) {
-  const [cols, setCols] = useState(null);
-  useEffect(() => {
-    if (!image) { setCols(null); return; }
-    let cancelled = false;
-    const img = new window.Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try {
-        const W = 220;
-        const H = Math.max(60, Math.round((img.height / img.width) * W));
-        const c = document.createElement('canvas');
-        c.width = W; c.height = H;
-        const ctx = c.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0, W, H);
-        const data = ctx.getImageData(0, 0, W, H).data;
+// ============================================================================
+// ===== التيك باك — محرّك ورقة RK =====
+// ============================================================================
+// ورقة واحدة A4 عمودية على بنية نموذج RK Fashion.
+// نفس دالة الرسم تُستخدم مرتين: مرة على كانفاس للمعاينة، ومرة داخل jsPDF
+// للملف. لذلك ما تراه المصممة في المعاينة هو نفسه ما ينزل في الملف.
+// الملف نصّي: كل الكتابة فيه نص حقيقي بخطوط مضمّنة، قابل للنسخ والتعديل.
+//
+// لا توليد صور في هذه الورقة إطلاقاً:
+//   · LOOK = صورة التصميم · BACK VIEW = الرسمة الملوّنة الخلفية
+//   · TECHNICAL FLAT و CONSTRUCTION = الرسمتان التقنيتان المرفوعتان
+//   · لقطات التفاصيل ومربعات الأقمشة ودوائر التريمز = قصّ من صورة التصميم
+//   · الكولورواي = ألوان مسحوبة من بكسلات التصميم + أقرب بانتون TCX
+// ============================================================================
 
-        // لون الخلفية: أغلب لون على الإطار الخارجي
-        const bag = new Map();
-        const push = (x, y) => {
-          const i = (y * W + x) * 4;
-          const key = (data[i] >> 4) + ',' + (data[i + 1] >> 4) + ',' + (data[i + 2] >> 4);
-          const e = bag.get(key) || { n: 0, s: [0, 0, 0] };
-          e.n++; e.s[0] += data[i]; e.s[1] += data[i + 1]; e.s[2] += data[i + 2];
-          bag.set(key, e);
-        };
-        for (let x = 0; x < W; x++) { push(x, 0); push(x, H - 1); }
-        for (let y = 0; y < H; y++) { push(0, y); push(W - 1, y); }
-        let bg = [255, 255, 255], best = null;
-        bag.forEach((e) => { if (!best || e.n > best.n) best = e; });
-        if (best) bg = best.s.map((v) => v / best.n);
+const TP_W = 210;
+const TP_H = 297;
+const TP_INK = '#1d1b1a';
+const TP_MUTED = '#6b6661';
+const TP_RULE = '#d6d2cc';
+const TP_SOFT = '#f4f2ef';
+const TP_LEADER = '#5a5652';
+const TP_SIZE_COLS = [['XS', '0-2'], ['S', '4-6'], ['M', '8-10'], ['L', '12-14'], ['XL', '16-18'], ['XXL', '20-22']];
 
-        const pts = [];
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i + 3] < 200) continue;
-          const c3 = [data[i], data[i + 1], data[i + 2]];
-          if (cDist(c3, bg) < 70) continue;              // خلفية
-          if (Math.max(c3[0], c3[1], c3[2]) < 28) continue;  // ظل أسود
-          if (Math.min(c3[0], c3[1], c3[2]) > 238) continue; // وهج أبيض
-          pts.push(c3);
-        }
-        const out = clusterColors(pts, maxColors || 6)
-          .map((x) => ({ hex: toHex(x.rgb), rgb: x.rgb.map((v) => Math.round(v)), share: Math.round(x.share * 1000) / 10 }));
-        if (!cancelled) setCols(out.length ? out : null);
-      } catch (e) { if (typeof console !== "undefined") console.warn("[gh]", e && e.message); if (!cancelled) setCols(null); }
-    };
-    img.onerror = () => { if (!cancelled) setCols(null); };
-    img.src = image;
-    return () => { cancelled = true; };
-  }, [image, maxColors]);
-  return cols;
-}
+const TP_CARE = {
+  dryclean: ['DRY CLEAN', 'ONLY'],
+  handwash: ['HAND WASH', 'COLD'],
+  wash30: ['MACHINE WASH', '30°C GENTLE'],
+  nowash: ['DO NOT', 'WASH'],
+  nobleach: ['DO NOT', 'BLEACH'],
+  steamlow: ['STEAM', 'LOW'],
+  ironlow: ['IRON', 'LOW'],
+  noiron: ['DO NOT', 'IRON'],
+  notumble: ['DO NOT', 'TUMBLE DRY'],
+  dryflat: ['DRY', 'FLAT'],
+  hangbag: ['STORE HANGING', 'IN GARMENT BAG'],
+  storefolded: ['STORE', 'FOLDED'],
+};
+const TP_CARE_KINDS = ['dryclean', 'handwash', 'wash30', 'nowash', 'nobleach', 'steamlow', 'ironlow', 'noiron', 'notumble', 'dryflat'];
+const TP_STORAGE_KINDS = ['hangbag', 'storefolded'];
+const TP_CARE_AR = {
+  dryclean: 'تنظيف جاف فقط', handwash: 'غسيل يدوي بارد', wash30: 'غسالة 30 درجة لطيف',
+  nowash: 'ممنوع الغسيل', nobleach: 'ممنوع المبيّض', steamlow: 'بخار منخفض', ironlow: 'كي منخفض',
+  noiron: 'ممنوع الكي', notumble: 'ممنوع النشّافة', dryflat: 'تجفيف مسطّح',
+  hangbag: 'تعليق داخل كيس', storefolded: 'تخزين مطوي',
+};
+const TP_TRIM_KINDS = ['zipper', 'button', 'hook', 'snap', 'thread', 'label', 'elastic', 'boning',
+  'bead', 'crystal', 'sequin', 'pearl', 'piping', 'lace', 'ribbon', 'embroidery', 'other'];
 
-// دمج: أسماء الأجزاء من التحليل، وأكواد الألوان من البكسل.
-// كل جزء يأخذ أقرب لون مستخرج للون الذي خمّنه النموذج، فيبقى الوصف صحيحاً
-// ويصبح الكود مضبوطاً. الألوان المستخرجة غير المستخدمة تُضاف كما هي.
-function mergeColorway(declared, extracted) {
-  if (!extracted || !extracted.length) return declared || [];
-  const hexToRgb = (h) => {
-    const m = /^#?([0-9a-f]{6})$/i.exec(String(h || ''));
-    if (!m) return null;
-    const v = parseInt(m[1], 16);
-    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
-  };
-  const pool = extracted.slice();
-  const out = (declared || []).map((d) => {
-    const rgb = hexToRgb(d.hex);
-    let bi = 0;
-    if (rgb) {
-      let bd = Infinity;
-      pool.forEach((e, i) => { const dd = cDist(rgb, e.rgb); if (dd < bd) { bd = dd; bi = i; } });
-    }
-    const pick = pool.splice(bi, 1)[0] || extracted[0];
-    // الكود يُشتقّ من اللون المسحوب فعلاً، لا من تخمين النموذج
-    const pt = nearestPantone(pick.hex);
-    return { ...d, hex: pick.hex, share: pick.share,
-      pantone: pt ? pt.code : d.pantone, pantoneName: pt ? pt.name : '', deltaE: pt ? pt.deltaE : null };
-  });
-  pool.forEach((e) => {
-    const pt = nearestPantone(e.hex);
-    out.push({ part: '', hex: e.hex, share: e.share,
-      pantone: pt ? pt.code : '', pantoneName: pt ? pt.name : '', deltaE: pt ? pt.deltaE : null });
-  });
-  return out.sort((a, b) => (b.share || 0) - (a.share || 0));
-}
-
-const DEFAULT_VIEW_BOX = { top: 6, bottom: 95, left: 22, right: 78 };
-
-// منظر واحد مشروح: خطوط القياس تعبر جسم القطعة، والدوائر/التسميات على جهة labelSide
-
-// ===========================================================================
-// محرّك مواقع الليبلات — يُحسب من جدول القياسات، لا يُخمَّن.
-// محايد تجاه نوع القطعة: لا فستان ولا بنطلون في هذا الكود.
-// ===========================================================================
-const LANDMARKS = [
-  ['topedge',  /top\s*edge|upper\s*edge|waistband\s*top/i],
-  ['neck',     /\bneck|collar/i],
-  ['shoulder', /shoulder|\byoke\b/i],
-  ['chest',    /\bchest\b|across\s*front|across\s*back|\bbp\s*-?\s*bp\b|bust\s*point|cup\s*height/i],
-  ['bust',     /\bbust\b|\bcup\b/i],
-  ['armhole',  /armhole|underarm|\bbicep\b|sleeve\s*cap|muscle/i],
-  ['elbow',    /elbow/i],
-  ['waist',    /\bwaist\b/i],
-  ['highhip',  /high\s*hip/i],
-  ['hip',      /\bhip\b|\bseat\b/i],
-  ['cuff',     /\bcuff\b|sleeve\s*opening|sleeve\s*hem/i],
-  ['crotch',   /\bcrotch\b|\brise\b/i],
-  ['thigh',    /\bthigh\b/i],
-  ['knee',     /\bknee\b|flare\s*break/i],
-  ['calf',     /\bcalf\b/i],
-  ['ankle',    /\bankle\b|leg\s*opening|hem\s*opening/i],
-  ['hem',      /\bhem\b|sweep|\bhfs\b|\bhbs\b|bottom\s*edge|\btrain\b/i],
+const TP_FONT_FILES = [
+  { id: 'regular', family: 'TPSans', weight: '400' },
+  { id: 'semibold', family: 'TPSans', weight: '600' },
+  { id: 'display', family: 'TPDisplay', weight: '400' },
 ];
-const LM_RANK = {};
-LANDMARKS.forEach(([k], i) => { LM_RANK[k] = i; });
 
-function landmarkOf(text, full) {
-  // الاسم قبل القوس هو الهوية؛ الوصف داخل القوس يذكر نقاطاً مرجعية أخرى
-  const t = full ? (text || '') : String(text || '').split('(')[0];
-  for (const [key, re] of LANDMARKS) if (re.test(t)) return key;
-  return null;
+const tpHasArabic = (s) => /[\u0600-\u06FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(String(s || ''));
+const tpUp = (s) => (tpHasArabic(s) ? String(s || '') : String(s || '').toUpperCase());
+const tpClamp = (v, a, b) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(a, Math.min(b, n)) : a;
+};
+const tpFin = (...v) => v.every((n) => typeof n === 'number' && Number.isFinite(n));
+
+// تنظيف النص قبل الرسم والقياس: أي رمز غير موجود في الخط يُستبدل بأقرب
+// مقابل أو يُحذف، فلا يظهر مربع فارغ في الملف ولا يختلف القياس.
+const TP_CHAR_MAP = { '\u2248': '~', '\u2212': '-', '\u2032': "'", '\u2033': '"', '\u00AD': '', '\t': ' ' };
+const tpCharOk = (ch) => {
+  const c = ch.codePointAt(0);
+  return (c >= 0x20 && c <= 0x7E) || (c >= 0xA0 && c <= 0xFF)
+    || c === 0x110 || (c >= 0x131 && c <= 0x133) || (c >= 0x140 && c <= 0x142) || c === 0x152 || c === 0x153
+    || c === 0x160 || c === 0x161 || c === 0x178 || c === 0x17D || c === 0x17E
+    || (c >= 0x2013 && c <= 0x2015) || (c >= 0x2018 && c <= 0x201A) || (c >= 0x201C && c <= 0x201E)
+    || (c >= 0x2020 && c <= 0x2022) || c === 0x2026 || c === 0x2030 || c === 0x2122
+    || (c >= 0x600 && c <= 0x6FF) || (c >= 0x750 && c <= 0x77F)
+    || (c >= 0xFB50 && c <= 0xFDFF) || (c >= 0xFE70 && c <= 0xFEFF);
+};
+function tpSafe(str) {
+  let out = '';
+  for (const ch0 of String(str == null ? '' : str)) {
+    const ch = Object.prototype.hasOwnProperty.call(TP_CHAR_MAP, ch0) ? TP_CHAR_MAP[ch0] : ch0;
+    if (!ch) continue;
+    if (ch === '\n' || tpCharOk(ch)) { out += ch; continue; }
+    const base = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (base && Array.from(base).every(tpCharOk)) out += base;
+  }
+  return out.replace(/ {2,}/g, ' ');
 }
-const VERTICAL_POM_RE = /position|height|drop|depth|\brise\b|from\s*top/i;
-// الأطوال الممتدة: تُستبعد من كونها مراسي لأنها مسافات لا نقاط.
-const SPAN_POM_RE = /\bcfl\b|\bcbl\b|center\s*(front|back)\s*length|side\s*seam\s*length|outseam|inseam|zipper\s*length|train\s*length|lining\s*length|sleeve\s*length|overall\s*length|\bback\s*length\b|\bfront\s*length\b/i;
+// خط العرض (Gilda) للأحرف اللاتينية فقط؛ غير ذلك يُرسم بالخط الأساسي
+const tpSerifOk = (str) => /^[\x20-\x7E\u00A0-\u017E]*$/.test(String(str || ''));
+const tpHexOk = (h) => /^#[0-9a-f]{6}$/i.test(String(h || ''));
+const tpHexRgb = (h) => {
+  const n = parseInt(String(h).slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
 
-// ما يُرسم سهماً رأسياً على الرسمة: الأطوال الممتدة، وكل قياس ارتفاع أو عمق
-// أو دروب أو موضع — فهذه مسافات رأسية، ورسمها خطاً أفقياً عابراً للقطعة خطأ.
-// منفصل عن السابق عمداً: "Waist Position" مرساةٌ تحدّد موضع الخصر، وفي الوقت
-// نفسه يُرسم سهماً رأسياً إن ظهر كليبل. خلط النمطين يُفقد المرساة.
-const VERTICAL_DRAW_RE = new RegExp(SPAN_POM_RE.source + '|\\bheight\\b|\\bdepth\\b|\\bdrop\\b|\\bposition\\b|\\brise\\b', 'i');
-
-function pomVal(row, size) {
-  if (!row || !row.sizes) return null;
-  const v = row.sizes[String(size)] ?? row.sizes[size];
-  const n = typeof v === 'string' ? parseFloat(v) : v;
-  return Number.isFinite(n) ? n : null;
+function tpUserError(msg) {
+  const e = new Error(msg);
+  e.userMessage = msg;
+  return e;
 }
-function totalLen(rows, size, view) {
-  const full = /center\s*(front|back)\s*length|side\s*seam\s*length|outseam|overall\s*length|garment\s*length|\bback\s*length\b|\bfront\s*length\b/i;
+
+// ---------------------------------------------------------------------------
+// تحميل jsPDF والخطوط مرة واحدة. الخطوط تُخدَم من /api/techpack-fonts بنفس
+// النطاق، وتُسجَّل للكانفاس (FontFace) وللـ PDF معاً فتتطابق المقاسات.
+// ---------------------------------------------------------------------------
+let _tpEngine = null;
+
+function tpB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+  }
+  return btoa(bin);
+}
+
+function tpRegisterFonts(doc, fonts, ok) {
+  if (!ok) return;
+  doc.addFileToVFS('TPSans-Regular.ttf', fonts.regular);
+  doc.addFont('TPSans-Regular.ttf', 'TPSans', 'normal');
+  doc.addFileToVFS('TPSans-SemiBold.ttf', fonts.semibold);
+  doc.addFont('TPSans-SemiBold.ttf', 'TPSansSB', 'normal');
+  doc.addFileToVFS('TPDisplay-Regular.ttf', fonts.display);
+  doc.addFont('TPDisplay-Regular.ttf', 'TPDisplay', 'normal');
+}
+
+function tpEnsureEngine() {
+  if (_tpEngine) return _tpEngine;
+  _tpEngine = (async () => {
+    const mod = await import('jspdf');
+    const JsPDF = mod.jsPDF || mod.default;
+    const fonts = {};
+    await Promise.all(TP_FONT_FILES.map(async (f) => {
+      try {
+        const r = await fetch('/api/techpack-fonts?f=' + f.id);
+        if (!r.ok) throw new Error('font ' + r.status);
+        const buf = await r.arrayBuffer();
+        fonts[f.id] = tpB64(buf);
+        if (typeof FontFace !== 'undefined' && document.fonts) {
+          const face = new FontFace(f.family, buf.slice(0), { weight: f.weight, style: 'normal' });
+          await face.load();
+          document.fonts.add(face);
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] font', f.id, e && e.message);
+      }
+    }));
+    const ok = Boolean(fonts.regular && fonts.semibold && fonts.display);
+    const measure = new JsPDF({ unit: 'mm', format: 'a4' });
+    tpRegisterFonts(measure, fonts, ok);
+    return { JsPDF, fonts, ok, measure };
+  })().catch((e) => { _tpEngine = null; throw e; });
+  return _tpEngine;
+}
+
+// ---------------------------------------------------------------------------
+// أدوات الصور
+// ---------------------------------------------------------------------------
+function tpLoadImage(src) {
+  return new Promise((resolve, reject) => {
+    const im = new window.Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error('image load'));
+    im.src = src;
+  });
+}
+
+function tpCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w));
+  c.height = Math.max(1, Math.round(h));
+  return c;
+}
+
+async function tpFileToCanvas(file, maxSide) {
+  const url = URL.createObjectURL(file);
+  try {
+    const im = await tpLoadImage(url);
+    const k = Math.min(1, maxSide / Math.max(im.naturalWidth, im.naturalHeight));
+    const c = tpCanvas(im.naturalWidth * k, im.naturalHeight * k);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffffff';                 // الشفافية تُملأ أبيض لا أسود
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(im, 0, 0, c.width, c.height);
+    return c;
+  } catch (e) {
+    throw tpUserError('تعذّر قراءة إحدى الصور المرفوعة — ارفعيها بصيغة JPG أو PNG');
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+// قصّ الفراغ حول القطعة: الخلفية = اللون الغالب على الإطار الخارجي.
+// العدّ لكل صف وعمود يتجاهل النقاط المتناثرة فلا يزيح الحدود.
+function tpTrim(src) {
+  const W = Math.min(320, src.width);
+  const H = Math.max(8, Math.round((src.height / src.width) * W));
+  const t = tpCanvas(W, H);
+  const tctx = t.getContext('2d', { willReadFrequently: true });
+  tctx.drawImage(src, 0, 0, W, H);
+  const data = tctx.getImageData(0, 0, W, H).data;
+
+  const bag = new Map();
+  const push = (x, y) => {
+    const i = (y * W + x) * 4;
+    const key = (data[i] >> 4) + ',' + (data[i + 1] >> 4) + ',' + (data[i + 2] >> 4);
+    const e = bag.get(key) || { n: 0, s: [0, 0, 0] };
+    e.n++; e.s[0] += data[i]; e.s[1] += data[i + 1]; e.s[2] += data[i + 2];
+    bag.set(key, e);
+  };
+  for (let x = 0; x < W; x++) { push(x, 0); push(x, H - 1); }
+  for (let y = 0; y < H; y++) { push(0, y); push(W - 1, y); }
   let best = null;
-  rows.forEach((r) => {
-    if (!full.test(r.pom || '')) return;
-    const v = pomVal(r, size); if (v == null || v <= 0) return;
-    const same = (r.view || 'front') === view;
-    if (best == null || (same && !best.same) || (same === best.same && v > best.v)) best = { v, same };
-  });
-  if (best) return best.v;
-  // لا احتياط بأكبر رقم في الجدول: أكبر رقم قد يكون عرضاً لا طولاً،
-  // فيصير الخصر بعرض 35 سم "طول القطعة" وتنهار كل النسب بصمت.
-  // غياب قياس طول كامل خللٌ يُبلَّغ عنه، لا يُرقَّع.
-  return null;
-}
-function relationOf(pom) {
-  const m = /(\d+(?:\.\d+)?)\s*cm\s*(below|under|down\s*from|above)\s*(?:the\s+)?([a-z\s]+)/i.exec(pom || '');
-  if (!m) return null;
-  const lm = landmarkOf(m[3], true); if (!lm) return null;
-  return { from: lm, delta: (/above/i.test(m[2]) ? -1 : 1) * parseFloat(m[1]) };
-}
-function buildAnchors(rows, size, view) {
-  const total = totalLen(rows, size, view);
-  if (!total || total <= 0) return null;
-  const cm = { topedge: 0, hem: total };
-  rows.forEach((r) => {
-    const pom = r.pom || '';
-    if (SPAN_POM_RE.test(pom) || !VERTICAL_POM_RE.test(pom) || relationOf(pom)) return;
-    const lm = landmarkOf(pom); const v = pomVal(r, size);
-    if (!lm || v == null || v < 0 || v > total) return;
-    if (cm[lm] == null) cm[lm] = v;
-  });
-  // أعلى معلم مذكور في الجدول هو الحافة العليا للقطعة نفسها
-  let minRank = null;
-  rows.forEach((r) => {
-    const lm = landmarkOf(r.pom);
-    if (lm && LM_RANK[lm] != null && (minRank == null || LM_RANK[lm] < minRank)) minRank = LM_RANK[lm];
-  });
-  if (minRank != null) {
-    const k = LANDMARKS[minRank][0];
-    // لا تدهس مسافة مقيسة صريحة: إن كان للمعلم قياس رأسي في الجدول فهو
-    // المرجع، والترسية عند الصفر تخصّ المعالم التي لا قياس لها فقط.
-    if (cm[k] == null) cm[k] = 0;
-  }
-  for (let pass = 0; pass < 4; pass++) {
-    rows.forEach((r) => {
-      const pom = r.pom || ''; if (SPAN_POM_RE.test(pom)) return;
-      const rel = relationOf(pom); if (!rel) return;
-      const lm = landmarkOf(pom); if (!lm || cm[lm] != null) return;
-      const base = cm[rel.from]; if (base == null) return;
-      const v = base + rel.delta; if (v >= 0 && v <= total) cm[lm] = v;
-    });
-  }
-  // تصحيح القياسات المنسوبة إلى الخصر لا إلى الحافة العليا.
-  // "Flare Break Height (from waist seam…)" و "Thigh (mid-thigh of skirt)"
-  // تُقاس من خط الخصر؛ أخذها كما هي يقلب الترتيب التشريحي فتصير الركبة
-  // فوق الفخذ وتتكدّس الليبلات في نطاق واحد.
-  if (cm.waist != null) {
-    const fromWaist = /from\s*(the\s*)?(natural\s*)?waist|below\s*waist|waist\s*seam\s*(down|to)|of\s*skirt|skirt\s*yoke|where\s*skirt|down\s*to\s*point/i;
-    rows.forEach((r) => {
-      const pom = r.pom || '';
-      if (SPAN_POM_RE.test(pom)) return;
-      const lm = landmarkOf(pom);
-      if (!lm || LM_RANK[lm] == null || LM_RANK[lm] <= LM_RANK.waist) return;
-      if (!fromWaist.test(pom)) return;
-      if (relationOf(pom)) return;          // عولج بالفعل في جولة العلاقات
-      const v = pomVal(r, size);
-      if (v == null || v <= 0) return;
-      if (v >= cm.waist) return;            // قيمة أكبر من الخصر مقيسة من الأعلى أصلاً
-      const abs = cm.waist + v;
-      if (abs <= total) cm[lm] = abs;
-    });
-  }
+  bag.forEach((e) => { if (!best || e.n > best.n) best = e; });
+  const bg = best ? best.s.map((v) => v / best.n) : [255, 255, 255];
+  const edgeShare = best ? best.n / (2 * (W + H)) : 0;
 
-  // الأسورة عند نهاية الكم: موضعها = الكتف + طول الكم، لا استيفاء بين
-  // الفخذ والركبة. الاستيفاء كان يضعها أسفل الورك وهي عند المعصم.
-  {
-    const sl = rows.find((r) => /sleeve\s*length/i.test(r.pom || ''));
-    const slv = sl ? pomVal(sl, size) : null;
-    if (slv != null && slv > 0 && cm.shoulder != null) {
-      const abs = cm.shoulder + slv;
-      if (abs > 0 && abs <= total) cm.cuff = abs;
-    }
-  }
-
-  const known = Object.keys(cm).filter((k) => LM_RANK[k] != null && cm[k] != null)
-    .map((k) => ({ rank: LM_RANK[k], v: cm[k] })).sort((a, b) => a.rank - b.rank);
-  LANDMARKS.forEach(([k], rank) => {
-    if (cm[k] != null) return;
-    let lo = null, hi = null;
-    for (const p of known) { if (p.rank < rank) lo = p; if (p.rank > rank && hi == null) hi = p; }
-    if (lo && hi && hi.rank !== lo.rank) cm[k] = lo.v + ((rank - lo.rank) / (hi.rank - lo.rank)) * (hi.v - lo.v);
-  });
-  // حارس الترتيب: لا يعلو معلمٌ على ما فوقه مهما كانت صياغة الجدول.
-  // انقلاب الترتيب يضع الركبة فوق الفخذ ويُفسد كل مواقع الليبلات.
-  let prev = 0;
-  LANDMARKS.forEach(([k]) => {
-    if (cm[k] == null) return;
-    if (cm[k] < prev) cm[k] = prev;
-    prev = cm[k];
-  });
-
-  // خط الكنس يقع عند حافة الهيم المرسومة، لا عند آخر بكسل في الصورة:
-  // أسفل الرسمة ينتهي بأطراف تول وذيل تمتد تحت خط الهيم الفعلي، فوضع
-  // الليبل عند 100% يضعه أسفل الحافة التي يقيسها المصنع.
-  cm.hem = total * 0.955;
-
-  cm.__total = total;
-  return cm;
-}
-const pClamp = (p) => Math.max(0.5, Math.min(99.5, Math.round(p * 10) / 10));
-function computeY(text, cm) {
-  const rel = relationOf(text);
-  if (rel && cm[rel.from] != null) return pClamp(((cm[rel.from] + rel.delta) / cm.__total) * 100);
-  const lm = landmarkOf(text);
-  if (!lm || cm[lm] == null) return null;
-  return pClamp((cm[lm] / cm.__total) * 100);
-}
-// فضّ التداخل بالاسترخاء المتوازن: المتصادمان يتقاسمان الإزاحة
-function relaxRows(list, minGap) {
-  if (list.length < 2) return list;
-  for (let pass = 0; pass < 40; pass++) {
-    let moved = false;
-    for (let i = 1; i < list.length; i++) {
-      const gap = list[i].y - list[i - 1].y;
-      if (gap < minGap - 0.01) {
-        const push = (minGap - gap) / 2;
-        list[i - 1].y = pClamp(list[i - 1].y - push);
-        list[i].y = pClamp(list[i].y + push);
-        moved = true;
+  const rows = new Array(H).fill(0);
+  const cols = new Array(W).fill(0);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (Math.abs(data[i] - bg[0]) + Math.abs(data[i + 1] - bg[1]) + Math.abs(data[i + 2] - bg[2]) > 54) {
+        rows[y]++; cols[x]++;
       }
     }
-    if (!moved) break;
   }
-  for (let i = 1; i < list.length; i++) if (list[i].y <= list[i - 1].y) list[i].y = pClamp(list[i - 1].y + minGap);
-  for (let i = list.length - 2; i >= 0; i--) if (list[i].y >= list[i + 1].y) list[i].y = pClamp(list[i + 1].y - minGap);
-  return list;
+  const rMin = Math.max(1, Math.round(W * 0.012));
+  const cMin = Math.max(1, Math.round(H * 0.006));
+  let top = -1, bot = -1, left = -1, right = -1;
+  for (let y = 0; y < H; y++) if (rows[y] >= rMin) { if (top < 0) top = y; bot = y; }
+  for (let x = 0; x < W; x++) if (cols[x] >= cMin) { if (left < 0) left = x; right = x; }
+
+  // خلفية غير موحّدة أو لا شيء يُكشف: الصورة كما هي
+  if (edgeShare < 0.45 || top < 0 || right <= left || bot <= top) {
+    return { canvas: src, bg };
+  }
+  const k = src.width / W;
+  const pad = Math.round(Math.max(src.width, src.height) * 0.015);
+  const sx = tpClamp(Math.floor(left * k) - pad, 0, src.width - 1);
+  const sy = tpClamp(Math.floor(top * k) - pad, 0, src.height - 1);
+  const ex = tpClamp(Math.ceil((right + 1) * k) + pad, sx + 1, src.width);
+  const ey = tpClamp(Math.ceil((bot + 1) * k) + pad, sy + 1, src.height);
+  const out = tpCanvas(ex - sx, ey - sy);
+  const octx = out.getContext('2d');
+  octx.fillStyle = 'rgb(' + bg.map(Math.round).join(',') + ')';
+  octx.fillRect(0, 0, out.width, out.height);
+  octx.drawImage(src, sx, sy, ex - sx, ey - sy, 0, 0, out.width, out.height);
+  return { canvas: out, bg };
 }
-function labelPositions(items, measurements, size, view) {
-  const rows = Array.isArray(measurements) ? measurements : [];
-  const cm = buildAnchors(rows, size, view);
-  const horiz = [], vert = [];
-  (items || []).forEach((it, i) => {
-    const text = typeof it === 'string' ? it : (it.label || it.target || it.text || '');
-    if (!text) return;
-    const base = typeof it === 'object' ? it : {};
-    if (VERTICAL_DRAW_RE.test(text)) {
-      let top = 1.5, bottom = 99;
-      if (cm) {
-        const hit = rows.find((r) => sameLabelName(r.pom, text));
-        const len = hit ? pomVal(hit, size) : null;
-        if (/\btrain\b/i.test(text) && len != null) top = pClamp(((cm.__total - len) / cm.__total) * 100);
-        else if (len != null && len < cm.__total) bottom = pClamp((len / cm.__total) * 100);
+
+// نسخة التحليل: مسطرة إحداثيات 0–100 على هامش أبيض + شبكة خفيفة كل 10.
+// كل إحداثيات Claude تُقرأ نسبةً إلى مساحة الصورة وحدها (بدون الهامش).
+function tpGridBlob(src, maxSide) {
+  const k = Math.min(1, (maxSide || 1300) / Math.max(src.width, src.height));
+  const iw = Math.round(src.width * k);
+  const ih = Math.round(src.height * k);
+  const m = Math.max(30, Math.round(Math.max(iw, ih) * 0.04));
+  const c = tpCanvas(iw + m * 2, ih + m * 2);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, m, m, iw, ih);
+
+  ctx.lineWidth = 1;
+  for (let p = 5; p < 100; p += 5) {
+    const major = p % 10 === 0;
+    ctx.strokeStyle = major ? 'rgba(0,150,255,0.42)' : 'rgba(0,150,255,0.16)';
+    const x = m + (iw * p) / 100;
+    const y = m + (ih * p) / 100;
+    ctx.beginPath(); ctx.moveTo(x, m); ctx.lineTo(x, m + ih); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(m, y); ctx.lineTo(m + iw, y); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(0,120,220,0.9)';
+  ctx.strokeRect(m - 0.5, m - 0.5, iw + 1, ih + 1);
+
+  const fs = Math.max(11, Math.round(m * 0.42));
+  ctx.font = '700 ' + fs + 'px Arial, sans-serif';
+  ctx.fillStyle = '#0060b0';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  // الأرقام لا تتزاحم على الصور الضيّقة: خطوة 20 بدل 10 عند الحاجة
+  const numW = ctx.measureText('100').width * 1.35;
+  const stepX = iw / 10 >= numW ? 10 : (iw / 5 >= numW ? 20 : 50);
+  const stepY = ih / 10 >= fs * 1.6 ? 10 : 20;
+  for (let p = 0; p <= 100; p += stepX) {
+    const x = m + (iw * p) / 100;
+    ctx.fillText(String(p), x, m / 2);
+    ctx.fillText(String(p), x, m + ih + m / 2);
+  }
+  for (let p = 0; p <= 100; p += stepY) {
+    const y = m + (ih * p) / 100;
+    ctx.fillText(String(p), m / 2, y);
+    ctx.fillText(String(p), m + iw + m / 2, y);
+  }
+  return new Promise((resolve, reject) => {
+    c.toBlob((b) => (b ? resolve(b) : reject(new Error('grid'))), 'image/jpeg', 0.88);
+  });
+}
+
+// أصل صورة للرسم: كانفاس للمعاينة + dataURL للـ PDF
+let _tpAssetSeq = 0;
+function tpAsset(canvas, maxSide, quality) {
+  const k = Math.min(1, (maxSide || 1600) / Math.max(canvas.width, canvas.height));
+  let c = canvas;
+  if (k < 1) {
+    c = tpCanvas(canvas.width * k, canvas.height * k);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(canvas, 0, 0, c.width, c.height);
+  }
+  _tpAssetSeq += 1;
+  return { key: 'tpimg' + _tpAssetSeq, el: c, w: c.width, h: c.height, url: c.toDataURL('image/jpeg', quality || 0.9) };
+}
+
+// صندوق بالنسب المئوية → مستطيل بكسل بنسبة عرض/ارتفاع محددة، داخل حدود الصورة
+function tpBoxRect(src, box, aspect, minFrac) {
+  const W = src.width, H = src.height;
+  const x1 = (tpClamp(Math.min(box.x1, box.x2), 0, 100) / 100) * W;
+  const x2 = (tpClamp(Math.max(box.x1, box.x2), 0, 100) / 100) * W;
+  const y1 = (tpClamp(Math.min(box.y1, box.y2), 0, 100) / 100) * H;
+  const y2 = (tpClamp(Math.max(box.y1, box.y2), 0, 100) / 100) * H;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  const minS = Math.min(W, H) * (minFrac || 0.1);
+  let w = Math.max(x2 - x1, minS);
+  let h = Math.max(y2 - y1, minS);
+  if (w / h > aspect) h = w / aspect; else w = h * aspect;
+  const s = Math.min(1, W / w, H / h);
+  w *= s; h *= s;
+  const sx = tpClamp(cx - w / 2, 0, W - w);
+  const sy = tpClamp(cy - h / 2, 0, H - h);
+  return { sx, sy, w, h };
+}
+
+function tpCrop(src, box, aspect, outW) {
+  const r = tpBoxRect(src, box, aspect, 0.1);
+  const ow = outW || 420;
+  const c = tpCanvas(ow, ow / aspect);
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, r.sx, r.sy, r.w, r.h, 0, 0, c.width, c.height);
+  return tpAsset(c, ow, 0.9);
+}
+
+// لون صندوق: أكبر مجموعة لونية داخله (يتجاهل الظلال واللمعة)
+function tpSampleBox(src, box) {
+  const W = src.width, H = src.height;
+  const x1 = Math.floor((tpClamp(Math.min(box.x1, box.x2), 0, 100) / 100) * W);
+  const x2 = Math.ceil((tpClamp(Math.max(box.x1, box.x2), 0, 100) / 100) * W);
+  const y1 = Math.floor((tpClamp(Math.min(box.y1, box.y2), 0, 100) / 100) * H);
+  const y2 = Math.ceil((tpClamp(Math.max(box.y1, box.y2), 0, 100) / 100) * H);
+  const bw = Math.max(1, x2 - x1);
+  const bh = Math.max(1, y2 - y1);
+  const k = Math.min(1, 48 / Math.max(bw, bh));
+  const c = tpCanvas(bw * k, bh * k);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(src, x1, y1, bw, bh, 0, 0, c.width, c.height);
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  const pts = [];
+  for (let i = 0; i < d.length; i += 4) pts.push([d[i], d[i + 1], d[i + 2]]);
+  const cl = clusterColors(pts, 3);
+  if (!cl.length) return '';
+  return toHex(cl[0].rgb);
+}
+
+// نقطة الليبل تُثبَّت على أقرب خطّ مرسوم فعلاً في الرسمة التقنية
+function tpSnapper(src) {
+  const W = Math.min(400, src.width);
+  const H = Math.max(8, Math.round((src.height / src.width) * W));
+  const c = tpCanvas(W, H);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(src, 0, 0, W, H);
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const dark = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    const p = i * 4;
+    dark[i] = (d[p] * 0.299 + d[p + 1] * 0.587 + d[p + 2] * 0.114) < 165 ? 1 : 0;
+  }
+  const R = Math.round(Math.max(W, H) * 0.03);
+  return (xp, yp) => {
+    const px = Math.round((tpClamp(xp, 0, 100) / 100) * (W - 1));
+    const py = Math.round((tpClamp(yp, 0, 100) / 100) * (H - 1));
+    if (dark[py * W + px]) return [xp, yp];
+    let best = null, bd = Infinity;
+    for (let dy = -R; dy <= R; dy++) {
+      const y = py + dy;
+      if (y < 0 || y >= H) continue;
+      for (let dx = -R; dx <= R; dx++) {
+        const x = px + dx;
+        if (x < 0 || x >= W) continue;
+        const dd = dx * dx + dy * dy;
+        if (dd < bd && dd <= R * R && dark[y * W + x]) { bd = dd; best = [x, y]; }
       }
-      vert.push({ ...base, text, top, bottom });
+    }
+    if (!best) return [xp, yp];
+    return [(best[0] / (W - 1)) * 100, (best[1] / (H - 1)) * 100];
+  };
+}
+
+function tpDateStr(d) {
+  const M = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  return d.getDate() + ' ' + M[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+function tpStyleNo(brand, season, d) {
+  const letters = String(brand || '').replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/)
+    .filter(Boolean).map((w) => w[0].toUpperCase()).join('').slice(0, 3);
+  const s = String(season || '').toUpperCase();
+  let sc = '';
+  if (/FALL|AUTUMN|WINTER|خريف|شتاء/.test(s)) sc = 'FW';
+  else if (/SPRING|SUMMER|ربيع|صيف/.test(s)) sc = 'SS';
+  else if (/RESORT|CRUISE/.test(s)) sc = 'RS';
+  const yy = String(d.getFullYear()).slice(2);
+  const n = String((d.getHours() * 60 + d.getMinutes()) % 1000).padStart(3, '0');
+  return (letters || 'ST') + '-' + yy + (sc || 'CL') + '-' + n;
+}
+
+// ---------------------------------------------------------------------------
+// بناء بيانات الورقة من ناتج التحليل + الصور المرفوعة
+// ---------------------------------------------------------------------------
+function tpBuildSheet(d, imgs, input) {
+  const assets = {};
+  const add = (a) => { assets[a.key] = a; return a.key; };
+  const design = imgs.design;
+  // مصدر كل قصّة: صورة التصميم أو الرسمة الملوّنة الأمامية — حسب ما حدده التحليل
+  const srcOf = (it) => (it && it.source === 'colorFront' && imgs.colorFront ? imgs.colorFront : design);
+  const bgOf = (it) => (it && it.source === 'colorFront' && imgs.colorFront
+    ? (imgs.colorFrontBg || [255, 255, 255]) : (imgs.designBg || [255, 255, 255]));
+
+  const look = add(tpAsset(design, 1700, 0.9));
+
+  // BACK VIEW: الرسمة الملوّنة الخلفية. القطع الطويلة تُعرض من الكتف حتى الورك
+  // كما في النموذج، والقطعة كاملة تظهر في TECHNICAL FLAT.
+  let backSrc = imgs.colorBack;
+  if (backSrc.height / backSrc.width > 1.9) {
+    const hh = Math.round(backSrc.height * 0.66);
+    const c = tpCanvas(backSrc.width, hh);
+    c.getContext('2d').drawImage(backSrc, 0, 0, backSrc.width, hh, 0, 0, backSrc.width, hh);
+    backSrc = c;
+  }
+  const lookBack = add(tpAsset(backSrc, 1100, 0.9));
+  const flatF = add(tpAsset(imgs.lineFront, 1500, 0.92));
+  const flatB = add(tpAsset(imgs.lineBack, 1500, 0.92));
+
+  // الكولورواي: من بكسلات التصميم فقط، بلا تكرار.
+  // أي لون يطابق خلفية الصورة يُرفض (صندوق وقع خارج القطعة).
+  const isBg = (hex, it) => cDist(tpHexRgb(hex), bgOf(it)) < 36;
+  const sample = (it) => {
+    const b = it && it.box;
+    if (!b || b.x2 - b.x1 <= 0 || b.y2 - b.y1 <= 0) return '';
+    const hex = tpSampleBox(srcOf(it), b);
+    return tpHexOk(hex) && !isBg(hex, it) ? hex : '';
+  };
+  const colorway = [];
+  const pushColor = (hex, name) => {
+    if (!hex || colorway.length >= 3) return;
+    const pt = nearestPantone(hex);
+    const rgb = tpHexRgb(hex);
+    if (colorway.some((c) => cDist(tpHexRgb(c.hex), rgb) < 40)) return;
+    if (pt && colorway.some((c) => c.code === 'PANTONE ' + pt.code)) return;
+    colorway.push({
+      name: pt ? pt.name.replace(/-/g, ' ').toUpperCase() : String(name || '').toUpperCase(),
+      code: pt ? 'PANTONE ' + pt.code : '',
+      hex,
+    });
+  };
+  (d.garmentColors || []).forEach((g) => pushColor(sample(g), g.name));
+  // احتياط: إن لم يصح أي صندوق لون، تُسحب الألوان من مربعات الأقمشة الظاهرة
+  if (!colorway.length) {
+    (d.fabrics || []).forEach((f) => { if (f.visible) pushColor(sample(f), f.colorName); });
+  }
+  const cw = colorway;
+
+  const snapHex = (hex) => {
+    if (!tpHexOk(hex)) return cw[0] ? cw[0].hex : '#CCCCCC';
+    const rgb = tpHexRgb(hex);
+    let best = null, bd = Infinity;
+    cw.forEach((c) => { const dd = cDist(tpHexRgb(c.hex), rgb); if (dd < bd) { bd = dd; best = c; } });
+    return best && bd < 70 ? best.hex : hex.toUpperCase();
+  };
+
+  const fabrics = (d.fabrics || []).slice(0, 4).map((f) => {
+    const vis = f.visible && f.box && (f.box.x2 - f.box.x1) > 1 && (f.box.y2 - f.box.y1) > 1;
+    return {
+      role: f.role || '',
+      name: f.name || '',
+      comp: [f.composition, f.weight].filter(Boolean).join(' – '),
+      color: f.colorName || '',
+      hex: (vis && sample(f)) || snapHex(f.hex),
+      asset: vis ? add(tpCrop(srcOf(f), f.box, 1.4, 420)) : null,
+    };
+  });
+
+  const trims = (d.trims || []).slice(0, 4).map((t) => {
+    const vis = t.visible && t.box && (t.box.x2 - t.box.x1) > 1 && (t.box.y2 - t.box.y1) > 1;
+    return {
+      name: t.name || '',
+      desc: [t.description, t.colorName && !String(t.description || '').toLowerCase()
+        .includes(String(t.colorName).toLowerCase()) ? '(' + t.colorName + ')' : ''].filter(Boolean).join(' '),
+      kind: TP_TRIM_KINDS.includes(t.kind) ? t.kind : 'other',
+      hex: snapHex(t.hex),
+      asset: vis ? add(tpCrop(srcOf(t), t.box, 1, 300)) : null,
+    };
+  });
+
+  const details = (d.details || []).slice(0, 4).map((x) => ({
+    caption: x.caption || '',
+    asset: add(tpCrop(srcOf(x), x.box, 27.5 / 31, 480)),
+  }));
+
+  const snapF = tpSnapper(imgs.lineFront);
+  const snapB = tpSnapper(imgs.lineBack);
+  const cons = (list, snap) => (list || []).slice(0, 7).map((c) => {
+    const [x, y] = snap(c.x, c.y);
+    return { label: c.label || '', x, y };
+  });
+
+  const care = (d.care || []).filter((k) => TP_CARE_KINDS.includes(k)).slice(0, 4);
+  ['dryclean', 'nowash', 'nobleach', 'steamlow'].forEach((k) => {
+    if (care.length < 4 && !care.includes(k)) care.push(k);
+  });
+  const storage = (d.care || []).find((k) => TP_STORAGE_KINDS.includes(k)) || 'hangbag';
+
+  const now = new Date();
+  const brand = input.brand || '';
+  const season = d.season || '';
+  const sheet = {
+    brand: brand || 'BRAND NAME',
+    subtitle: d.collectionLine || '',
+    styleNo: tpStyleNo(brand, season || input.season, now),
+    styleName: d.styleName || input.garmentName || '',
+    season: season || input.season || '',
+    category: d.category || '',
+    date: tpDateStr(now),
+    look, lookBack, flatF, flatB,
+    designDetails: (d.designDetails || []).slice(0, 8),
+    fabrics,
+    trims,
+    details,
+    specs: (d.specs || []).slice(0, 12).map((s) => ({ component: s.component || '', spec: s.specification || '' })),
+    consF: cons(d.constructionFront, snapF),
+    consB: cons(d.constructionBack, snapB),
+    care,
+    storage,
+    sizeRows: (d.sizeRows || []).slice(0, 5).map((r) => ({ label: r.label || '', vals: (r.values || []).slice(0, 6) })),
+    colorway: cw,
+    note1: '* ALL MEASUREMENTS ARE IN CM, APPROXIMATE AND SUBJECT TO ±1 CM TOLERANCE.',
+    note2: '* SAMPLE SIZE: SMALL (4-6)',
+  };
+  return { sheet, assets };
+}
+
+// ---------------------------------------------------------------------------
+// الرسّامان: PDF وكانفاس بنفس الواجهة. القياس دائماً من jsPDF.
+// ---------------------------------------------------------------------------
+function tpFontName(ok, fam, wt) {
+  if (!ok) {
+    if (fam === 'serif') return ['times', 'normal'];
+    return ['helvetica', wt === 'b' ? 'bold' : 'normal'];
+  }
+  if (fam === 'serif') return ['TPDisplay', 'normal'];
+  return [wt === 'b' ? 'TPSansSB' : 'TPSans', 'normal'];
+}
+
+class TpBasePainter {
+  constructor(engine) {
+    this.eng = engine;
+    this.f = { fam: 'sans', wt: 'r', size: 6 };
+  }
+  setFont(fam, wt, size) {
+    this.f = { fam, wt, size };
+    const [n, s] = tpFontName(this.eng.ok, fam, wt);
+    this.eng.measure.setFont(n, s);
+    this.eng.measure.setFontSize(size);
+  }
+  w(str, cs) {
+    const s = tpSafe(str);
+    if (!s) return 0;
+    return this.eng.measure.getTextWidth(s) + (cs || 0) * Math.max(0, s.length - 1);
+  }
+  lh(mult) { return this.f.size * 0.3528 * (mult || 1.22); }
+  wrap(text, maxW, cs) {
+    const out = [];
+    String(text || '').split('\n').forEach((para) => {
+      const words = para.split(/\s+/).filter(Boolean);
+      let line = '';
+      words.forEach((wd) => {
+        const t = line ? line + ' ' + wd : wd;
+        if (this.w(t, cs) <= maxW || !line) {
+          line = t;
+        } else {
+          out.push(line);
+          line = wd;
+        }
+      });
+      if (line) out.push(line);
+    });
+    // كلمة أطول من العرض: تُقطع حرفياً
+    return out.flatMap((l) => {
+      if (this.w(l, cs) <= maxW) return [l];
+      const parts = [];
+      let cur = '';
+      for (const ch of l) {
+        if (this.w(cur + ch, cs) > maxW && cur) { parts.push(cur); cur = ch; } else cur += ch;
+      }
+      if (cur) parts.push(cur);
+      return parts;
+    });
+  }
+  // نص بمحاذاة، مع تصغير تلقائي إن تجاوز العرض الأقصى
+  textFit(str, x, y, o) {
+    const opt = o || {};
+    let size = this.f.size;
+    const cs = opt.cs || 0;
+    if (opt.maxW) {
+      while (size > (opt.minSize || 3.2) && this.w(str, cs) > opt.maxW) {
+        size -= 0.2;
+        this.setFont(this.f.fam, this.f.wt, size);
+      }
+    }
+    this.text(str, x, y, opt);
+  }
+}
+
+class TpPdfPainter extends TpBasePainter {
+  constructor(engine, doc) {
+    super(engine);
+    this.doc = doc;
+  }
+  setFont(fam, wt, size) {
+    super.setFont(fam, wt, size);
+    const [n, s] = tpFontName(this.eng.ok, fam, wt);
+    this.doc.setFont(n, s);
+    this.doc.setFontSize(size);
+  }
+  text(str, x, y, o) {
+    const opt = o || {};
+    const s = tpSafe(str);
+    if (!s || !tpFin(x, y)) return;
+    const cs = tpHasArabic(s) ? 0 : (opt.cs || 0);
+    const w = this.w(s, cs);
+    let xx = x;
+    if (opt.align === 'center') xx = x - w / 2;
+    else if (opt.align === 'right') xx = x - w;
+    this.doc.setTextColor(opt.color || TP_INK);
+    this.doc.text(s, xx, y, { charSpace: cs, baseline: 'alphabetic' });
+  }
+  rect(x, y, w, h, o) {
+    if (!tpFin(x, y, w, h)) return;
+    const opt = o || {};
+    if (opt.fill) this.doc.setFillColor(opt.fill);
+    if (opt.stroke) { this.doc.setDrawColor(opt.stroke); this.doc.setLineWidth(opt.lw || 0.2); }
+    const style = opt.fill && opt.stroke ? 'FD' : (opt.fill ? 'F' : 'S');
+    this.doc.rect(x, y, w, h, style);
+  }
+  line(x1, y1, x2, y2, o) {
+    if (!tpFin(x1, y1, x2, y2)) return;
+    const opt = o || {};
+    this.doc.setDrawColor(opt.color || TP_RULE);
+    this.doc.setLineWidth(opt.lw || 0.2);
+    if (opt.dash) this.doc.setLineDashPattern(opt.dash, 0);
+    this.doc.line(x1, y1, x2, y2);
+    if (opt.dash) this.doc.setLineDashPattern([], 0);
+  }
+  circle(cx, cy, r, o) {
+    if (!tpFin(cx, cy, r) || r <= 0) return;
+    const opt = o || {};
+    if (opt.fill) this.doc.setFillColor(opt.fill);
+    if (opt.stroke) { this.doc.setDrawColor(opt.stroke); this.doc.setLineWidth(opt.lw || 0.2); }
+    const style = opt.fill && opt.stroke ? 'FD' : (opt.fill ? 'F' : 'S');
+    this.doc.circle(cx, cy, r, style);
+  }
+  poly(pts, o) {
+    const opt = o || {};
+    if (!pts || pts.length < 2 || !pts.every((q) => tpFin(q[0], q[1]))) return;
+    const rel = [];
+    for (let i = 1; i < pts.length; i++) rel.push([pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]]);
+    if (opt.fill) this.doc.setFillColor(opt.fill);
+    this.doc.setDrawColor(opt.stroke || TP_INK);
+    this.doc.setLineWidth(opt.lw || 0.2);
+    const style = opt.fill ? (opt.noStroke ? 'F' : 'FD') : 'S';
+    this.doc.lines(rel, pts[0][0], pts[0][1], [1, 1], style, Boolean(opt.closed));
+  }
+  img(a, x, y, w, h) {
+    if (!a || !tpFin(x, y, w, h) || w <= 0 || h <= 0) return;
+    // الاسم المستعار يمنع تكرار بيانات الصورة داخل الملف عند رسمها مرتين
+    this.doc.addImage(a.url, 'JPEG', x, y, w, h, a.key, 'FAST');
+  }
+  clipRect(x, y, w, h, fn) {
+    this.doc.saveGraphicsState();
+    this.doc.rect(x, y, w, h, null);
+    this.doc.clip();
+    this.doc.discardPath();
+    fn();
+    this.doc.restoreGraphicsState();
+  }
+  clipCircle(cx, cy, r, fn) {
+    this.doc.saveGraphicsState();
+    this.doc.circle(cx, cy, r, null);
+    this.doc.clip();
+    this.doc.discardPath();
+    fn();
+    this.doc.restoreGraphicsState();
+  }
+}
+
+class TpCanvasPainter extends TpBasePainter {
+  constructor(engine, ctx, k) {
+    super(engine);
+    this.ctx = ctx;
+    this.k = k;
+  }
+  setFont(fam, wt, size) {
+    super.setFont(fam, wt, size);
+    const px = size * 0.3528 * this.k;
+    const fallback = fam === 'serif' ? 'Georgia, "Times New Roman", serif' : 'Helvetica, Arial, sans-serif';
+    const name = !this.eng.ok ? fallback
+      : (fam === 'serif' ? 'TPDisplay, ' + fallback : 'TPSans, ' + fallback);
+    const weight = fam === 'serif' ? 400 : (wt === 'b' ? 600 : 400);
+    this.ctx.font = weight + ' ' + px.toFixed(2) + 'px ' + name;
+  }
+  text(str, x, y, o) {
+    const opt = o || {};
+    const s = tpSafe(str);
+    if (!s || !tpFin(x, y)) return;
+    const ar = tpHasArabic(s);
+    const cs = ar ? 0 : (opt.cs || 0);
+    const w = this.w(s, cs);
+    let xx = x;
+    if (opt.align === 'center') xx = x - w / 2;
+    else if (opt.align === 'right') xx = x - w;
+    const ctx = this.ctx;
+    ctx.fillStyle = opt.color || TP_INK;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.direction = 'ltr';
+    if (!cs) {
+      ctx.fillText(s, xx * this.k, y * this.k);
       return;
     }
-    const y = cm ? computeY(text, cm) : null;
-    // لا اختراع موقع: ما تعذّر حسابه يُعلَّم uncomputed ويظهر للمصممة.
-    horiz.push({ ...base, text,
-      y: y != null ? y : pClamp(8 + i * (84 / Math.max((items.length - 1), 1))),
-      uncomputed: y == null });
-  });
-  horiz.sort((a, b) => a.y - b.y);
-  return { horizontal: relaxRows(horiz, 3.5), vertical: vert };
-}
-function sameLabelName(pom, label) {
-  const norm = (x) => String(x || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-z]/g, '');
-  const a = norm(pom), b = norm(label);
-  return a && b && (a.includes(b) || b.includes(a));
-}
-
-
-// ===========================================================================
-// تصحيح حتمي لقائمة الخامات. لا عدد ثابت ولا بنود مفروضة.
-// القائمة تتبع التصميم؛ والبوم هو المصفوفة نفسها مرقّمة، فلا يختلف الرقمان.
-// ===========================================================================
-const MAT_GROUPS = [
-  ['shell',      /shell|main\s*fabric|body\s*fabric|outer\s*fabric|face\s*fabric|satin|crepe|wool|denim|twill|gabardine|velvet|jacquard|brocade|silk(?!\s*thread)|cotton|linen|georgette|organza|taffeta|tweed/i],
-  ['overlay',    /overlay|godet|panel\s*fabric|tulle(?!.*embroider)|chiffon|mesh|net\b/i],
-  ['lace',       /\blace\b|guipure|chantilly|embroidered\s*(tulle|net|mesh|fabric)|eyelet|broderie/i],
-  ['lining',     /lining|underlining|interlining(?!\s*fusible)/i],
-  ['structure',  /boning|channel\s*tape|horsehair|crinoline|padding|shoulder\s*pad|wadding|batting|elastic|waistband\s*(tape|stiffener)|petersham|grosgrain/i],
-  ['closure',    /zipper|\bzip\b|button|snap|hook|eye\b|velcro|buckle|clasp|drawstring|toggle/i],
-  ['stabilizer', /interfacing|fusible|stay\s*tape|seam\s*tape|edge\s*tape|bias\s*binding|twill\s*tape/i],
-  ['embellish',  /hand-?applied|bead|pearl|crystal|rhinestone|sequin|stone|applique|embroidery\s*thread|trim(?!\s*tape)|fringe|tassel|feather|stud/i],
-  ['label',      /label|\btag\b|care\s*instruction|brand\s*mark|size\s*label|composition/i],
-  ['thread',     /thread\s*set|sewing\s*thread|\bthread\b/i],
-  ['hanger',     /hanger|\bhook\s*rail/i],
-  ['packaging',  /garment\s*bag|poly\s*bag|packaging|\bbag\b|tissue\s*paper|box\b/i],
-];
-const MAT_ORDER = {};
-MAT_GROUPS.forEach(([k], i) => { MAT_ORDER[k] = i; });
-
-function matGroup(m) {
-  // الاسم يحسم أولاً: وصف الخامة يذكر أقمشة أخرى بطبيعته
-  for (const [key, re] of MAT_GROUPS) if (re.test(m.name || '')) return key;
-  const hay = [m.placement, m.description].filter(Boolean).join(' ');
-  for (const [key, re] of MAT_GROUPS) if (re.test(hay)) return key;
-  return 'shell';
-}
-const matKey = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-function matDedupe(list) {
-  const out = [];
-  list.forEach((m) => {
-    const k = matKey(m.name); if (!k) return;
-    const hit = out.find((o) => matKey(o.name) === k);
-    if (!hit) { out.push({ ...m }); return; }
-    if ((m.placement || '').length > (hit.placement || '').length) hit.placement = m.placement;
-    const a = parseFloat(hit.qty), b = parseFloat(m.qty);
-    if (Number.isFinite(b) && (!Number.isFinite(a) || b > a)) hit.qty = m.qty;
-  });
-  return out;
-}
-
-// البندان الإلزاميان الوحيدان: ليبل التركيب والمقاس، وليبل العناية
-const MAT_REQUIRED = [
-  { test: /composition|fabric\s*(content|label)|size\s*label|main\s*label|brand\s*label/i,
-    item: { name: 'Fabric composition and size label',
-      placement: 'Interior center-back neckline or inner side seam',
-      description: 'Woven label stating fibre composition and size',
-      qty: '1', unit: 'pc',
-      photoPrompt: 'Professional studio product photograph of a single blank woven garment label with no text or logo, macro detail, soft even lighting, photorealistic. No watermark.' } },
-  { test: /care\s*(instruction|label)|washing\s*label|care\s*tag/i,
-    item: { name: 'Care instruction label',
-      placement: 'Stitched behind the composition label at the inner side seam',
-      description: 'Satin care label with wash, dry and press symbols matched to the fabrics used',
-      qty: '1', unit: 'pc',
-      photoPrompt: 'Professional studio product photograph of a single satin care instruction label with laundry symbols, macro detail, soft even lighting, photorealistic. No watermark.' } },
-];
-
-// الخرز واللؤلؤ والدانتيل: تُضاف فقط إن رآها التحليل في التصميم
-const MAT_CUES = [
-  [/\bpearl/i, { name: 'Pearl embellishments', placement: 'Hand-applied over the embellished areas of the design',
-    description: 'Round glass or resin pearls in mixed sizes, hand-stitched with fine beading thread', qty: '500', unit: 'pcs',
-    photoPrompt: 'Professional studio product photograph of loose round pearls in mixed sizes scattered on fabric, macro detail, soft even lighting, photorealistic. No watermark.' }],
-  [/\bbead|beading|beaded/i, { name: 'Bead embellishments', placement: 'Hand-applied over the embellished areas of the design',
-    description: 'Glass seed and bugle beads in mixed sizes, hand-stitched with fine beading thread', qty: '800', unit: 'pcs',
-    photoPrompt: 'Professional studio product photograph of loose glass seed and bugle beads scattered on fabric, macro detail, soft even lighting, photorealistic. No watermark.' }],
-  [/\blace\b|guipure|chantilly|broderie/i, { name: 'Lace fabric', placement: 'Panels and edges where lace appears on the design',
-    description: 'Corded lace on fine net ground, colour matched to the design', qty: '1.5', unit: 'm',
-    photoPrompt: 'Professional studio product photograph of a piece of corded lace fabric on plain background, macro detail showing the net ground, soft even lighting, photorealistic. No watermark.' }],
-];
-
-
-// تعليمات العناية تُشتقّ من الخامات الموجودة فعلاً، لا نصاً عاماً:
-// التطريز والخرز والتول والحرير كلٌّ يفرض قيداً مختلفاً على الغسيل والكي.
-function careFromMaterials(list) {
-  const hay = (list || []).map((m) => [m.name, m.description].join(' ')).join(' ').toLowerCase();
-  const out = [];
-  const delicate = /bead|pearl|sequin|crystal|embroider|lace|tulle|silk|chiffon|organza|velvet|satin/.test(hay);
-  out.push(delicate ? 'Dry Clean Only' : 'Gentle Machine Wash Cold');
-  if (/bead|pearl|sequin|crystal|embroider/.test(hay)) out.push('Do Not Iron Directly on Embellishment');
-  else out.push('Cool Iron if Needed');
-  out.push('Do Not Bleach');
-  out.push('Do Not Tumble Dry');
-  if (/tulle|chiffon|organza/.test(hay)) out.push('Store Flat or Hanging on Padded Hanger');
-  return out.join(', ');
-}
-
-function normalizeMaterials(raw, cues, hex, pantone, brandName, careText) {
-  // الشمّاعة والتغليف ليسا من خامات الخياطة. إزالة إجباريتهما وحدها لا تكفي:
-  // النموذج قد يعيدهما من تلقائه، فيُحذفان حتمياً هنا.
-  const EXCLUDED = /hanger|garment\s*bag|poly\s*bag|polybag|packaging|tissue\s*paper|\bgift\s*box\b|hook\s*rail|swing\s*tag|price\s*tag|barcode/i;
-  let list = Array.isArray(raw)
-    ? raw.filter((m) => m && m.name && !EXCLUDED.test([m.name, m.placement].filter(Boolean).join(' ')))
-    : [];
-  list = matDedupe(list);
-
-  const hay = (cues || []).filter(Boolean).join(' ');
-  MAT_CUES.forEach(([re, item]) => {
-    if (!re.test(hay)) return;
-    if (list.some((m) => re.test([m.name, m.description].join(' ')))) return;
-    list.push({ ...item });
-  });
-
-  MAT_REQUIRED.forEach((req) => {
-    if (list.some((m) => req.test.test([m.name, m.placement, m.description].join(' ')))) return;
-    list.push({ ...req.item });
-  });
-
-  // الليبل بلا اسم براند وبلا تعليمات عناية لا فائدة منه للمصنع:
-  // يُحقن الاسم الذي كتبته المصممة، وتُشتقّ العناية من الخامات الفعلية.
-  const brand = String(brandName || '').trim() || 'BRAND NAME';
-  const care = String(careText || '').trim() || careFromMaterials(list);
-  list = list.map((m) => {
-    const hay = [m.name, m.placement, m.description].join(' ');
-    if (/composition|size\s*label|main\s*label|brand\s*label/i.test(hay) && !/care\s*instruction/i.test(hay)) {
-      return { ...m, description: 'Woven label stating brand name "' + brand + '", garment size, and fibre composition' };
+    // تباعد الحروف يدوياً: خاصية letterSpacing غير مدعومة في كل المتصفحات
+    let cx = xx;
+    for (const ch of s) {
+      ctx.fillText(ch, cx * this.k, y * this.k);
+      cx += this.w(ch, 0) + cs;
     }
-    if (/care\s*(instruction|label)|washing\s*label|care\s*tag/i.test(hay)) {
-      return { ...m, description: 'Woven care label stating: ' + care };
+  }
+  rect(x, y, w, h, o) {
+    if (!tpFin(x, y, w, h)) return;
+    const opt = o || {};
+    const k = this.k;
+    if (opt.fill) { this.ctx.fillStyle = opt.fill; this.ctx.fillRect(x * k, y * k, w * k, h * k); }
+    if (opt.stroke) {
+      this.ctx.strokeStyle = opt.stroke;
+      this.ctx.lineWidth = (opt.lw || 0.2) * k;
+      this.ctx.strokeRect(x * k, y * k, w * k, h * k);
     }
-    return m;
+  }
+  line(x1, y1, x2, y2, o) {
+    if (!tpFin(x1, y1, x2, y2)) return;
+    const opt = o || {};
+    const k = this.k;
+    const ctx = this.ctx;
+    ctx.strokeStyle = opt.color || TP_RULE;
+    ctx.lineWidth = (opt.lw || 0.2) * k;
+    ctx.setLineDash(opt.dash ? opt.dash.map((v) => v * k) : []);
+    ctx.beginPath();
+    ctx.moveTo(x1 * k, y1 * k);
+    ctx.lineTo(x2 * k, y2 * k);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  circle(cx, cy, r, o) {
+    if (!tpFin(cx, cy, r) || r <= 0) return;
+    const opt = o || {};
+    const k = this.k;
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.arc(cx * k, cy * k, r * k, 0, Math.PI * 2);
+    if (opt.fill) { ctx.fillStyle = opt.fill; ctx.fill(); }
+    if (opt.stroke) { ctx.strokeStyle = opt.stroke; ctx.lineWidth = (opt.lw || 0.2) * k; ctx.stroke(); }
+  }
+  poly(pts, o) {
+    const opt = o || {};
+    if (!pts || pts.length < 2 || !pts.every((q) => tpFin(q[0], q[1]))) return;
+    const k = this.k;
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0] * k, pts[0][1] * k);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] * k, pts[i][1] * k);
+    if (opt.closed) ctx.closePath();
+    if (opt.fill) { ctx.fillStyle = opt.fill; ctx.fill(); }
+    if (!opt.noStroke) {
+      ctx.strokeStyle = opt.stroke || TP_INK;
+      ctx.lineWidth = (opt.lw || 0.2) * k;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+  }
+  img(a, x, y, w, h) {
+    if (!a || !tpFin(x, y, w, h) || w <= 0 || h <= 0) return;
+    const k = this.k;
+    this.ctx.imageSmoothingQuality = 'high';
+    this.ctx.drawImage(a.el, x * k, y * k, w * k, h * k);
+  }
+  clipRect(x, y, w, h, fn) {
+    const k = this.k;
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.rect(x * k, y * k, w * k, h * k);
+    this.ctx.clip();
+    fn();
+    this.ctx.restore();
+  }
+  clipCircle(cx, cy, r, fn) {
+    const k = this.k;
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.arc(cx * k, cy * k, r * k, 0, Math.PI * 2);
+    this.ctx.clip();
+    fn();
+    this.ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// أدوات رسم مشتركة
+// ---------------------------------------------------------------------------
+function tpContain(p, a, x, y, w, h, alignY) {
+  if (!a) {
+    p.rect(x, y, w, h, { fill: TP_SOFT });
+    return;
+  }
+  const s = Math.min(w / a.w, h / a.h);
+  const dw = a.w * s;
+  const dh = a.h * s;
+  const dx = x + (w - dw) / 2;
+  const dy = alignY === 'top' ? y : (alignY === 'bottom' ? y + h - dh : y + (h - dh) / 2);
+  p.img(a, dx, dy, dw, dh);
+  return { x: dx, y: dy, w: dw, h: dh };
+}
+
+function tpCover(p, a, x, y, w, h) {
+  if (!a) return;
+  const s = Math.max(w / a.w, h / a.h);
+  const dw = a.w * s;
+  const dh = a.h * s;
+  p.clipRect(x, y, w, h, () => p.img(a, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh));
+}
+
+function tpArc(cx, cy, rx, ry, a0, a1, n) {
+  const pts = [];
+  const steps = n || 16;
+  for (let i = 0; i <= steps; i++) {
+    const t = a0 + ((a1 - a0) * i) / steps;
+    pts.push([cx + Math.cos(t) * rx, cy + Math.sin(t) * ry]);
+  }
+  return pts;
+}
+
+// رموز العناية مرسومة بالكود داخل مربع s×s يبدأ من (x, y)
+function tpCareIcon(p, kind, x, y, s) {
+  const P = (u, v) => [x + u * s, y + v * s];
+  const lw = 0.22;
+  const o = { stroke: TP_INK, lw };
+  const cross = () => {
+    p.poly([P(0.08, 0.1), P(0.92, 0.9)], o);
+    p.poly([P(0.92, 0.1), P(0.08, 0.9)], o);
+  };
+  const tub = () => {
+    p.poly([P(0.06, 0.3), P(0.18, 0.84), P(0.82, 0.84), P(0.94, 0.3)], o);
+    const wave = [];
+    for (let i = 0; i <= 20; i++) {
+      const u = 0.06 + (0.88 * i) / 20;
+      wave.push(P(u, 0.36 + Math.sin(i * Math.PI / 5) * 0.035));
+    }
+    p.poly(wave, o);
+  };
+  const iron = () => {
+    p.poly([P(0.08, 0.8), P(0.92, 0.8), P(0.92, 0.62), P(0.82, 0.42), P(0.36, 0.42), P(0.14, 0.62)], { ...o, closed: true });
+    p.poly([P(0.4, 0.42), P(0.44, 0.28), P(0.84, 0.28)], o);
+  };
+  if (kind === 'dryclean') { p.circle(x + s / 2, y + s / 2, s * 0.4, o); return; }
+  if (kind === 'handwash') {
+    tub();
+    p.poly([P(0.42, 0.72), P(0.42, 0.52), P(0.5, 0.46), P(0.58, 0.52), P(0.58, 0.72)], o);
+    return;
+  }
+  if (kind === 'wash30') {
+    tub();
+    p.setFont('sans', 'r', s * 1.05);
+    p.text('30', x + s / 2, y + s * 0.74, { align: 'center' });
+    return;
+  }
+  if (kind === 'nowash') { tub(); cross(); return; }
+  if (kind === 'nobleach') { p.poly([P(0.5, 0.12), P(0.94, 0.86), P(0.06, 0.86)], { ...o, closed: true }); cross(); return; }
+  if (kind === 'steamlow') {
+    iron();
+    p.circle(x + s * 0.55, y + s * 0.64, s * 0.035, { fill: TP_INK });
+    [0.36, 0.52, 0.68].forEach((u) => p.poly([P(u, 0.86), P(u, 0.97)], o));
+    return;
+  }
+  if (kind === 'ironlow') { iron(); p.circle(x + s * 0.55, y + s * 0.64, s * 0.035, { fill: TP_INK }); return; }
+  if (kind === 'noiron') { iron(); cross(); return; }
+  if (kind === 'notumble') {
+    p.rect(x + s * 0.1, y + s * 0.1, s * 0.8, s * 0.8, { stroke: TP_INK, lw });
+    p.circle(x + s / 2, y + s / 2, s * 0.3, o);
+    cross();
+    return;
+  }
+  if (kind === 'dryflat') {
+    p.rect(x + s * 0.1, y + s * 0.1, s * 0.8, s * 0.8, { stroke: TP_INK, lw });
+    p.poly([P(0.28, 0.5), P(0.72, 0.5)], o);
+    return;
+  }
+  if (kind === 'hangbag') {
+    p.poly(tpArc(x + s * 0.5, y + s * 0.13, s * 0.07, s * 0.07, Math.PI, Math.PI * 2.5, 12), o);
+    p.poly([P(0.5, 0.2), P(0.5, 0.26)], o);
+    p.poly([P(0.5, 0.26), P(0.16, 0.42), P(0.16, 0.95), P(0.84, 0.95), P(0.84, 0.42), P(0.5, 0.26)], { ...o, closed: true });
+    p.poly([P(0.5, 0.26), P(0.4, 0.46), P(0.5, 0.95)], o);
+    p.poly([P(0.5, 0.26), P(0.6, 0.46)], o);
+    return;
+  }
+  if (kind === 'storefolded') {
+    p.rect(x + s * 0.12, y + s * 0.3, s * 0.76, s * 0.5, { stroke: TP_INK, lw });
+    p.poly([P(0.12, 0.3), P(0.38, 0.55), P(0.38, 0.8)], o);
+    p.poly([P(0.88, 0.3), P(0.62, 0.55), P(0.62, 0.8)], o);
+    return;
+  }
+  p.circle(x + s / 2, y + s / 2, s * 0.4, o);
+}
+
+// أيقونة تريم مخفي (سحاب، زر…) داخل دائرة، بلون الخامة
+function tpTrimIcon(p, kind, hex, cx, cy, r) {
+  const col = tpHexOk(hex) ? hex : '#9A948D';
+  const dark = '#3b3835';
+  const o = { stroke: dark, lw: 0.18 };
+  if (kind === 'zipper') {
+    const w = r * 0.62;
+    p.rect(cx - w / 2, cy - r * 0.78, w, r * 1.56, { fill: col });
+    for (let i = 0; i < 9; i++) {
+      const yy = cy - r * 0.62 + i * r * 0.14;
+      const side = i % 2 ? 1 : -1;
+      p.poly([[cx, yy], [cx + side * r * 0.12, yy]], { stroke: '#c9c4bd', lw: 0.35 });
+    }
+    p.rect(cx - r * 0.12, cy - r * 0.72, r * 0.24, r * 0.3, { fill: '#b9b3ab', stroke: dark, lw: 0.12 });
+    return;
+  }
+  if (kind === 'button' || kind === 'snap') {
+    p.circle(cx, cy, r * 0.55, { fill: col, stroke: dark, lw: 0.15 });
+    if (kind === 'snap') { p.circle(cx, cy, r * 0.25, { stroke: '#e8e4de', lw: 0.25 }); return; }
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => p.circle(cx + a * r * 0.16, cy + b * r * 0.16, r * 0.07, { fill: '#f4f2ef' }));
+    return;
+  }
+  if (kind === 'hook') {
+    p.poly([[cx - r * 0.5, cy - r * 0.2], [cx - r * 0.05, cy - r * 0.2]].concat(
+      tpArc(cx - r * 0.05, cy, r * 0.2, r * 0.2, -Math.PI / 2, Math.PI / 2, 10)).concat([[cx - r * 0.3, cy + r * 0.2]]), { stroke: dark, lw: 0.3 });
+    p.poly(tpArc(cx + r * 0.35, cy, r * 0.16, r * 0.28, Math.PI / 2, Math.PI * 1.5, 10), { stroke: dark, lw: 0.3 });
+    return;
+  }
+  if (kind === 'thread') {
+    p.rect(cx - r * 0.3, cy - r * 0.5, r * 0.6, r * 1.0, { fill: col });
+    p.rect(cx - r * 0.42, cy - r * 0.62, r * 0.84, r * 0.13, { fill: '#d9cbb4', stroke: dark, lw: 0.1 });
+    p.rect(cx - r * 0.42, cy + r * 0.49, r * 0.84, r * 0.13, { fill: '#d9cbb4', stroke: dark, lw: 0.1 });
+    return;
+  }
+  if (kind === 'label') {
+    p.rect(cx - r * 0.55, cy - r * 0.32, r * 1.1, r * 0.64, { fill: '#fbfaf7', stroke: dark, lw: 0.15 });
+    [-0.12, 0.02, 0.16].forEach((v, i) => p.poly([[cx - r * 0.35, cy + v * r], [cx + r * (i === 1 ? 0.2 : 0.35), cy + v * r]], { stroke: col, lw: 0.3 }));
+    return;
+  }
+  if (kind === 'elastic') {
+    p.rect(cx - r * 0.7, cy - r * 0.22, r * 1.4, r * 0.44, { fill: col });
+    const wv = [];
+    for (let i = 0; i <= 16; i++) wv.push([cx - r * 0.7 + (r * 1.4 * i) / 16, cy + Math.sin(i * Math.PI / 2) * r * 0.1]);
+    p.poly(wv, { stroke: '#f4f2ef', lw: 0.2 });
+    return;
+  }
+  if (kind === 'boning') {
+    [-0.3, 0, 0.3].forEach((u) => p.rect(cx + u * r - r * 0.07, cy - r * 0.6, r * 0.14, r * 1.2, { fill: col, stroke: dark, lw: 0.08 }));
+    return;
+  }
+  p.circle(cx, cy, r * 0.62, { fill: col, stroke: o.stroke, lw: 0.1 });
+}
+
+// ---------------------------------------------------------------------------
+// الورقة — الإحداثيات بالملّيمتر على A4 عمودي (210 × 297)
+// ---------------------------------------------------------------------------
+const TP_L = {
+  x0: 5, x1: 71, x2: 141, x3: 205,        // حدود الأعمدة
+  yTop: 5, yHead: 25, yRow1: 125, yLook: 186, yFab: 214, yRow3: 252, yBot: 292,
+  xSize: 121,
+};
+
+function tpTitle(p, label, x1, x2, y) {
+  p.setFont('sans', 'b', 6.6);
+  p.text(label, (x1 + x2) / 2, y, { align: 'center', cs: 0.42 });
+}
+
+function tpDrawSheet(p, d, A) {
+  const L = TP_L;
+  const get = (k) => (k && A[k]) || null;
+
+  // الخلفية والإطار
+  p.rect(0, 0, TP_W, TP_H, { fill: '#ffffff' });
+  const cell = (x, y, w, h) => p.rect(x, y, w, h, { stroke: TP_RULE, lw: 0.25 });
+  cell(L.x0, L.yTop, L.x3 - L.x0, L.yHead - L.yTop);
+  cell(L.x0, L.yHead, L.x1 - L.x0, L.yLook - L.yHead);           // LOOK
+  cell(L.x1, L.yHead, L.x2 - L.x1, L.yRow1 - L.yHead);           // TECHNICAL FLAT
+  cell(L.x2, L.yHead, L.x3 - L.x2, L.yRow1 - L.yHead);           // DETAILS
+  cell(L.x1, L.yRow1, L.x2 - L.x1, L.yLook - L.yRow1);           // DESIGN DETAILS
+  cell(L.x2, L.yRow1, L.x3 - L.x2, L.yFab - L.yRow1);            // FABRICS & TRIMS
+  cell(L.x0, L.yLook, L.x1 - L.x0, L.yRow3 - L.yLook);           // CONSTRUCTION
+  cell(L.x1, L.yLook, L.x2 - L.x1, L.yRow3 - L.yLook);           // MATERIAL SPECS
+  cell(L.x2, L.yFab, L.x3 - L.x2, L.yRow3 - L.yFab);             // CARE
+  cell(L.x0, L.yRow3, L.xSize - L.x0, L.yBot - L.yRow3);         // SIZE CHART
+  cell(L.xSize, L.yRow3, L.x3 - L.xSize, L.yBot - L.yRow3);      // COLORWAY
+
+  // ===== الهيدر =====
+  const hb = 83, hm = 150;
+  p.line(hb, L.yTop, hb, L.yHead, { color: TP_RULE, lw: 0.25 });
+  p.line(hm, L.yTop, hm, L.yHead, { color: TP_RULE, lw: 0.25 });
+  const brand = String(d.brand || '');
+  if (tpHasArabic(brand) || !tpSerifOk(brand)) {
+    p.setFont('sans', 'b', 17);
+    p.textFit(brand, (L.x0 + hb) / 2, 15.8, { align: 'center', maxW: 70, minSize: 9 });
+  } else {
+    p.setFont('serif', 'r', 21);
+    p.textFit(brand.toUpperCase(), (L.x0 + hb) / 2, 15.6, { align: 'center', cs: 1.15, maxW: 70, minSize: 9 });
+  }
+  if (d.subtitle) {
+    p.setFont('sans', 'r', 4.9);
+    p.textFit(tpUp(d.subtitle), (L.x0 + hb) / 2, 20.6, { align: 'center', cs: 0.85, maxW: 70, color: TP_MUTED });
+  }
+  const meta = (label, value, lx, vx, y, maxW) => {
+    p.setFont('sans', 'b', 5.4);
+    p.text(label, lx, y, { cs: 0.22 });
+    p.setFont('sans', 'r', 6);
+    p.textFit(tpUp(value || '—'), vx, y, { maxW, minSize: 3.6, cs: 0.12 });
+  };
+  meta('STYLE NO.', d.styleNo, hb + 4, hb + 25, 12.2, hm - hb - 29);
+  p.line(hb + 4, 15.4, hm - 4, 15.4, { color: '#e8e5e0', lw: 0.2 });
+  meta('STYLE NAME', d.styleName, hb + 4, hb + 25, 20.4, hm - hb - 29);
+  meta('SEASON', d.season, hm + 4, hm + 22, 10.8, L.x3 - hm - 25);
+  meta('CATEGORY', d.category, hm + 4, hm + 22, 16.2, L.x3 - hm - 25);
+  meta('DATE', d.date, hm + 4, hm + 22, 21.6, L.x3 - hm - 25);
+
+  // ===== LOOK =====
+  // الصور أولاً ثم العناوين فوقها، حتى لا تغطي خلفية الصورة العنوان
+  tpContain(p, get(d.look), L.x0 + 2, L.yHead + 3, L.x1 - L.x0 - 4, 106, 'center');
+  tpContain(p, get(d.lookBack), L.x0 + 2, 141.5, L.x1 - L.x0 - 4, 42.5, 'center');
+  p.setFont('sans', 'b', 5.4);
+  p.text('LOOK', L.x0 + 3, L.yHead + 5.2, { cs: 0.25 });
+  p.setFont('sans', 'r', 4.8);
+  p.text('FRONT', L.x0 + 3, L.yHead + 8.4, { cs: 0.2, color: TP_MUTED });
+  p.setFont('sans', 'b', 5.4);
+  p.text('BACK VIEW', L.x0 + 3, 139.6, { cs: 0.25 });
+
+  // ===== TECHNICAL FLAT =====
+  tpTitle(p, 'TECHNICAL FLAT', L.x1, L.x2, L.yHead + 6.2);
+  p.setFont('sans', 'r', 5);
+  const fcx = L.x1 + (L.x2 - L.x1) / 4;
+  const bcx = L.x1 + ((L.x2 - L.x1) * 3) / 4;
+  p.text('FRONT', fcx, L.yHead + 11.5, { align: 'center', cs: 0.3 });
+  p.text('BACK', bcx, L.yHead + 11.5, { align: 'center', cs: 0.3 });
+  tpContain(p, get(d.flatF), L.x1 + 2, L.yHead + 14, 32, L.yRow1 - L.yHead - 17, 'top');
+  tpContain(p, get(d.flatB), L.x1 + 36, L.yHead + 14, 32, L.yRow1 - L.yHead - 17, 'top');
+
+  // ===== DETAILS & CLOSE-UP =====
+  tpTitle(p, 'DETAILS & CLOSE-UP', L.x2, L.x3, L.yHead + 6.2);
+  const dets = (d.details || []).slice(0, 4);
+  const dw = 27.5, dh = 31;
+  const dxs = [L.x2 + 3.5, L.x2 + 3.5 + dw + 2.5];
+  const dys = [L.yHead + 10, L.yHead + 10 + dh + 14];
+  dets.forEach((it, i) => {
+    const x = dxs[i % 2];
+    const y = dys[Math.floor(i / 2)];
+    tpCover(p, get(it.asset), x, y, dw, dh);
+    p.setFont('sans', 'r', 4.5);
+    const lines = p.wrap(tpUp(it.caption), dw + 1, 0.1).slice(0, 3);
+    lines.forEach((ln, j) => p.text(ln, x + dw / 2, y + dh + 3.6 + j * p.lh(1.25), { align: 'center', cs: 0.1 }));
   });
 
-  list = list.map((m, i) => ({ m, i, g: MAT_ORDER[matGroup(m)] }))
-    .sort((a, b) => (a.g - b.g) || (a.i - b.i)).map((x) => x.m);
-
-  // اللون الحقيقي يُحقن في برومبت الصورة بدل ترك النموذج يسمّي اللون
-  if (hex) {
-    const tint = pantone ? (hex + ' (PANTONE ' + pantone + ')') : hex;
-    list = list.map((m) => {
-      const g = matGroup(m);
-      if (g === 'label' || g === 'packaging' || g === 'hanger') return m;
-      if (!m.photoPrompt || m.photoPrompt.includes(hex)) return m;
-      return { ...m, photoPrompt: m.photoPrompt.replace(/\.\s*No\s+watermark/i, ', exact colour ' + tint + '. No watermark') };
+  // ===== DESIGN DETAILS =====
+  tpTitle(p, 'DESIGN DETAILS', L.x1, L.x2, L.yRow1 + 6.2);
+  const dd = (d.designDetails || []).filter((t) => tpSafe(t).trim()).slice(0, 8);
+  const half = Math.ceil(dd.length / 2);
+  const colsDD = [dd.slice(0, half), dd.slice(half)];
+  let ddSize = 4.9;
+  const ddFits = (size) => {
+    p.setFont('sans', 'r', size);
+    return colsDD.every((col) => {
+      let h = 0;
+      col.forEach((t) => { h += p.wrap(tpUp(t), 28, 0.08).length * p.lh(1.3) + 2.2; });
+      return h <= L.yLook - L.yRow1 - 13;
     });
-  }
-  // لا بند بلا كمية: الشرطة في البوم تعني أن المصنع لا يعرف كم يشتري.
-  // التقدير مبدئي حسب الوحدة، والمصممة تعدّله.
-  const fallbackQty = (u) => (
-    { pcs: '500', pc: '1', m: '1.5', g: '200', set: '1', spool: '3', yd: '1.5' }[String(u || '').toLowerCase()] || '1');
-  return list.map((m, i) => ({
-    ...m,
-    qty: (m.qty === '' || m.qty == null) ? fallbackQty(m.unit) : m.qty,
-    unit: m.unit || 'pc',
-    num: i + 1,
-  }));
-}
-
-// كل رقم كول أوت يجب أن يشير إلى خامة موجودة فعلاً
-function pruneCallouts(callouts, materials) {
-  const max = materials.length;
-  return (callouts || []).filter((c) => Number.isFinite(+c.num) && +c.num >= 1 && +c.num <= max);
-}
-
-
-// الموضع الأفقي داخل القطعة (0 = أقصى اليسار، 1 = أقصى اليمين من صندوق القطعة).
-// يُشتقّ من وصف الموضع نفسه: ما هو عند خط الوسط يُشار إليه في الوسط، وما هو
-// عند الجنب أو الكم يُشار إليه عند الحافة المقابلة. بدونه تصطفّ كل الأرقام
-// على حافة واحدة ولا يعرف المصنع أيّ خامة تخصّ أيّ موضع.
-const X_ZONES = [
-  [/center\s*front|center\s*back|\bcf\b|\bcb\b|placket|zipper|spine|center\s*seam|hem\s*edge|waist\s*seam|neckline|collar|funnel/i, 0.50],
-  [/princess\s*seam|bust|chest|bodice\s*front|diagonal|inset|panel/i, 0.34],
-  [/side\s*seam|side\s*panel|underarm|armhole|\bside\b/i, 0.18],
-  [/sleeve|cuff|wrist|bishop/i, 0.08],
-  [/skirt|godet|flare|sweep|overlay|tier|layer/i, 0.40],
-  [/lining|interlining|boning|interfacing|stay\s*tape/i, 0.28],
-  [/bead|pearl|crystal|sequin|embroider|applique/i, 0.44],
-];
-
-function zoneX(text, side) {
-  const t = String(text || '');
-  let f = 0.34;                       // افتراضي: داخل القطعة لا على حافتها
-  for (const [re, v] of X_ZONES) { if (re.test(t)) { f = v; break; } }
-  // side = الجهة التي تخرج منها التسمية؛ الخط يدخل نحو الداخل منها
-  return side === 'right' ? (1 - f) : f;
-}
-
-function AnnotatedView({ image, mode, items, caption, labelSide, measurements, sampleSize, view }) {
-  const detected = useImgBox(image);
-  // لا بديل ملوّن في الصفحات التقنية: مربع فارغ يقول السبب أفضل من صفحة
-  // تبدو سليمة وهي مخالفة للنموذج.
-  if (!image) {
-    return (
-      <div className="tp-view">
-        <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}>
-          <span>تعذّر توليد الرسمة التقنية لهذا المنظر — أعيدي التوليد</span>
-        </div>
-        <div className="tp-view-cap">{caption}</div>
-      </div>
-    );
-  }
-  const box = detected || DEFAULT_VIEW_BOX;
-
-  // المواقع تُحسب من جدول القياسات نفسه. لم يعد النموذج يُرجع أي رقم موقع.
-  const pos = labelPositions(items, measurements, sampleSize, view || 'front');
-  const vertical = mode === 'measure' ? pos.vertical : [];
-  const horizontal = mode === 'measure'
-    ? pos.horizontal
-    : labelPositions(items, measurements, sampleSize, view || 'front').horizontal.concat(
-        pos.vertical.map((v) => ({ ...v, y: v.top })));
-  const rows = horizontal.map((it) => ({
-    ...it,
-    top: box.top + (it.y / 100) * (box.bottom - box.top),
-  }));
-
-  const bw = Math.max(box.right - box.left, 20);
-
-  return (
-    <div className="tp-view">
-      <div className="tp-anno">
-        <img src={image} alt={caption} />
-
-        {mode === 'measure' && rows.map((r, i) => (
-          <div className={'tp-m-wrap' + (r.uncomputed ? ' uncomputed' : '')} key={'m' + i} style={{ top: r.top + '%', left: box.left + '%', width: bw + '%' }}>
-            <span className="tp-m-label">{r.text}{r.uncomputed ? ' ⚠' : ''}</span>
-            <i className="tp-m-line"></i>
-          </div>
-        ))}
-        {mode === 'measure' && vertical.map((v, i) => (
-          <div className="tp-anno-vert" key={'v' + i}
-            style={{ left: Math.min(box.right + 2.5 + i * 4.5, 96) + '%',
-              top: (box.top + (v.top / 100) * (box.bottom - box.top)) + '%',
-              bottom: (100 - (box.top + (v.bottom / 100) * (box.bottom - box.top))) + '%' }}>
-            <span className="tp-m-label vert">{v.text}</span>
-          </div>
-        ))}
-
-        {mode !== 'measure' && rows.map((r, i) => {
-          // التسمية تلاصق حافة القطعة والخط يلمس القطعة نفسها — لا تسميات عائمة بالفراغ
-          // نقطة النهاية الحقيقية داخل القطعة، لا حافة الصندوق
-          const bw = box.right - box.left;
-          const tipX = box.left + zoneX(r.text || r.target || '', labelSide) * bw;
-          const style = labelSide === 'right'
-            ? { top: r.top + '%', left: tipX + '%', width: Math.max(2, 100 - tipX - 0.5) + '%' }
-            : { top: r.top + '%', left: Math.max(tipX - 26, 0.5) + '%', width: (tipX - Math.max(tipX - 26, 0.5)) + '%' };
-          return (
-            <div className={'tp-anno-row ' + (labelSide === 'right' ? 'right' : 'left')} key={'c' + i} style={style}>
-              {labelSide === 'right' ? <><i className="tp-anno-line"></i>{mode === 'callout' ? <span className="tp-anno-circle">{r.num}</span> : <span className="tp-anno-text">{r.text}</span>}</>
-                : <>{mode === 'callout' ? <span className="tp-anno-circle">{r.num}</span> : <span className="tp-anno-text">{r.text}</span>}<i className="tp-anno-line"></i></>}
-            </div>
-          );
-        })}
-      </div>
-      <div className="tp-view-cap">{caption}</div>
-    </div>
-  );
-}
-
-// زوج المنظرين الأمامي والخلفي جنباً إلى جنب
-function AnnotatedPair({ frontImage, backImage, mode, front, back, measurements, sampleSize }) {
-  return (
-    <div className="tp-img-frame">
-      <div className="tp-pair">
-        <AnnotatedView image={frontImage} mode={mode} items={front} caption="FRONT" labelSide="left"
-          measurements={measurements} sampleSize={sampleSize} view="front" />
-        <AnnotatedView image={backImage} mode={mode} items={back} caption="BACK" labelSide="right"
-          measurements={measurements} sampleSize={sampleSize} view="back" />
-      </div>
-    </div>
-  );
-}
-
-// صفحة DETAILED VIEWS: لقطات مقرّبة مقصوصة من صورة التصميم المرجعية نفسها —
-// حتمية 100% وبلا أي توليد أو كلفة، فلا يمكن أن تخالف التصميم.
-// موضع كل لقطة يُشتقّ من نفس محرّك المعالم المستخدم في الليبلات، فيصحّ على
-// أي نوع قطعة. الجدول السابق كان كلمات فستان محفورة (TULLE، TRAIN، BODICE)،
-// فكان كل ما لا يطابقها يسقط على قصّات ثابتة عشوائية.
-const DEFAULT_CROPS = ['50% 12%', '50% 26%', '50% 40%', '50% 58%', '50% 74%', '50% 90%'];
-
-
-// تنقية تفاصيل DETAILED VIEWS.
-// اللقطات تُقتطع من رسمة مسطّحة، فما لا يُرى فيها لا يصلح لقطةً: السحاب
-// المخفي، الدرزات والبطانة والدعامات الداخلية. البرومبت يمنعها، وهذا
-// المرشّح يجعل المنع حتمياً بالكود لا رجاءً للنموذج.
-const HIDDEN_DETAIL = /invisible\s*zip|concealed|hidden|inner|interior|internal|lining(?!\s*hem)|understitch|boning|interfac|stay\s*tape|seam\s*allowance|bone\s*channel|facing\b|serge|overlock|basting/i;
-
-function visibleDetails(list) {
-  const arr = Array.isArray(list) ? list : [];
-  const kept = arr.filter((d) => {
-    const hay = [d && d.area, d && d.detail].filter(Boolean).join(' ');
-    return hay && !HIDDEN_DETAIL.test(hay);
+  };
+  while (ddSize > 3.6 && !ddFits(ddSize)) ddSize -= 0.2;
+  p.setFont('sans', 'r', ddSize);
+  colsDD.forEach((col, ci) => {
+    const x = L.x1 + 3.5 + ci * 34;
+    let y = L.yRow1 + 13.5;
+    col.forEach((t) => {
+      const lines = p.wrap(tpUp(t), 28, 0.08);
+      p.circle(x + 0.5, y - p.lh(1) * 0.32, 0.38, { fill: TP_INK });
+      lines.forEach((ln, j) => p.text(ln, x + 2.2, y + j * p.lh(1.3), { cs: 0.08 }));
+      y += lines.length * p.lh(1.3) + 2.2;
+    });
   });
-  return kept.length ? kept : arr;   // لا تُفرَّغ الصفحة إن رُفض كل شيء
-}
 
-function RefCrops({ frontImage, backImage, items, anchors }) {
-  // تُقتطع اللقطات من الرسمة الملوّنة لا من صورة التصميم: صورة التصميم
-  // تضم رأس العارضة، فأي لقطة من أعلاها تُخرج وجهاً بدل تفصيل القطعة.
-  // الرسمة المسطّحة لا رأس فيها ولا جسم، فكل لقطة تقع على القماش.
-  if (!frontImage && !backImage) {
-    return <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '4/3' }}>
-      <span>الرسمة الملوّنة غير متوفّرة — تُقتطع منها لقطات التفاصيل</span>
-    </div>;
-  }
-  // تُعرض التفاصيل الموجودة فقط: حشو المربعات الفارغة كان يُخرج لقطات
-  // بلا تسمية على الصفحة.
-  const list = (items && items.length ? items : []).slice(0, 6);
-  if (!list.length) {
-    return <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '4/3' }}>
-      <span>لا تفاصيل مرئية لعرضها</span>
-    </div>;
-  }
+  // ===== FABRICS & TRIMS =====
+  tpTitle(p, 'FABRICS & TRIMS', L.x2, L.x3, L.yRow1 + 6.2);
+  p.setFont('sans', 'b', 5);
+  p.text('FABRIC', L.x2 + 3.5, L.yRow1 + 11.6, { cs: 0.25 });
+  const fabs = (d.fabrics || []).slice(0, 4);
+  const fTop = L.yRow1 + 13.5;
+  const fH = fabs.length ? Math.min(15, 46 / fabs.length) : 15;
+  fabs.forEach((f, i) => {
+    const y = fTop + i * fH;
+    const sw = 21;
+    const sh = fH - 2.2;
+    const sx = L.x3 - 3 - sw;
+    if (f.asset && get(f.asset)) tpCover(p, get(f.asset), sx, y, sw, sh);
+    else p.rect(sx, y, sw, sh, { fill: tpHexOk(f.hex) ? f.hex : '#CCCCCC' });
+    const tw = sx - (L.x2 + 3.5) - 2;
+    const rows = [
+      ['b', 4.9, tpUp(f.role)],
+      ['r', 4.6, f.name],
+      ['r', 4.3, f.comp],
+      ['r', 4.3, f.color ? 'COLOR: ' + f.color : ''],
+    ].filter((r) => r[2]);
+    const lineH = Math.min(2.3, (fH - 2) / Math.max(rows.length, 1));
+    rows.forEach((r, j) => {
+      p.setFont('sans', r[0], r[1]);
+      p.textFit(r[2], L.x2 + 3.5, y + 1.9 + j * lineH, { maxW: tw, minSize: 3, color: r[0] === 'b' ? TP_INK : '#3d3a37' });
+    });
+    if (i < fabs.length - 1) p.line(L.x2 + 3.5, y + fH - 1, L.x3 - 3, y + fH - 1, { color: '#ebe8e3', lw: 0.15 });
+  });
 
-  // الموضع الأفقي يتبع المنطقة كما في أرقام الكول أوت: القصّ من الوسط دائماً
-  // كان يُخرج الأسورة وخياطة الجنب من منتصف القطعة فلا تظهر أصلاً.
-  const posFor = (it, i) => {
-    const area = (it && it.area) || '';
-    const lm = landmarkOf(area, true);
-    const xf = zoneX(area, 'left');                 // 0 يسار … 1 يمين
-    const x = Math.max(8, Math.min(92, Math.round(xf * 100)));
-    if (lm && anchors && anchors[lm] != null && anchors.__total) {
-      const y = Math.max(6, Math.min(94, (anchors[lm] / anchors.__total) * 100));
-      return x + '% ' + Math.round(y) + '%';
+  const trims = (d.trims || []).slice(0, 4);
+  const tY = 188.8;
+  p.line(L.x2, tY - 3.2, L.x3, tY - 3.2, { color: TP_RULE, lw: 0.25 });
+  p.setFont('sans', 'b', 5);
+  p.text('TRIMS', L.x2 + 3.5, tY, { cs: 0.25 });
+  const tn = Math.max(trims.length, 1);
+  const tcw = (L.x3 - L.x2) / tn;
+  const tr = tn >= 4 ? 4.3 : 5;
+  trims.forEach((t, i) => {
+    const cx = L.x2 + tcw * (i + 0.5);
+    const cy = tY + 7.6;
+    p.circle(cx, cy, tr, { fill: TP_SOFT });
+    if (t.asset && get(t.asset)) {
+      p.clipCircle(cx, cy, tr, () => {
+        const a = get(t.asset);
+        const s = Math.max((tr * 2) / a.w, (tr * 2) / a.h);
+        p.img(a, cx - (a.w * s) / 2, cy - (a.h * s) / 2, a.w * s, a.h * s);
+      });
+    } else {
+      tpTrimIcon(p, t.kind, t.hex, cx, cy, tr);
     }
-    const fallback = DEFAULT_CROPS[i % DEFAULT_CROPS.length];
-    return x + '% ' + fallback.split(' ')[1];
-  };
+    p.circle(cx, cy, tr, { stroke: TP_RULE, lw: 0.25 });
+    p.setFont('sans', 'b', 4.4);
+    p.textFit(tpUp(t.name), cx, cy + tr + 3, { align: 'center', maxW: tcw - 1.5, minSize: 3.2, cs: 0.1 });
+    p.setFont('sans', 'r', 3.9);
+    p.wrap(t.desc, tcw - 2, 0).slice(0, 2).forEach((ln, j) => {
+      p.text(ln, cx, cy + tr + 5 + j * p.lh(1.2), { align: 'center', color: '#3d3a37' });
+    });
+  });
 
-  // التقريب يتبع حجم التفصيل: ياقة أو أسورة تحتاج تقريباً أعلى من تنورة
-  const zoomFor = (it) => {
-    const a = String((it && it.area) || '');
-    if (/cuff|collar|zipper|button|hook|label|neckline|wrist/i.test(a)) return '380%';
-    if (/seam|panel|insert|pleat|dart|hem\s*finish/i.test(a)) return '300%';
-    if (/skirt|train|sweep|overlay|tier|layer/i.test(a)) return '220%';
-    return '280%';
-  };
+  // ===== CONSTRUCTION DETAILS =====
+  tpTitle(p, 'CONSTRUCTION DETAILS', L.x0, L.x1, L.yLook + 6.2);
+  const imgTop = L.yLook + 9.5;
+  const imgH = L.yRow3 - imgTop - 5.5;
+  const fr = tpContain(p, get(d.flatF), L.x0 + 14.5, imgTop, 18.5, imgH, 'center') || { x: L.x0 + 14.5, y: imgTop, w: 18.5, h: imgH };
+  const br = tpContain(p, get(d.flatB), L.x0 + 33.5, imgTop, 18.5, imgH, 'center') || { x: L.x0 + 33.5, y: imgTop, w: 18.5, h: imgH };
+  p.setFont('sans', 'r', 4.6);
+  p.text('FRONT', fr.x + fr.w / 2, L.yRow3 - 2, { align: 'center', cs: 0.25 });
+  p.text('BACK', br.x + br.w / 2, L.yRow3 - 2, { align: 'center', cs: 0.25 });
 
-  // كل لقطة تُقتطع من منظرها الفعلي: تفصيل خلفي من الرسمة الخلفية
-  const srcFor = (it) => {
-    const wantBack = it && String(it.view || '').toLowerCase() === 'back';
-    if (wantBack && backImage) return backImage;
-    return frontImage || backImage;
+  const drawCallouts = (items, rect, side) => {
+    p.setFont('sans', 'r', 3.7);
+    const labW = 12.2;
+    const lhh = p.lh(1.18);
+    const list = (items || []).map((c) => ({
+      ...c,
+      px: rect.x + (tpClamp(c.x, 0, 100) / 100) * rect.w,
+      py: rect.y + (tpClamp(c.y, 0, 100) / 100) * rect.h,
+      lines: p.wrap(tpUp(tpSafe(c.label).trim()), labW, 0.05).slice(0, 4),
+    })).filter((c) => c.lines.length).sort((a, b) => a.py - b.py);
+    list.forEach((c) => { c.h = c.lines.length * lhh; });
+    // توزيع رأسي بلا تداخل
+    const top = imgTop + 1.5;
+    const bottom = L.yRow3 - 3;
+    let cur = top;
+    list.forEach((c) => { c.ty = Math.max(c.py - c.h / 2, cur); cur = c.ty + c.h + 1.4; });
+    const over = cur - 1.4 - bottom;
+    if (over > 0) {
+      let limit = bottom;
+      for (let i = list.length - 1; i >= 0; i--) {
+        list[i].ty = Math.min(list[i].ty, limit - list[i].h);
+        limit = list[i].ty - 1.4;
+      }
+      if (list.length && list[0].ty < top) {
+        const tot = list.reduce((s, c) => s + c.h, 0);
+        const gap = list.length > 1 ? (bottom - top - tot) / (list.length - 1) : 0;
+        let yy = top;
+        list.forEach((c) => { c.ty = yy; yy += c.h + Math.max(gap, 0.4); });
+      }
+    }
+    list.forEach((c) => {
+      const tx = side === 'left' ? L.x0 + 1.8 : L.x1 - 1.8;
+      c.lines.forEach((ln, j) => p.text(ln, tx, c.ty + (j + 0.82) * lhh, { align: side === 'left' ? 'left' : 'right', cs: 0.05 }));
+      const midY = c.ty + (Math.min(c.lines.length, 2) * lhh) / 2;
+      const widest = Math.max(...c.lines.map((ln) => p.w(ln, 0.05)));
+      const sx = side === 'left' ? tx + widest + 0.6 : tx - widest - 0.6;
+      p.line(sx, midY, c.px, c.py, { color: TP_LEADER, lw: 0.13 });
+      p.circle(c.px, c.py, 0.32, { fill: TP_LEADER });
+    });
   };
+  drawCallouts(d.consF, fr, 'left');
+  drawCallouts(d.consB, br, 'right');
+
+  // ===== MATERIAL SPECIFICATIONS =====
+  tpTitle(p, 'MATERIAL SPECIFICATIONS', L.x1, L.x2, L.yLook + 6.2);
+  const tx0 = L.x1 + 2.5, tx1 = L.x2 - 2.5, c1w = 20;
+  const thY = L.yLook + 9;
+  p.rect(tx0, thY, tx1 - tx0, 4.4, { fill: TP_SOFT });
+  p.setFont('sans', 'b', 4.5);
+  p.text('COMPONENT', tx0 + 1.5, thY + 3, { cs: 0.2 });
+  p.text('SPECIFICATION', tx0 + c1w + 1.5, thY + 3, { cs: 0.2 });
+  const specs = (d.specs || []).filter((s) => s.component || s.spec);
+  const avail = L.yRow3 - (thY + 4.4) - 1.5;
+  let spSize = 4.4;
+  const layoutSpecs = (size) => {
+    p.setFont('sans', 'r', size);
+    const pad = size * 0.2;
+    let total = 0;
+    const rows = specs.map((s) => {
+      const lines = p.wrap(s.spec, tx1 - tx0 - c1w - 2.5, 0);
+      p.setFont('sans', 'b', size);
+      const cl = p.wrap(tpUp(s.component), c1w - 2, 0.05);
+      p.setFont('sans', 'r', size);
+      const h = Math.max(lines.length, cl.length) * p.lh(1.2) + pad * 2 + 0.6;
+      total += h;
+      return { s, lines, cl, h };
+    });
+    return { rows, total };
+  };
+  let spec = layoutSpecs(spSize);
+  while (spSize > 3.2 && spec.total > avail) { spSize -= 0.2; spec = layoutSpecs(spSize); }
+  let sy = thY + 4.4;
+  spec.rows.forEach((r) => {
+    if (sy + r.h > L.yRow3 - 0.8) return;
+    p.setFont('sans', 'b', spSize);
+    r.cl.forEach((ln, j) => p.text(ln, tx0 + 1.5, sy + 0.3 + spSize * 0.2 + (j + 0.85) * p.lh(1.2), { cs: 0.05 }));
+    p.setFont('sans', 'r', spSize);
+    r.lines.forEach((ln, j) => p.text(ln, tx0 + c1w + 1.5, sy + 0.3 + spSize * 0.2 + (j + 0.85) * p.lh(1.2), { color: '#2f2c2a' }));
+    sy += r.h;
+    p.line(tx0, sy, tx1, sy, { color: '#e6e2dc', lw: 0.15 });
+  });
+
+  // ===== CARE INSTRUCTIONS =====
+  tpTitle(p, 'CARE INSTRUCTIONS', L.x2, L.x3, L.yFab + 6.2);
+  const care = (d.care || []).slice(0, 4);
+  const ccw = (L.x3 - L.x2) / 4;
+  care.forEach((k, i) => {
+    const cx = L.x2 + ccw * (i + 0.5);
+    tpCareIcon(p, k, cx - 3.6, L.yFab + 9, 7.2);
+    const lab = TP_CARE[k] || ['', ''];
+    p.setFont('sans', 'r', 3.9);
+    p.textFit(lab[0], cx, L.yFab + 19.6, { align: 'center', maxW: ccw - 1, minSize: 3 });
+    p.setFont('sans', 'r', 3.9);
+    p.textFit(lab[1], cx, L.yFab + 21.4, { align: 'center', maxW: ccw - 1, minSize: 3 });
+  });
+  const stK = d.storage || 'hangbag';
+  const stX = (L.x2 + L.x3) / 2;
+  tpCareIcon(p, stK, stX - 3.3, L.yFab + 23.3, 6.6);
+  const stLab = TP_CARE[stK] || ['', ''];
+  p.setFont('sans', 'r', 3.9);
+  p.text(stLab[0], stX, L.yFab + 33.6, { align: 'center' });
+  p.text(stLab[1], stX, L.yFab + 35.4, { align: 'center' });
+
+  // ===== SIZE CHART =====
+  tpTitle(p, 'SIZE CHART (CM)', L.x0, L.xSize, L.yRow3 + 5.6);
+  const sx0 = L.x0 + 2.5, sLabW = 26;
+  const sColW = (L.xSize - 2.5 - sx0 - sLabW) / 6;
+  const shY = L.yRow3 + 7.6;
+  p.rect(sx0, shY, L.xSize - 2.5 - sx0, 4.2, { fill: TP_SOFT });
+  p.setFont('sans', 'b', 4.4);
+  p.text('SIZE', sx0 + 1.5, shY + 2.9, { cs: 0.2 });
+  p.setFont('sans', 'r', 4.3);
+  TP_SIZE_COLS.forEach(([n, r], i) => {
+    p.text(n + ' (' + r + ')', sx0 + sLabW + sColW * (i + 0.5), shY + 2.9, { align: 'center' });
+  });
+  const rowsS = (d.sizeRows || []).slice(0, 5);
+  const rTop = shY + 4.2;
+  const rBot = L.yBot - 5.2;
+  const rH = rowsS.length ? (rBot - rTop) / Math.max(rowsS.length, 5) : 4.5;
+  rowsS.forEach((r, i) => {
+    const y = rTop + i * rH;
+    const lab = tpUp(r.label);
+    const m = /^(.*?)\s*(\(.*\))\s*$/.exec(lab);
+    if (m && m[1]) {
+      p.setFont('sans', 'b', 4);
+      p.textFit(m[1], sx0 + 1.5, y + rH * 0.44, { maxW: sLabW - 2, minSize: 3, cs: 0.05 });
+      p.setFont('sans', 'r', 3.3);
+      p.textFit(m[2], sx0 + 1.5, y + rH * 0.44 + 1.5, { maxW: sLabW - 2, minSize: 2.6 });
+    } else {
+      p.setFont('sans', 'b', 4.2);
+      p.textFit(lab, sx0 + 1.5, y + rH * 0.62, { maxW: sLabW - 2, minSize: 3, cs: 0.05 });
+    }
+    p.setFont('sans', 'r', 4.4);
+    for (let j = 0; j < 6; j++) {
+      const v = (r.vals || [])[j];
+      p.text(v == null || v === '' ? '—' : String(v), sx0 + sLabW + sColW * (j + 0.5), y + rH * 0.62, { align: 'center' });
+    }
+    p.line(sx0, y + rH, L.xSize - 2.5, y + rH, { color: '#e6e2dc', lw: 0.15 });
+  });
+  for (let j = 0; j <= 6; j++) {
+    const x = sx0 + sLabW + sColW * j;
+    p.line(x, shY, x, rTop + rH * Math.max(rowsS.length, 1), { color: '#ece9e4', lw: 0.12 });
+  }
+  p.setFont('sans', 'r', 3.4);
+  p.textFit(d.note1 || '', sx0, L.yBot - 1.8, { maxW: 70, minSize: 2.6, color: TP_MUTED });
+  p.textFit(d.note2 || '', L.xSize - 2.5, L.yBot - 1.8, { align: 'right', maxW: 34, minSize: 2.6, color: TP_MUTED });
+
+  // ===== COLORWAY =====
+  tpTitle(p, 'COLORWAY', L.xSize, L.x3, L.yRow3 + 5.6);
+  const cws = (d.colorway || []).slice(0, 3);
+  const bw = 22, bh = 17, gap = 5;
+  const totalW = cws.length * bw + Math.max(cws.length - 1, 0) * gap;
+  const bx0 = (L.xSize + L.x3) / 2 - totalW / 2;
+  cws.forEach((c, i) => {
+    const x = bx0 + i * (bw + gap);
+    p.rect(x, L.yRow3 + 9, bw, bh, { fill: tpHexOk(c.hex) ? c.hex : '#CCCCCC' });
+    p.rect(x, L.yRow3 + 9, bw, bh, { stroke: '#e3dfd9', lw: 0.15 });
+    p.setFont('sans', 'b', 4.5);
+    p.textFit(tpUp(c.name), x + bw / 2, L.yRow3 + 30.2, { align: 'center', maxW: bw + gap - 1, minSize: 3, cs: 0.12 });
+    p.setFont('sans', 'r', 4);
+    p.textFit(c.code || '', x + bw / 2, L.yRow3 + 32.8, { align: 'center', maxW: bw + gap - 1, minSize: 2.8, color: '#3d3a37' });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// المعاينة: كانفاس بنفس دالة الرسم
+// ---------------------------------------------------------------------------
+function TechpackPreview({ sheet, assets }) {
+  const ref = useRef(null);
+  const [fail, setFail] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const eng = await tpEnsureEngine();
+        if (cancelled || !ref.current) return;
+        const c = ref.current;
+        const PX = 1480;
+        c.width = PX;
+        c.height = Math.round((PX * TP_H) / TP_W);
+        const ctx = c.getContext('2d');
+        const painter = new TpCanvasPainter(eng, ctx, PX / TP_W);
+        tpDrawSheet(painter, sheet, assets || {});
+        setFail('');
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] preview', e && e.message);
+        if (!cancelled) setFail('تعذّر عرض المعاينة — حدّثي الصفحة وحاولي مرة ثانية');
+      }
+    }, 80);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [sheet, assets]);
+  return (
+    <div className="tp-sheet-wrap">
+      {fail ? <div className="err">{fail}</div> : null}
+      <canvas ref={ref} className="tp-sheet-canvas" />
+    </div>
+  );
+}
+
+// حفظ PDF: نفس الرسم داخل jsPDF — نص حقيقي وخطوط مضمّنة
+async function tpSavePdf(sheet, assets) {
+  const eng = await tpEnsureEngine();
+  const doc = new eng.JsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+  tpRegisterFonts(doc, eng.fonts, eng.ok);
+  const title = [sheet.styleNo, sheet.styleName].filter(Boolean).join(' ');
+  doc.setProperties({ title: title || 'Tech Pack', subject: 'Tech Pack', creator: 'GH Couture AI' });
+  const painter = new TpPdfPainter(eng, doc);
+  tpDrawSheet(painter, sheet, assets || {});
+  const safe = (title || 'techpack').replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '-').slice(0, 80);
+  doc.save(safe + '.pdf');
+}
+
+// ---------------------------------------------------------------------------
+// لوحة التعديل: كل نص في الورقة قابل للتعديل قبل الحفظ
+// ---------------------------------------------------------------------------
+function TpField({ label, value, onChange, area, rows, dir }) {
+  return (
+    <label className="tp-ed-field">
+      {label ? <span>{label}</span> : null}
+      {area
+        ? <textarea dir={dir || 'ltr'} rows={rows || 2} value={value || ''} onChange={(e) => onChange(e.target.value)} />
+        : <input dir={dir || 'ltr'} type="text" value={value || ''} onChange={(e) => onChange(e.target.value)} />}
+    </label>
+  );
+}
+
+function TpGroup({ title, children }) {
+  return (
+    <details className="tp-ed-group">
+      <summary>{title}</summary>
+      <div className="tp-ed-body">{children}</div>
+    </details>
+  );
+}
+
+function TechpackEditor({ sheet, onChange }) {
+  const set = (key, val) => onChange({ ...sheet, [key]: val });
+  const setItem = (key, i, patch) => {
+    const list = (sheet[key] || []).slice();
+    list[i] = { ...list[i], ...patch };
+    set(key, list);
+  };
+  const delItem = (key, i) => set(key, (sheet[key] || []).filter((_, j) => j !== i));
+  const addItem = (key, item) => set(key, (sheet[key] || []).concat([item]));
+  const Del = ({ k, i }) => <button type="button" className="tp-ed-del" onClick={() => delItem(k, i)}>حذف</button>;
 
   return (
-    <div className="tp-crops">
-      {list.map((it, i) => (
-        <div className="tp-crop" key={i}>
-          <div className="tp-crop-img"
-            style={{ backgroundImage: 'url(' + srcFor(it) + ')',
-              backgroundPosition: posFor(it, i), backgroundSize: zoomFor(it) }}></div>
-          {it && it.area ? <div className="tp-crop-cap">{it.area}</div> : null}
+    <div className="tp-editor">
+      <TpGroup title="الهيدر">
+        <div className="tp-ed-grid">
+          <TpField label="اسم البراند" dir="auto" value={sheet.brand} onChange={(v) => set('brand', v)} />
+          <TpField label="السطر تحت البراند" value={sheet.subtitle} onChange={(v) => set('subtitle', v)} />
+          <TpField label="STYLE NO." value={sheet.styleNo} onChange={(v) => set('styleNo', v)} />
+          <TpField label="STYLE NAME" value={sheet.styleName} onChange={(v) => set('styleName', v)} />
+          <TpField label="SEASON" value={sheet.season} onChange={(v) => set('season', v)} />
+          <TpField label="CATEGORY" value={sheet.category} onChange={(v) => set('category', v)} />
+          <TpField label="DATE" value={sheet.date} onChange={(v) => set('date', v)} />
         </div>
-      ))}
+      </TpGroup>
+
+      <TpGroup title="DESIGN DETAILS">
+        {(sheet.designDetails || []).map((t, i) => (
+          <div className="tp-ed-row" key={'dd' + i}>
+            <TpField value={t} onChange={(v) => { const l = sheet.designDetails.slice(); l[i] = v; set('designDetails', l); }} />
+            <button type="button" className="tp-ed-del" onClick={() => set('designDetails', sheet.designDetails.filter((_, j) => j !== i))}>حذف</button>
+          </div>
+        ))}
+        {(sheet.designDetails || []).length < 8 && (
+          <button type="button" className="tp-ed-add" onClick={() => set('designDetails', (sheet.designDetails || []).concat(['']))}>+ إضافة نقطة</button>
+        )}
+      </TpGroup>
+
+      <TpGroup title="DETAILS & CLOSE-UP">
+        {(sheet.details || []).map((it, i) => (
+          <div className="tp-ed-row" key={'dt' + i}>
+            <TpField label={'لقطة ' + (i + 1)} value={it.caption} onChange={(v) => setItem('details', i, { caption: v })} />
+          </div>
+        ))}
+      </TpGroup>
+
+      <TpGroup title="FABRICS">
+        {(sheet.fabrics || []).map((f, i) => (
+          <div className="tp-ed-card" key={'fb' + i}>
+            <div className="tp-ed-grid">
+              <TpField label="الدور" value={f.role} onChange={(v) => setItem('fabrics', i, { role: v })} />
+              <TpField label="اسم القماش" value={f.name} onChange={(v) => setItem('fabrics', i, { name: v })} />
+              <TpField label="التركيب والوزن" value={f.comp} onChange={(v) => setItem('fabrics', i, { comp: v })} />
+              <TpField label="اللون" value={f.color} onChange={(v) => setItem('fabrics', i, { color: v })} />
+            </div>
+            {!f.asset && (
+              <label className="tp-ed-color">لون المربع
+                <input type="color" value={tpHexOk(f.hex) ? f.hex : '#cccccc'} onChange={(e) => setItem('fabrics', i, { hex: e.target.value.toUpperCase() })} />
+              </label>
+            )}
+            <Del k="fabrics" i={i} />
+          </div>
+        ))}
+        {(sheet.fabrics || []).length < 4 && (
+          <button type="button" className="tp-ed-add"
+            onClick={() => addItem('fabrics', { role: 'FABRIC', name: '', comp: '', color: '', hex: '#CCCCCC', asset: null })}>+ إضافة قماش</button>
+        )}
+      </TpGroup>
+
+      <TpGroup title="TRIMS">
+        {(sheet.trims || []).map((t, i) => (
+          <div className="tp-ed-card" key={'tr' + i}>
+            <div className="tp-ed-grid">
+              <TpField label="الاسم" value={t.name} onChange={(v) => setItem('trims', i, { name: v })} />
+              <TpField label="الوصف" value={t.desc} onChange={(v) => setItem('trims', i, { desc: v })} />
+            </div>
+            {!t.asset && (
+              <label className="tp-ed-color">لون الأيقونة
+                <input type="color" value={tpHexOk(t.hex) ? t.hex : '#cccccc'} onChange={(e) => setItem('trims', i, { hex: e.target.value.toUpperCase() })} />
+              </label>
+            )}
+            <Del k="trims" i={i} />
+          </div>
+        ))}
+        {(sheet.trims || []).length < 4 && (
+          <button type="button" className="tp-ed-add"
+            onClick={() => addItem('trims', { name: '', desc: '', kind: 'other', hex: '#CCCCCC', asset: null })}>+ إضافة تريم</button>
+        )}
+      </TpGroup>
+
+      <TpGroup title="MATERIAL SPECIFICATIONS">
+        {(sheet.specs || []).map((s, i) => (
+          <div className="tp-ed-card" key={'sp' + i}>
+            <div className="tp-ed-grid">
+              <TpField label="COMPONENT" value={s.component} onChange={(v) => setItem('specs', i, { component: v })} />
+              <TpField label="SPECIFICATION" area rows={2} value={s.spec} onChange={(v) => setItem('specs', i, { spec: v })} />
+            </div>
+            <Del k="specs" i={i} />
+          </div>
+        ))}
+        {(sheet.specs || []).length < 12 && (
+          <button type="button" className="tp-ed-add" onClick={() => addItem('specs', { component: '', spec: '' })}>+ إضافة صف</button>
+        )}
+      </TpGroup>
+
+      <TpGroup title="CONSTRUCTION DETAILS">
+        <div className="tp-ed-sub">الرسمة الأمامية</div>
+        {(sheet.consF || []).map((c, i) => (
+          <div className="tp-ed-row" key={'cf' + i}>
+            <TpField value={c.label} onChange={(v) => setItem('consF', i, { label: v })} />
+            <Del k="consF" i={i} />
+          </div>
+        ))}
+        <div className="tp-ed-sub">الرسمة الخلفية</div>
+        {(sheet.consB || []).map((c, i) => (
+          <div className="tp-ed-row" key={'cb' + i}>
+            <TpField value={c.label} onChange={(v) => setItem('consB', i, { label: v })} />
+            <Del k="consB" i={i} />
+          </div>
+        ))}
+      </TpGroup>
+
+      <TpGroup title="CARE INSTRUCTIONS">
+        <div className="tp-ed-grid">
+          {[0, 1, 2, 3].map((i) => (
+            <label className="tp-ed-field" key={'ca' + i}>
+              <span>{'رمز ' + (i + 1)}</span>
+              <select value={(sheet.care || [])[i] || ''} onChange={(e) => {
+                const l = (sheet.care || []).slice();
+                l[i] = e.target.value;
+                set('care', l.filter(Boolean));
+              }}>
+                <option value="">—</option>
+                {TP_CARE_KINDS.map((k) => <option key={k} value={k}>{TP_CARE_AR[k]}</option>)}
+              </select>
+            </label>
+          ))}
+          <label className="tp-ed-field">
+            <span>التخزين</span>
+            <select value={sheet.storage || 'hangbag'} onChange={(e) => set('storage', e.target.value)}>
+              {TP_STORAGE_KINDS.map((k) => <option key={k} value={k}>{TP_CARE_AR[k]}</option>)}
+            </select>
+          </label>
+        </div>
+      </TpGroup>
+
+      <TpGroup title="SIZE CHART (CM)">
+        <div className="tp-ed-size">
+          <div className="tp-ed-size-row head">
+            <span>القياس</span>
+            {TP_SIZE_COLS.map(([n]) => <span key={n}>{n}</span>)}
+            <span />
+          </div>
+          {(sheet.sizeRows || []).map((r, i) => (
+            <div className="tp-ed-size-row" key={'sz' + i}>
+              <input dir="ltr" value={r.label} onChange={(e) => setItem('sizeRows', i, { label: e.target.value })} />
+              {[0, 1, 2, 3, 4, 5].map((j) => (
+                <input dir="ltr" key={j} value={(r.vals || [])[j] || ''} onChange={(e) => {
+                  const vals = (r.vals || []).slice();
+                  while (vals.length < 6) vals.push('');
+                  vals[j] = e.target.value;
+                  setItem('sizeRows', i, { vals });
+                }} />
+              ))}
+              <button type="button" className="tp-ed-del" onClick={() => delItem('sizeRows', i)}>حذف</button>
+            </div>
+          ))}
+        </div>
+        {(sheet.sizeRows || []).length < 5 && (
+          <button type="button" className="tp-ed-add" onClick={() => addItem('sizeRows', { label: '', vals: ['', '', '', '', '', ''] })}>+ إضافة صف</button>
+        )}
+        <div className="tp-ed-grid" style={{ marginTop: '0.6rem' }}>
+          <TpField label="الملاحظة الأولى" value={sheet.note1} onChange={(v) => set('note1', v)} />
+          <TpField label="الملاحظة الثانية" value={sheet.note2} onChange={(v) => set('note2', v)} />
+        </div>
+      </TpGroup>
+
+      <TpGroup title="COLORWAY">
+        {(sheet.colorway || []).map((c, i) => (
+          <div className="tp-ed-card" key={'cw' + i}>
+            <span className="tp-ed-chip" style={{ background: c.hex }} />
+            <div className="tp-ed-grid">
+              <TpField label="اسم اللون" value={c.name} onChange={(v) => setItem('colorway', i, { name: v })} />
+              <TpField label="كود بانتون" value={c.code} onChange={(v) => setItem('colorway', i, { code: v })} />
+            </div>
+            <Del k="colorway" i={i} />
+          </div>
+        ))}
+      </TpGroup>
     </div>
   );
 }
 
 
-// هيدر الصفحة — مطابق لهيدر النموذج:
-// يسار: صورة مصغّرة + كود الستايل + الاسم + الموسم + المورّد
-// وسط: عنوان الصفحة + (Size / Category / Fabric)
-// يمين: الإصدار + Page X of N + التاريخ + العلامة
-function TpPage({ n, total, title, children }) {
-  const meta = useContext(TpMetaContext);
-  return (
-    <div className="tp-page">
-      <div className="tp-hd">
-        <div className="tp-hd-left">
-          {meta.preview
-            ? <img src={meta.preview} alt="" className="tp-hd-thumb" />
-            : <div className="tp-hd-thumb ph"></div>}
-          <div>
-            <div className="tp-hd-code">{meta.styleCode}</div>
-            <div className="tp-hd-name">{meta.garmentName}</div>
-            <div className="tp-hd-sub">Season: {meta.season}</div>
-            <div className="tp-hd-sub">Vendor: {meta.brandName}</div>
-          </div>
-        </div>
-        <div className="tp-hd-mid">
-          <div className="tp-hd-title">{title}</div>
-          <div className="tp-hd-cols">
-            <div className="tp-hd-col"><span>Size:</span> {meta.sampleSize} ({meta.sizeRange})</div>
-            <div className="tp-hd-col"><span>Category:</span> {meta.category}</div>
-            <div className="tp-hd-col"><span>Fabric:</span> {meta.fabricSummary}</div>
-          </div>
-        </div>
-        <div className="tp-hd-right">
-          <div className="tp-hd-ver">{meta.version}</div>
-          <div className="tp-hd-page">Page {n} of {total}</div>
-          <div className="tp-hd-sub">{meta.date}</div>
-          <div className="tp-hd-sub">{meta.brandName}</div>
-        </div>
-      </div>
-      <div className="tp-hd-rule"></div>
-      <div className="tp-page-body">
-        {children}
-      </div>
-    </div>
-  );
-}
 // ===== الأنماط =====
 function StyleBlock() {
   return (
@@ -3115,132 +3132,52 @@ function StyleBlock() {
       .platform-name { font-weight: 700; color: var(--ink); direction: ltr; }
       .platform-note { color: var(--ink-soft); font-size: 0.85rem; text-align: left; }
 
-      /* ===== التيك باك — هيكل Adstronaut ===== */
+      /* ===== التيك باك — ورقة واحدة ===== */
       .tp { background: #e8e8ea; border-radius: 8px; padding: 1.4rem; box-shadow: 0 20px 60px rgba(0,0,0,0.08); }
 
       /* صفحة مستقلة لكل قسم */
 
 
-      /* ===== ورقة التيك باك — صفحة واحدة على بنية نموذج RK ===== */
-      .sheet { background: #fff; color: #1a1a1a; font-family: 'Tajawal', system-ui, sans-serif;
-        width: 210mm; margin: 0 auto; padding: 0; direction: ltr; font-size: 7.6px; line-height: 1.4; }
-      .sheet * { box-sizing: border-box; }
-      .sh-head { display: grid; grid-template-columns: 1.15fr 1.25fr 1fr; border: 1px solid #d8d5cf; }
-      .sh-head > div { padding: 7px 10px; border-right: 1px solid #d8d5cf; }
-      .sh-head > div:last-child { border-right: 0; }
-      .sh-brand-name { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 17px;
-        letter-spacing: 0.16em; color: #6b1a2b; font-weight: 600; }
-      .sh-brand-sub { font-size: 6.4px; letter-spacing: 0.3em; color: #6d6a66; margin-top: 3px; }
-      .sh-meta > div { display: grid; grid-template-columns: 74px 1fr; gap: 6px; margin-bottom: 4px; }
-      .sh-meta > div:last-child { margin-bottom: 0; }
-      .sh-meta span { font-size: 6.4px; letter-spacing: 0.1em; color: #4a4744; font-weight: 700; }
-      .sh-meta b { font-size: 7.4px; font-weight: 500; color: #1a1a1a; }
-
-      .sh-row { display: grid; border: 1px solid #d8d5cf; border-top: 0; }
-      .sh-row-1 { grid-template-columns: 1fr 1.05fr 0.92fr; }
-      .sh-row-2 { grid-template-columns: 1fr 1.05fr 0.92fr; }
-      .sh-row-3 { grid-template-columns: 1fr 1.05fr 0.92fr; }
-      .sh-row-4 { grid-template-columns: 1fr 1.05fr 0.92fr; }
-      .sh-cell { padding: 7px 8px; border-right: 1px solid #d8d5cf; min-width: 0; }
-      .sh-cell:last-child { border-right: 0; }
-      .sh-span2 { grid-column: span 2; }
-
-      .sh-title { text-align: center; font-size: 7.6px; font-weight: 700; letter-spacing: 0.16em;
-        margin-bottom: 6px; color: #1a1a1a; }
-      .sh-sub { font-size: 6.6px; font-weight: 700; letter-spacing: 0.12em; color: #4a4744;
-        margin: 5px 0 4px; }
-      .sh-corner { font-size: 6.2px; font-weight: 700; letter-spacing: 0.12em; color: #4a4744; }
-      .sh-corner i { font-style: normal; font-weight: 500; }
-      .sh-corner-b { margin-top: 5px; }
-      .sh-cap { text-align: center; font-size: 6.2px; letter-spacing: 0.14em; color: #6d6a66; margin-bottom: 3px; }
-
-      .sh-look img, .sh-flat img { width: 100%; display: block; object-fit: contain; }
-      .sh-look { margin-top: 3px; }
-      .sh-look-sm img { max-height: 118px; object-fit: contain; }
-      .sh-flats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-      .sh-ph { width: 100%; aspect-ratio: 2/3; background: #f3f1ed; border: 1px dashed #d8d5cf; }
-
-      .sh-details { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-      .sh-detail-img { width: 100%; aspect-ratio: 1/1; background-repeat: no-repeat;
-        background-color: #f3f1ed; border: 1px solid #e6e3de; }
-      .sh-detail-cap { font-size: 5.9px; text-align: center; letter-spacing: 0.06em;
-        color: #4a4744; margin-top: 3px; line-height: 1.35; }
-
-      .sh-bullets { margin: 0; padding: 0; list-style: none;
-        columns: 2; column-gap: 14px; font-size: 7px; }
-      .sh-bullets li { break-inside: avoid; margin-bottom: 7px; padding-left: 9px; position: relative;
-        letter-spacing: 0.02em; }
-      .sh-bullets li::before { content: '•'; position: absolute; left: 0; color: #6b1a2b; }
-
-      .sh-fab { display: grid; grid-template-columns: 1fr 52px; gap: 7px; align-items: stretch;
-        border-bottom: 1px solid #e6e3de; padding: 5px 0; }
-      .sh-fab:last-of-type { border-bottom: 0; }
-      .sh-fab-txt b { display: block; font-size: 6.8px; letter-spacing: 0.06em; }
-      .sh-fab-txt span { display: block; font-size: 6.4px; color: #4a4744; }
-      .sh-swatch { border-radius: 2px; min-height: 34px; }
-
-      .sh-trims { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; text-align: center; }
-      .sh-trim-dot { width: 34px; height: 34px; border-radius: 50%; margin: 0 auto 3px;
-        border: 1px solid #e6e3de; }
-      .sh-trim b { display: block; font-size: 6.4px; letter-spacing: 0.08em; }
-      .sh-trim span { display: block; font-size: 6px; color: #6d6a66; line-height: 1.3; }
-
-      .sh-table { width: 100%; border-collapse: collapse; font-size: 6.6px; }
-      .sh-table th { background: #f6f4f1; text-align: left; padding: 4px 6px;
-        font-weight: 700; letter-spacing: 0.08em; border: 1px solid #e6e3de; }
-      .sh-table td { padding: 4px 6px; border: 1px solid #e6e3de; vertical-align: top; }
-      .sh-comp { font-weight: 700; letter-spacing: 0.05em; white-space: nowrap; }
-      .sh-size td, .sh-size th { text-align: center; }
-      .sh-size td:first-child, .sh-size th:first-child { text-align: left; }
-      .sh-note { display: flex; gap: 26px; font-size: 5.8px; color: #6d6a66; margin-top: 4px; }
-
-      .sh-care { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; text-align: center; }
-      .sh-care-i { color: #3a3734; }
-      .sh-care-i span { display: block; font-size: 5.8px; letter-spacing: 0.05em;
-        color: #4a4744; margin-top: 2px; line-height: 1.3; }
-
-      .sh-colorway { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; text-align: center; }
-      .sh-cw-box { width: 100%; aspect-ratio: 3/2; border-radius: 2px; margin-bottom: 3px; }
-      .sh-cw b { display: block; font-size: 6.4px; letter-spacing: 0.06em; }
-      .sh-cw span { display: block; font-size: 5.9px; color: #6d6a66; }
-
-      @media (max-width: 820px) {
-        .sheet { width: 100%; font-size: 9px; }
-        .sh-head, .sh-row-1, .sh-row-2, .sh-row-3, .sh-row-4 { grid-template-columns: 1fr; }
-        .sh-span2 { grid-column: span 1; }
-        .sh-cell { border-right: 0; border-bottom: 1px solid #d8d5cf; }
-      }
-      /* ===== الطباعة / تصدير PDF =====
-         عند الطباعة يُخفى كل ما عدا التيك باك، وتُفرَض ورقة A4 أفقية بحيث
-         تقع كل صفحة تيك باك على ورقة واحدة كاملة كما في النموذج المرجعي.
-         النص يبقى متجهاً: قابلاً للبحث والنسخ والطباعة بأي مقاس. */
-      @media print {
-        @page { size: A4 portrait; margin: 6mm; }
-        html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
-        /* يُخفى كل شيء، ثم يُستعاد #techpack-canvas وسلسلة آبائه فقط */
-        body.printing-techpack * { visibility: hidden !important; }
-        body.printing-techpack #techpack-canvas,
-        body.printing-techpack #techpack-canvas * { visibility: visible !important; }
-        body.printing-techpack #techpack-canvas {
-          position: absolute !important; inset: 0 auto auto 0; width: 100% !important;
-        }
-        body.printing-techpack button,
-        body.printing-techpack textarea,
-        body.printing-techpack input,
-        body.printing-techpack select { display: none !important; }
-        #techpack-canvas, #techpack-canvas * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .tp { background: #fff !important; padding: 0 !important; margin: 0 !important; }
-        /* ورقة لكل صفحة، بلا ظل ولا حواف شاشة */
-        /* الورقة صفحة واحدة: تُطبع كاملة بلا فواصل داخلية */
-        .sheet { width: 100% !important; font-size: 7.2px !important; }
-        .sh-row, .sh-head, .sh-cell, .sh-fab, .sh-trim, .sh-detail, .sh-cw,
-        .sh-care-i, .sh-table, tr { break-inside: avoid; page-break-inside: avoid; }
-        .tp-page:last-child { break-after: auto; page-break-after: auto; }
-        /* منع انقسام الجداول والبطاقات بين ورقتين */
-        .tp-table, .tp-crops, .tp-pair, .tp-mat-grid, .tp-colorways,
-        .tp-crop, .tp-view, .tp-pantone-row, tr { break-inside: avoid; page-break-inside: avoid; }
-        thead { display: table-header-group; }
-        img { max-width: 100% !important; }
+      /* ===== ورقة التيك باك: معاينة كانفاس + لوحة تعديل ===== */
+      .tp-work { display: block; }
+      .tp-work.editing { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 1.2rem; align-items: start; }
+      .tp-sheet-wrap { background: #e9e7e3; border-radius: 8px; padding: 1rem; min-width: 0; }
+      .tp-sheet-canvas { display: block; width: 100%; max-width: 820px; height: auto; margin: 0 auto;
+        background: #fff; box-shadow: 0 12px 40px rgba(0,0,0,0.12); }
+      .tp-editor { background: #fff; border: 1px solid #eceae4; border-radius: 8px; padding: 0.3rem;
+        max-height: 88vh; overflow-y: auto; position: sticky; top: 1rem; min-width: 0; }
+      .tp-ed-group { border-bottom: 1px solid #f0ede7; }
+      .tp-ed-group:last-child { border-bottom: 0; }
+      .tp-ed-group summary { cursor: pointer; padding: 0.75rem 0.7rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.03em; }
+      .tp-ed-body { padding: 0 0.7rem 0.9rem; }
+      .tp-ed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+      .tp-ed-field { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+      .tp-ed-field span { font-size: 0.68rem; color: #8a847e; }
+      .tp-ed-field input, .tp-ed-field textarea, .tp-ed-field select, .tp-ed-size-row input {
+        width: 100%; box-sizing: border-box; border: 1px solid #e3dfd8; border-radius: 5px;
+        padding: 0.4rem 0.5rem; font-size: 0.78rem; font-family: inherit; background: #fdfcfa; color: #1d1b1a; }
+      .tp-ed-field textarea { resize: vertical; min-height: 2.6rem; }
+      .tp-ed-row { display: flex; gap: 0.4rem; align-items: flex-end; margin-bottom: 0.45rem; }
+      .tp-ed-row .tp-ed-field { flex: 1; }
+      .tp-ed-card { border: 1px solid #f0ede7; border-radius: 6px; padding: 0.55rem; margin-bottom: 0.55rem;
+        display: flex; flex-direction: column; gap: 0.45rem; }
+      .tp-ed-del { align-self: flex-start; border: 1px solid #ecd6d6; background: #fff; color: #a0413c;
+        border-radius: 5px; font-size: 0.7rem; padding: 0.35rem 0.6rem; cursor: pointer; white-space: nowrap; font-family: inherit; }
+      .tp-ed-add { border: 1px dashed #d8d2c8; background: #fbfaf7; border-radius: 5px; font-size: 0.74rem;
+        padding: 0.45rem 0.7rem; cursor: pointer; width: 100%; font-family: inherit; }
+      .tp-ed-sub { font-size: 0.7rem; color: #8a847e; margin: 0.4rem 0 0.35rem; }
+      .tp-ed-color { display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; color: #8a847e; }
+      .tp-ed-color input { width: 42px; height: 26px; border: 1px solid #e3dfd8; border-radius: 4px; padding: 0; background: none; }
+      .tp-ed-chip { display: block; width: 100%; height: 14px; border-radius: 3px; border: 1px solid #eee; }
+      .tp-ed-size { display: flex; flex-direction: column; gap: 0.35rem; overflow-x: auto; }
+      .tp-ed-size-row { display: grid; grid-template-columns: minmax(120px, 1.8fr) repeat(6, minmax(48px, 1fr)) auto;
+        gap: 0.3rem; align-items: center; min-width: 540px; }
+      .tp-ed-size-row.head span { font-size: 0.66rem; color: #8a847e; text-align: center; }
+      .tp-ed-size-row input { padding: 0.35rem 0.3rem; text-align: center; }
+      .tp-ed-size-row input:first-child { text-align: left; }
+      @media (max-width: 980px) {
+        .tp-work.editing { grid-template-columns: 1fr; }
+        .tp-editor { position: static; max-height: none; }
       }
       .tp-img-miss { display: flex; align-items: center; justify-content: center; text-align: center;
         padding: 1rem; font-size: 0.72rem; color: #9a6b2f; background: #fdf8ef;
@@ -3268,8 +3205,6 @@ function StyleBlock() {
       .flat-group-title:first-child { margin-top: 0; }
       .tp-save-hint { font-size: 0.72rem; color: #888; margin: 0.4rem 0 0.9rem; line-height: 1.7; }
       .download-btn.secondary { background: transparent; border: 1px solid #d8d4cc; color: #555; }
-      .tp-page { background: #fff; border-radius: 6px; padding: 1.6rem 1.9rem; margin-bottom: 1.2rem; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-      .tp-page-body { min-height: 40px; }
 
       /* هيدر الصفحة — تخطيط النموذج الحرفي */
       .tp-hd { display: grid; grid-template-columns: 1.5fr 2fr 0.8fr; gap: 1rem; align-items: start; direction: ltr; }
