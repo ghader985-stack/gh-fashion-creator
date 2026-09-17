@@ -135,7 +135,7 @@ HEADER
 
 DESIGN DETAILS (designDetails): 6 to 8 lines, each at most 8 words, covering silhouette, neckline, sleeves, closure, lining, length and the signature details. Factory wording, no marketing words.
 
-GARMENT COLOURS (garmentColors): the 1 to 3 main colours of the GARMENT only, largest area first. Ignore skin, hair, shoes, jewellery, background and shadows. For each colour give a plain English name, a source, and a SMALL box (3 to 8 units each side) on that source image that lies completely inside a flat, evenly lit area of that colour — no seam, no embellishment, no shadow, no highlight.
+GARMENT COLOURS (garmentColors): EVERY distinct colour of the GARMENT itself (1 to 8), largest area first — including every shade of tulle, overlay, embroidery and trim that reads as its own colour. Do not stop at three, and do not merge two shades that a factory would dye separately. Ignore skin, hair, shoes, jewellery, background and shadows. For each colour give a plain English name, a source, and a SMALL box (3 to 8 units each side) on that source image that lies completely inside a flat, evenly lit area of that colour — no seam, no embellishment, no shadow, no highlight.
 
 FABRICS (fabrics): every textile of the garment, max 4, in this order: main fabric, contrast fabric, overlay / lace / tulle / illusion, lining.
 - role: "MAIN FABRIC", "CONTRAST FABRIC", "OVERLAY", "ILLUSION", "LACE" or "LINING".
@@ -233,7 +233,7 @@ function normalize(raw) {
     garmentType: str(o.garmentType),
     designDetails: list(o.designDetails).map(str).filter(Boolean).slice(0, 8),
     garmentColors: list(o.garmentColors).map((c) => ({ name: str(c && c.name), source: src(c && c.source), box: box(c && c.box) }))
-      .filter((c) => c.box.x2 > c.box.x1 && c.box.y2 > c.box.y1).slice(0, 3),
+      .filter((c) => c.box.x2 > c.box.x1 && c.box.y2 > c.box.y1).slice(0, 10),
     fabrics: list(o.fabrics).map((f) => ({
       role: str(f && f.role), name: str(f && f.name), composition: str(f && f.composition),
       weight: str(f && f.weight), colorName: str(f && f.colorName), hex: hex(f && f.hex),
