@@ -841,7 +841,7 @@ export default function Home() {
             {activeTab === 'techpack' && (
               <div className="tool">
                 <section className="card">
-                  <p className="card-hint">ارفعي صورة تصميمك الملوّنة والرسمات، وأضيفي مواصفات القماش. تُبنى لكِ ورقة تيك باك كاملة للمصنع، وتنزل كملف PDF قابل للتعديل.</p>
+                  <p className="card-hint">ارفعي صورة التصميم والرسمات الأربع ومواصفات القماش.</p>
                   <div className="field">
                     <label>صورة التصميم الملوّنة</label>
                     <div className="upload-area">
@@ -860,12 +860,6 @@ export default function Home() {
                   </div>
                   <div className="field">
                     <label>الرسمات — مطلوبة</label>
-                    <div className="tp-save-hint" style={{ margin: '0 0 0.7rem' }}>
-                      الأربع مطلوبة: التقنيتان تظهران في خانتي TECHNICAL FLAT و CONSTRUCTION DETAILS،
-                      والملوّنة الأمامية مصدر لقطات التفاصيل والأقمشة والتريمز مع صورة التصميم،
-                      والملوّنة الخلفية تظهر في خانة BACK VIEW.
-                      ارفعي رسماتك، أو نزّليها من قسم <strong>فلات سكتش (الرسمة التقنية)</strong> وارفعيها هنا.
-                    </div>
                     <div className="flat-upload-grid">
                       {[
                         ['الرسمة التقنية — أمامي', upLineFront, setUpLineFront, upLineFrontPrev, setUpLineFrontPrev],
@@ -939,10 +933,6 @@ export default function Home() {
                       <button onClick={() => setTpEditOpen((v) => !v)} className="download-btn secondary">
                         {tpEditOpen ? 'إغلاق التعديل' : 'تعديل الورقة'}
                       </button>
-                    </div>
-                    <div className="tp-save-hint">
-                      الملف نصّي: كل الكتابة فيه قابلة للنسخ والبحث والتعديل ببرامج PDF.
-                      وأي نص تقدرين تعدّليه من «تعديل الورقة» قبل الحفظ، والمعاينة تتحدّث مباشرة.
                     </div>
                     <div className={'tp-work' + (tpEditOpen ? ' editing' : '')}>
                       {tpEditOpen && <TechpackEditor sheet={techpack} onChange={setTechpack} />}
