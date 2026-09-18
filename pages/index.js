@@ -74,6 +74,17 @@ export default function Home() {
   const [studioResult, setStudioResult] = useState(null);
   const [studioError, setStudioError] = useState('');
 
+  // ===== تغيير الألوان (كلور تشنج) =====
+  const [ccPreview, setCcPreview] = useState('');
+  const [ccData, setCcData] = useState(null);
+  const [ccZones, setCcZones] = useState([]);
+  const [ccOpenZone, setCcOpenZone] = useState(-1);
+  const [ccLoading, setCcLoading] = useState(false);
+  const [ccStage, setCcStage] = useState('');
+  const [ccBusy, setCcBusy] = useState(false);
+  const [ccError, setCcError] = useState('');
+  const [ccResults, setCcResults] = useState([]);
+
   // ===== التيك باك =====
   const [tpImage, setTpImage] = useState(null);
   const [tpPreview, setTpPreview] = useState('');
@@ -162,20 +173,21 @@ export default function Home() {
       items: [
         { id: 'moodboard', name: 'المود بورد', num: '01', desc: 'لوحة الإلهام' },
         { id: 'studio', name: 'استوديو AI', num: '02', desc: 'توليد صورة القطعة' },
+        { id: 'color', name: 'تغيير الألوان', num: '03', desc: 'ألوان جديدة لأي منطقة' },
       ],
     },
     {
       label: 'الإنتاج',
       items: [
-        { id: 'flat', name: 'فلات سكتش (الرسمة التقنية)', num: '03', desc: 'رسمة تقنية بالأبيض والأسود' },
-        { id: 'techpack', name: 'التيك باك', num: '04', desc: 'الحزمة التقنية' },
+        { id: 'flat', name: 'فلات سكتش (الرسمة التقنية)', num: '04', desc: 'رسمة تقنية بالأبيض والأسود' },
+        { id: 'techpack', name: 'التيك باك', num: '05', desc: 'الحزمة التقنية' },
       ],
     },
     {
       label: 'التسويق',
       items: [
-        { id: 'marketing', name: 'المحتوى التسويقي', num: '05', desc: 'كابشنات وأفكار' },
-        { id: 'video', name: 'الفيديو', num: '06', desc: 'برومبتات سينمائية' },
+        { id: 'marketing', name: 'المحتوى التسويقي', num: '06', desc: 'كابشنات وأفكار' },
+        { id: 'video', name: 'الفيديو', num: '07', desc: 'برومبتات سينمائية' },
       ],
     },
   ];
@@ -363,6 +375,131 @@ export default function Home() {
       setFlatError('خطأ في الاتصال، حاولي مرة ثانية');
     }
     setFlatLoading(false);
+  };
+
+  // ===== تغيير الألوان =====
+  // كشف المناطق والتلوين يتمّان داخل المتصفح بلا أي تكلفة. الاستدعاء الوحيد
+  // هو تسمية المناطق، وإن فشل يكمل القسم بأسماء البانتون.
+  const handleCcImage = async (file) => {
+    if (!file) return;
+    if (!gate()) return;
+    setCcError('');
+    setCcZones([]);
+    setCcData(null);
+    setCcOpenZone(-1);
+    setCcPreview(URL.createObjectURL(file));
+    setCcLoading(true);
+    try {
+      setCcStage('جارٍ قراءة الصورة…');
+      const full = await tpFileToCanvas(file, CC_OUT_MAX);
+      const view = ccScaled(full, CC_VIEW_MAX);
+
+      setCcStage('جارٍ كشف مناطق الألوان…');
+      const det = ccDetectZones(view);
+      if (!det.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
+      const map = ccMasks(view, det.centers);
+      const maskCache = det.zones.map((z, i) => ccZoneMask(map, i));
+      setCcData({ full, view, map, centers: det.centers, maskCache });
+
+      let zones = det.zones.map((z, i) => ({
+        n: i + 1,
+        x: z.x,
+        y: z.y,
+        hex: z.hex,
+        share: Math.max(1, Math.round(z.share * 100)),
+        pantone: z.pantone,
+        name: z.pantoneName || z.hex,
+        where: '',
+        material: '',
+        part: 'other',
+        mode: 'keep',
+        target: z.hex,
+      }));
+      setCcZones(zones);
+
+      setCcStage('جارٍ تسمية المناطق…');
+      try {
+        const blob = await ccPinnedBlob(view, det.zones);
+        const fd = new FormData();
+        fd.append('image', blob, 'zones.jpg');
+        fd.append('zones', JSON.stringify(zones.map((z) => ({ number: z.n, hex: z.hex, share: z.share }))));
+        const r = await fetch('/api/colorzones', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (r.ok && Array.isArray(d.zones) && d.zones.length) {
+          zones = zones.map((z) => {
+            const m = d.zones.find((x) => x.number === z.n);
+            return m ? { ...z, name: m.name || z.name, where: m.where, material: m.material, part: m.part } : z;
+          });
+          setCcZones(zones);
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] colorzones', e && e.message);
+      }
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] colorchanger', e && e.message);
+      setCcError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
+      setCcData(null);
+    }
+    setCcLoading(false);
+    setCcStage('');
+  };
+
+  const ccSetZone = (i, patch) => {
+    setCcZones((list) => list.map((z, j) => (j === i ? { ...z, ...patch } : z)));
+  };
+
+  const ccChangedZones = ccZones.filter((z) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex);
+
+  // النتيجة النهائية بدقّة الصورة الكاملة، وتنزل PNG على جهاز المصممة مباشرة
+  const ccGenerate = async () => {
+    if (!ccData || !ccChangedZones.length) {
+      setCcError('اختاري لون جديد لمنطقة وحدة عالأقل');
+      return;
+    }
+    setCcError('');
+    setCcBusy(true);
+    try {
+      const changes = ccZones
+        .map((z, i) => ({ zone: i, hex: z.target, on: z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex }))
+        .filter((c) => c.on);
+      const fullMap = ccMasks(ccData.full, ccData.centers);
+      const out = ccRecolor(ccData.full, fullMap, ccData.centers, changes);
+      const rec = {
+        id: 'cc' + Date.now(),
+        createdAt: Date.now(),
+        url: out.toDataURL('image/png'),
+        thumb: ccScaled(out, 420).toDataURL('image/jpeg', 0.82),
+        summary: changes.map((c) => {
+          const pt = nearestPantone(c.hex);
+          return {
+            fromHex: ccZones[c.zone].hex,
+            fromName: ccZones[c.zone].name,
+            toHex: c.hex,
+            toName: pt ? pt.name : '',
+            toCode: pt ? pt.code : '',
+          };
+        }),
+      };
+      setCcResults((list) => [rec, ...list]);
+      ccDownload(rec);
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] cc generate', e && e.message);
+      setCcError('تعذّر إنشاء النتيجة، جرّبي مرة ثانية');
+    }
+    setCcBusy(false);
+  };
+
+  const ccDownload = (rec) => {
+    const a = document.createElement('a');
+    a.href = rec.url;
+    a.download = 'color-' + new Date(rec.createdAt).toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const ccRemove = (rec) => {
+    setCcResults((list) => list.filter((r) => r.id !== rec.id));
   };
 
   // ===== بناء ورقة التيك باك =====
@@ -838,6 +975,125 @@ export default function Home() {
               </div>
             )}
 
+            {activeTab === 'color' && (
+              <div className="tool">
+                <section className="card">
+                  <p className="card-hint">ارفعي صورة التصميم أو صورة القطعة المخيطة، وغيّري لون أي منطقة.</p>
+                  <div className="field">
+                    <label>الصورة</label>
+                    <div className="upload-area">
+                      {ccPreview ? (
+                        <div className="img-preview">
+                          <img src={ccPreview} alt="preview" />
+                          <button className="remove-img"
+                            onClick={() => { setCcPreview(''); setCcData(null); setCcZones([]); setCcError(''); }}>✕</button>
+                        </div>
+                      ) : (
+                        <label className="upload-label">
+                          <input type="file" accept="image/*" style={{ display: 'none' }}
+                            onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) handleCcImage(f); }} />
+                          <span>اضغطي لرفع الصورة</span>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  {ccError && <div className="err">{ccError}</div>}
+                </section>
+
+                {ccLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{ccStage || 'جارٍ التحضير…'}</p></div>}
+                {!ccLoading && !ccData && !ccPreview && <p className="placeholder">النتيجة رح تظهر هنا</p>}
+
+                {ccData && ccZones.length > 0 && (
+                  <div className="cc-work">
+                    <div className="cc-stage">
+                      <CcPreview data={ccData} zones={ccZones} showPins />
+                      <div className="cc-stage-note">الأرقام على الصورة هي نفس أرقام المناطق تحت</div>
+                    </div>
+
+                    <div className="cc-panel">
+                      <div className="cc-panel-head">مناطق الألوان — {ccZones.length}</div>
+                      {ccZones.map((z, i) => (
+                        <div className={'cc-zone' + (z.mode === 'change' ? ' on' : '')} key={'z' + i}>
+                          <div className="cc-zone-head">
+                            <span className="cc-zone-num">{z.n}</span>
+                            <span className="cc-chip lg" style={{ background: z.mode === 'change' ? z.target : z.hex }} />
+                            <div className="cc-zone-info">
+                              <div className="cc-zone-title">
+                                <strong>{z.name}</strong>
+                                <span className="cc-zone-hex" dir="ltr">{z.mode === 'change' ? z.target : z.hex}</span>
+                                {z.pantone && <span className="cc-zone-pt" dir="ltr">PANTONE {z.pantone}</span>}
+                              </div>
+                              <div className="cc-zone-where">
+                                {z.where || ('نسبة المساحة ' + z.share + '%')}
+                                {z.material ? ' · ' + z.material : ''}
+                                {z.part && z.part !== 'other' ? ' · ' + CC_PART_AR[z.part] : ''}
+                              </div>
+                            </div>
+                            <div className="cc-zone-actions">
+                              <button type="button" className={'cc-btn' + (z.mode === 'keep' ? ' active' : '')}
+                                onClick={() => { ccSetZone(i, { mode: 'keep' }); setCcOpenZone(-1); }}>متل ما هي</button>
+                              <button type="button" className={'cc-btn' + (z.mode === 'change' ? ' active' : '')}
+                                onClick={() => { ccSetZone(i, { mode: 'change' }); setCcOpenZone(ccOpenZone === i ? -1 : i); }}>غيّري اللون</button>
+                            </div>
+                          </div>
+                          {ccOpenZone === i && z.mode === 'change' && (
+                            <CcPicker value={z.target} onPick={(hex) => ccSetZone(i, { target: hex, mode: 'change' })} />
+                          )}
+                        </div>
+                      ))}
+
+                      {ccChangedZones.length > 0 && (
+                        <div className="cc-summary">
+                          <div className="cc-summary-head">ملخّص التغيير</div>
+                          {ccChangedZones.map((z) => {
+                            const pt = nearestPantone(z.target);
+                            return (
+                              <div className="cc-summary-row" key={'s' + z.n}>
+                                <span className="cc-chip" style={{ background: z.hex }} />
+                                <span className="cc-arrow">←</span>
+                                <span className="cc-chip" style={{ background: z.target }} />
+                                <span dir="ltr">{z.name} → {pt ? pt.name + ' ' + pt.code : z.target}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <button className="cta" onClick={ccGenerate} disabled={ccBusy || !ccChangedZones.length}>
+                        {ccBusy ? <><span className="spinner"></span> جارٍ التجهيز…</> : 'نزّلي النتيجة PNG'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {ccResults.length > 0 && (
+                  <section className="card cc-results">
+                    <div className="cc-panel-head">النتائج — {ccResults.length} · نزلت على جهازك</div>
+                    <div className="cc-results-grid">
+                      {ccResults.map((rec) => (
+                        <div className="cc-result" key={rec.id}>
+                          <img src={rec.thumb} alt="result" />
+                          <div className="cc-result-sum">
+                            {(rec.summary || []).map((s, j) => (
+                              <span className="cc-result-pair" key={j}>
+                                <span className="cc-chip sm" style={{ background: s.fromHex }} />
+                                <span className="cc-chip sm" style={{ background: s.toHex }} />
+                                <em dir="ltr">{s.toName || s.toHex}</em>
+                              </span>
+                            ))}
+                          </div>
+                          <div className="cc-result-actions">
+                            <button type="button" className="download-btn sm" onClick={() => ccDownload(rec)}>تنزيل مرة ثانية</button>
+                            <button type="button" className="tp-ed-del" onClick={() => ccRemove(rec)}>حذف</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
+
             {activeTab === 'techpack' && (
               <div className="tool">
                 <section className="card">
@@ -1287,6 +1543,498 @@ function clusterColors(points, k) {
   assign.forEach((a) => { counts[a]++; });
   return cents.map((c, i) => ({ rgb: c, share: counts[i] / points.length }))
     .filter((x) => x.share > 0.02).sort((a, b) => b.share - a.share);
+}
+
+// ============================================================================
+// ===== تغيير الألوان — محرّك إعادة التلوين =====
+// ============================================================================
+// لا توليد صور ولا استدعاء مدفوع للتلوين: الصورة تبقى صورة المصممة نفسها،
+// ونحن نبدّل درجة اللون داخل المنطقة المحددة فقط. الإضاءة والملمس والخرز
+// والظلال تبقى كما هي، واللون الناتج هو اللون المختار بالضبط.
+//
+// الخطوات: تجميع ألوان الصورة إلى مناطق (k-means في فضاء Lab) · ترقيم المناطق
+// على الصورة · تسمية كل منطقة باستدعاء واحد صغير · ثم التلوين الفوري في
+// المتصفح مع معاينة مباشرة، وحفظ النتائج في حساب المتصفح.
+// ============================================================================
+
+const CC_ANALYSIS_MAX = 260;   // دقة كشف المناطق
+const CC_VIEW_MAX = 1000;      // دقة المعاينة الحية
+const CC_OUT_MAX = 2200;       // دقة الصورة النهائية
+const CC_MAX_ZONES = 8;
+// وزن الإضاءة داخل المسافة اللونية: منخفض حتى لا تنقسم القطعة الواحدة إلى
+// مناطق حسب الظل والضوء — الظل والضوء لنفس اللون يبقيان منطقة واحدة.
+const CC_LW = 0.3;
+const CC_PART_AR = {
+  garment: 'قماش',
+  trim: 'تريم',
+  skin: 'بشرة',
+  hair: 'شعر أو حجاب',
+  background: 'خلفية',
+  other: 'غير محدد',
+};
+
+// ---------------------------------------------------------------------------
+// تحويلات الألوان
+// ---------------------------------------------------------------------------
+function ccLab2Rgb(L, a, b) {
+  const fy = (L + 16) / 116;
+  const fx = fy + a / 500;
+  const fz = fy - b / 200;
+  const f = (t) => (t > 0.206896552 ? t * t * t : (t - 16 / 116) / 7.787);
+  const X = 95.047 * f(fx);
+  const Y = 100.0 * f(fy);
+  const Z = 108.883 * f(fz);
+  const x = X / 100, y = Y / 100, z = Z / 100;
+  let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
+  let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
+  let bb = x * 0.0557 + y * -0.204 + z * 1.057;
+  const gam = (c) => {
+    const v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(v * 255)));
+  };
+  return [gam(r), gam(g), gam(bb)];
+}
+
+const ccHexRgb = (hex) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return [0, 0, 0];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+
+function ccRgbHsv(r, g, b) {
+  const rr = r / 255, gg = g / 255, bb = b / 255;
+  const mx = Math.max(rr, gg, bb), mn = Math.min(rr, gg, bb);
+  const d = mx - mn;
+  let h = 0;
+  if (d) {
+    if (mx === rr) h = ((gg - bb) / d + (gg < bb ? 6 : 0)) * 60;
+    else if (mx === gg) h = ((bb - rr) / d + 2) * 60;
+    else h = ((rr - gg) / d + 4) * 60;
+  }
+  return [h, mx ? d / mx : 0, mx];
+}
+
+function ccHsvRgb(h, s, v) {
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let p = [0, 0, 0];
+  if (h < 60) p = [c, x, 0];
+  else if (h < 120) p = [x, c, 0];
+  else if (h < 180) p = [0, c, x];
+  else if (h < 240) p = [0, x, c];
+  else if (h < 300) p = [x, 0, c];
+  else p = [c, 0, x];
+  return p.map((q) => Math.round((q + m) * 255));
+}
+
+// بحث البانتون بالكود أو الاسم أو الهيكس
+function ccPantoneSearch(q) {
+  const s = String(q || '').trim().toLowerCase();
+  if (s.length < 2) return [];
+  const hex = /^#?([0-9a-f]{6})$/i.exec(s);
+  if (hex) {
+    const near = nearestPantone('#' + hex[1]);
+    return near ? [{ code: near.code.replace(' TCX', ''), name: near.name, hex: near.hex }] : [];
+  }
+  const out = [];
+  for (const p of pantoneTable()) {
+    if (p.code.toLowerCase().includes(s) || p.name.toLowerCase().includes(s)) {
+      out.push(p);
+      if (out.length >= 24) break;
+    }
+  }
+  return out;
+}
+
+function ccNearestThree(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return [];
+  const lab = rgbToLab(ccHexRgb('#' + m[1]));
+  return pantoneTable()
+    .map((p) => ({
+      p,
+      d: Math.sqrt(Math.pow(lab[0] - p.lab[0], 2) + Math.pow(lab[1] - p.lab[1], 2) + Math.pow(lab[2] - p.lab[2], 2)),
+    }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 3)
+    .map((x) => x.p);
+}
+
+// ---------------------------------------------------------------------------
+// كشف المناطق
+// ---------------------------------------------------------------------------
+function ccScaled(src, maxSide) {
+  const k = Math.min(1, maxSide / Math.max(src.width, src.height));
+  if (k >= 1) return src;
+  const c = tpCanvas(src.width * k, src.height * k);
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  return c;
+}
+
+function ccLabBuffer(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const n = canvas.width * canvas.height;
+  const lab = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const L = rgbToLab([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]);
+    lab[i * 3] = L[0]; lab[i * 3 + 1] = L[1]; lab[i * 3 + 2] = L[2];
+  }
+  return lab;
+}
+
+const ccDist = (lab, i, c) => {
+  const dl = (lab[i * 3] - c[0]) * CC_LW;
+  const da = lab[i * 3 + 1] - c[1];
+  const db = lab[i * 3 + 2] - c[2];
+  return dl * dl + da * da + db * db;
+};
+
+function ccKmeans(lab, n, k, iters) {
+  const cent = [];
+  const step = Math.max(1, Math.floor(n / 600));
+  cent.push([lab[0], lab[1], lab[2]]);
+  while (cent.length < k) {
+    let far = 0, farD = -1;
+    for (let i = 0; i < n; i += step) {
+      let d = Infinity;
+      for (const c of cent) {
+        const dd = ccDist(lab, i, c);
+        if (dd < d) d = dd;
+      }
+      if (d > farD) { farD = d; far = i; }
+    }
+    cent.push([lab[far * 3], lab[far * 3 + 1], lab[far * 3 + 2]]);
+  }
+  const assign = new Uint8Array(n);
+  for (let it = 0; it < iters; it++) {
+    for (let i = 0; i < n; i++) {
+      let bi = 0, bd = Infinity;
+      for (let c = 0; c < cent.length; c++) {
+        const d = ccDist(lab, i, cent[c]);
+        if (d < bd) { bd = d; bi = c; }
+      }
+      assign[i] = bi;
+    }
+    const sums = cent.map(() => [0, 0, 0, 0]);
+    for (let i = 0; i < n; i++) {
+      const s = sums[assign[i]];
+      s[0] += lab[i * 3]; s[1] += lab[i * 3 + 1]; s[2] += lab[i * 3 + 2]; s[3]++;
+    }
+    sums.forEach((s, c) => { if (s[3]) cent[c] = [s[0] / s[3], s[1] / s[3], s[2] / s[3]]; });
+  }
+  return { cent, assign };
+}
+
+const ccDeltaE = (a, b) => Math.sqrt(
+  Math.pow((a[0] - b[0]) * CC_LW, 2) + Math.pow(a[1] - b[1], 2) + Math.pow(a[2] - b[2], 2));
+
+// المناطق: تجميع ألوان الصورة، دمج المتشابه، ثم ترتيبها بالمساحة
+function ccDetectZones(src) {
+  const small = ccScaled(src, CC_ANALYSIS_MAX);
+  const w = small.width, h = small.height, n = w * h;
+  const lab = ccLabBuffer(small);
+  const { cent, assign } = ccKmeans(lab, n, 10, 14);
+
+  // دمج المراكز المتقاربة لوناً
+  const map = cent.map((_, i) => i);
+  for (let i = 0; i < cent.length; i++) {
+    for (let j = 0; j < i; j++) {
+      if (map[j] === j && ccDeltaE(cent[i], cent[j]) < 11) { map[i] = j; break; }
+    }
+  }
+  const groups = new Map();
+  for (let i = 0; i < n; i++) {
+    const g = map[assign[i]];
+    let e = groups.get(g);
+    if (!e) { e = { count: 0, sum: [0, 0, 0], sx: 0, sy: 0 }; groups.set(g, e); }
+    e.count++;
+    e.sum[0] += lab[i * 3]; e.sum[1] += lab[i * 3 + 1]; e.sum[2] += lab[i * 3 + 2];
+    e.sx += i % w; e.sy += Math.floor(i / w);
+  }
+  const zones = [];
+  groups.forEach((e, g) => {
+    const share = e.count / n;
+    if (share < 0.012) return;
+    const mean = [e.sum[0] / e.count, e.sum[1] / e.count, e.sum[2] / e.count];
+    zones.push({ g, share, lab: mean, cx: e.sx / e.count, cy: e.sy / e.count });
+  });
+  zones.sort((a, b) => b.share - a.share);
+  const keep = zones.slice(0, CC_MAX_ZONES);
+
+  // علامة الرقم تُوضع على أقرب بكسل فعلي للمنطقة، لا على مركز حسابي قد يقع خارجها
+  keep.forEach((z) => {
+    let bx = z.cx, by = z.cy, bd = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (map[assign[i]] !== z.g) continue;
+      const x = i % w, y = Math.floor(i / w);
+      const d = Math.pow(x - z.cx, 2) + Math.pow(y - z.cy, 2);
+      if (d < bd) { bd = d; bx = x; by = y; }
+    }
+    z.x = bx / w;
+    z.y = by / h;
+    z.hex = toHex(ccLab2Rgb(z.lab[0], z.lab[1], z.lab[2]));
+    const pt = nearestPantone(z.hex);
+    z.pantone = pt ? pt.code : '';
+    z.pantoneName = pt ? pt.name : '';
+  });
+  return { centers: keep.map((z) => z.lab), zones: keep };
+}
+
+// خريطة انتماء كل بكسل لأقرب مركز، مع قناع ناعم الحواف لكل منطقة
+function ccMasks(canvas, centers) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  const n = canvas.width * canvas.height;
+  const lab = new Float32Array(n * 3);
+  const assign = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const L = rgbToLab([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]);
+    lab[i * 3] = L[0]; lab[i * 3 + 1] = L[1]; lab[i * 3 + 2] = L[2];
+    let bi = 0, bd = Infinity;
+    for (let c = 0; c < centers.length; c++) {
+      const dl = (L[0] - centers[c][0]) * CC_LW;
+      const da = L[1] - centers[c][1];
+      const db = L[2] - centers[c][2];
+      const dd = dl * dl + da * da + db * db;
+      if (dd < bd) { bd = dd; bi = c; }
+    }
+    assign[i] = bi;
+  }
+  ccDespeckle(assign, canvas.width, canvas.height, centers.length);
+  return { lab, assign, w: canvas.width, h: canvas.height };
+}
+
+// تصويت الجوار: يشيل النقاط المتناثرة داخل المنطقة فلا يطلع اللون مبقّع
+function ccDespeckle(assign, w, h, k) {
+  const src = assign.slice();
+  const counts = new Uint16Array(k);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      counts.fill(0);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) counts[src[(y + dy) * w + x + dx]]++;
+      }
+      let bi = src[y * w + x], bc = counts[bi];
+      for (let c = 0; c < k; c++) if (counts[c] > bc) { bc = counts[c]; bi = c; }
+      assign[y * w + x] = bi;
+    }
+  }
+}
+
+// تنعيم حواف القناع بمرور أفقي ورأسي بسيط
+function ccZoneMask(map, k) {
+  const { assign, w, h } = map;
+  const n = w * h;
+  const m = new Float32Array(n);
+  for (let i = 0; i < n; i++) m[i] = assign[i] === k ? 1 : 0;
+  const t = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const l = x > 0 ? m[i - 1] : m[i];
+      const r = x < w - 1 ? m[i + 1] : m[i];
+      t[i] = (l + m[i] * 2 + r) / 4;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const u = y > 0 ? t[i - w] : t[i];
+      const dn = y < h - 1 ? t[i + w] : t[i];
+      m[i] = (u + t[i] * 2 + dn) / 4;
+    }
+  }
+  return m;
+}
+
+// التلوين نفسه: تُحفظ الإضاءة وتفاوت التشبّع، ويُستبدل اللون
+function ccRecolor(canvas, map, centers, changes) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  const n = canvas.width * canvas.height;
+  const out = new Float32Array(map.lab);
+  let touched = false;
+
+  changes.forEach((ch) => {
+    const mask = ch.mask || ccZoneMask(map, ch.zone);
+    const src = centers[ch.zone];
+    const t = rgbToLab(ccHexRgb(ch.hex));
+    const srcC = Math.max(Math.sqrt(src[1] * src[1] + src[2] * src[2]), 0.001);
+    touched = true;
+    for (let i = 0; i < n; i++) {
+      const w = mask[i];
+      if (w < 0.004) continue;
+      const L = map.lab[i * 3];
+      const a = map.lab[i * 3 + 1];
+      const b = map.lab[i * 3 + 2];
+      const chroma = Math.sqrt(a * a + b * b);
+      const ratio = Math.max(0.35, Math.min(1.6, chroma / srcC));
+      const mix = 0.9 * ratio + 0.1;
+      const nl = Math.max(0, Math.min(100, t[0] + (L - src[0])));
+      out[i * 3] = out[i * 3] * (1 - w) + nl * w;
+      out[i * 3 + 1] = out[i * 3 + 1] * (1 - w) + t[1] * mix * w;
+      out[i * 3 + 2] = out[i * 3 + 2] * (1 - w) + t[2] * mix * w;
+    }
+  });
+
+  if (!touched) return null;
+  for (let i = 0; i < n; i++) {
+    const rgb = ccLab2Rgb(out[i * 3], out[i * 3 + 1], out[i * 3 + 2]);
+    d[i * 4] = rgb[0]; d[i * 4 + 1] = rgb[1]; d[i * 4 + 2] = rgb[2];
+  }
+  const res = tpCanvas(canvas.width, canvas.height);
+  res.getContext('2d').putImageData(img, 0, 0);
+  return res;
+}
+
+// صورة مرقّمة تُرسل للتسمية
+function ccPinnedBlob(view, zones) {
+  const c = tpCanvas(view.width, view.height);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(view, 0, 0);
+  const r = Math.max(13, Math.round(Math.min(c.width, c.height) * 0.028));
+  ctx.font = '700 ' + Math.round(r * 1.15) + 'px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  zones.forEach((z, i) => {
+    const x = z.x * c.width;
+    const y = z.y * c.height;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.94)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#111';
+    ctx.stroke();
+    ctx.fillStyle = '#111';
+    ctx.fillText(String(i + 1), x, y + 1);
+  });
+  return new Promise((resolve, reject) => {
+    c.toBlob((b) => (b ? resolve(b) : reject(new Error('pin'))), 'image/jpeg', 0.86);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// منتقي اللون: مربّع تشبّع/إضاءة + شريط الدرجة + بحث بانتون + أقرب ثلاثة
+// ---------------------------------------------------------------------------
+function CcPicker({ value, onPick }) {
+  const [hsv, setHsv] = useState(() => ccRgbHsv(...ccHexRgb(value || '#7a5c46')));
+  const [q, setQ] = useState('');
+  const box = useRef(null);
+  const hexNow = toHex(ccHsvRgb(hsv[0], hsv[1], hsv[2]));
+  const results = ccPantoneSearch(q);
+  const near = ccNearestThree(hexNow);
+
+  const apply = (next) => {
+    setHsv(next);
+    onPick(toHex(ccHsvRgb(next[0], next[1], next[2])));
+  };
+  const fromPoint = (e) => {
+    const el = box.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const px = 'touches' in e && e.touches.length ? e.touches[0].clientX : e.clientX;
+    const py = 'touches' in e && e.touches.length ? e.touches[0].clientY : e.clientY;
+    const s = Math.max(0, Math.min(1, (px - r.left) / r.width));
+    const v = 1 - Math.max(0, Math.min(1, (py - r.top) / r.height));
+    apply([hsv[0], s, v]);
+  };
+  const pickHex = (hex) => {
+    setHsv(ccRgbHsv(...ccHexRgb(hex)));
+    onPick(hex.toUpperCase());
+  };
+
+  return (
+    <div className="cc-picker">
+      <input className="cc-search" type="text" dir="ltr" value={q} onChange={(e) => setQ(e.target.value)}
+        placeholder="ابحثي: 19-1652 · Rhubarb · #6B1428" />
+      {results.length > 0 && (
+        <div className="cc-search-list">
+          {results.map((p) => (
+            <button type="button" key={p.code} className="cc-search-row" onClick={() => { pickHex(p.hex); setQ(''); }}>
+              <span className="cc-chip" style={{ background: p.hex }} />
+              <span className="cc-code">{p.code}</span>
+              <span className="cc-name">{p.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="cc-picker-main">
+        <div className="cc-sv" ref={box}
+          style={{ background: 'linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ' + toHex(ccHsvRgb(hsv[0], 1, 1)) + ')' }}
+          onMouseDown={(e) => { fromPoint(e); const mv = (ev) => fromPoint(ev); const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); }; window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); }}
+          onTouchStart={fromPoint} onTouchMove={fromPoint}>
+          <span className="cc-sv-dot" style={{ left: hsv[1] * 100 + '%', top: (1 - hsv[2]) * 100 + '%' }} />
+        </div>
+        <div className="cc-picker-side">
+          <input className="cc-hue" type="range" min="0" max="359" value={Math.round(hsv[0])}
+            onChange={(e) => apply([Number(e.target.value), hsv[1], hsv[2]])} />
+          <div className="cc-hex-row">
+            <span className="cc-chip lg" style={{ background: hexNow }} />
+            <input className="cc-hex" type="text" dir="ltr" value={hexNow}
+              onChange={(e) => { const v = e.target.value.trim(); if (/^#?[0-9a-f]{6}$/i.test(v)) pickHex(v[0] === '#' ? v : '#' + v); }} />
+          </div>
+          <div className="cc-near">
+            <span>أقرب بانتون</span>
+            <div className="cc-near-row">
+              {near.map((p) => (
+                <button type="button" key={p.code} className="cc-near-item" onClick={() => pickHex(p.hex)}>
+                  <span className="cc-near-sw" style={{ background: p.hex }} />
+                  <strong>{p.code}</strong>
+                  <em>{p.name}</em>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// معاينة حية: الصورة بعد التلوين مع أرقام المناطق
+function CcPreview({ data, zones, showPins }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!data || !ref.current) return;
+    const changes = zones
+      .map((z, i) => ({ zone: i, hex: z.target, on: z.mode === 'change' && tpHexOk(z.target) }))
+      .filter((c) => c.on)
+      .map((c) => ({ zone: c.zone, hex: c.hex, mask: data.maskCache[c.zone] }));
+    const out = changes.length ? ccRecolor(data.view, data.map, data.centers, changes) : data.view;
+    const c = ref.current;
+    c.width = data.view.width;
+    c.height = data.view.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(out, 0, 0);
+    if (showPins) {
+      const r = Math.max(12, Math.round(Math.min(c.width, c.height) * 0.026));
+      ctx.font = '700 ' + Math.round(r * 1.1) + 'px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      zones.forEach((z, i) => {
+        const x = z.x * c.width;
+        const y = z.y * c.height;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = z.mode === 'change' ? '#1d7a4c' : '#111';
+        ctx.stroke();
+        ctx.fillStyle = '#111';
+        ctx.fillText(String(i + 1), x, y + 1);
+      });
+    }
+  }, [data, zones, showPins]);
+  return <canvas ref={ref} className="cc-canvas" />;
 }
 
 // ============================================================================
@@ -3300,6 +4048,67 @@ function StyleBlock() {
 
       /* صفحة مستقلة لكل قسم */
 
+
+      /* ===== تغيير الألوان ===== */
+      .cc-work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 440px); gap: 1.2rem; align-items: start; }
+      .cc-stage { background: #efedea; border-radius: 10px; padding: 0.9rem; }
+      .cc-canvas { display: block; width: 100%; height: auto; border-radius: 6px; background: #fff; }
+      .cc-stage-note { text-align: center; font-size: 0.72rem; color: var(--ink-soft); margin-top: 0.5rem; }
+      .cc-panel { display: flex; flex-direction: column; gap: 0.6rem; }
+      .cc-panel-head { font-size: 0.82rem; font-weight: 700; color: var(--ink); }
+      .cc-zone { border: 1px solid #ece9e4; border-radius: 8px; padding: 0.6rem; background: #fff; }
+      .cc-zone.on { border-color: #bcd8c6; background: #f7fbf8; }
+      .cc-zone-head { display: flex; align-items: flex-start; gap: 0.55rem; }
+      .cc-zone-num { width: 20px; height: 20px; border-radius: 50%; background: #1d1b1a; color: #fff;
+        font-size: 0.7rem; display: flex; align-items: center; justify-content: center; flex: none; }
+      .cc-chip { display: inline-block; width: 18px; height: 18px; border-radius: 4px; border: 1px solid #ddd8d1; flex: none; }
+      .cc-chip.lg { width: 34px; height: 34px; border-radius: 6px; }
+      .cc-chip.sm { width: 12px; height: 12px; border-radius: 3px; }
+      .cc-zone-info { flex: 1; min-width: 0; }
+      .cc-zone-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
+      .cc-zone-hex, .cc-zone-pt { font-size: 0.68rem; color: var(--ink-soft); background: #f4f2ef; border-radius: 4px; padding: 0.1rem 0.35rem; }
+      .cc-zone-where { font-size: 0.7rem; color: var(--ink-soft); margin-top: 0.2rem; }
+      .cc-zone-actions { display: flex; flex-direction: column; gap: 0.3rem; flex: none; }
+      .cc-btn { border: 1px solid #e3dfd8; background: #fff; border-radius: 6px; font-size: 0.72rem;
+        padding: 0.35rem 0.6rem; cursor: pointer; font-family: inherit; white-space: nowrap; }
+      .cc-btn.active { background: #1d1b1a; color: #fff; border-color: #1d1b1a; }
+      .cc-picker { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 0.5rem; }
+      .cc-search, .cc-hex { width: 100%; box-sizing: border-box; border: 1px solid #e3dfd8; border-radius: 6px;
+        padding: 0.4rem 0.55rem; font-size: 0.76rem; font-family: inherit; background: #fdfcfa; }
+      .cc-search-list { max-height: 160px; overflow-y: auto; border: 1px solid #ece9e4; border-radius: 6px; }
+      .cc-search-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; border: 0; background: #fff;
+        padding: 0.35rem 0.5rem; cursor: pointer; font-family: inherit; font-size: 0.74rem; text-align: right; }
+      .cc-search-row:hover { background: #f7f5f2; }
+      .cc-code { direction: ltr; font-weight: 700; }
+      .cc-name { direction: ltr; color: var(--ink-soft); }
+      .cc-picker-main { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(150px, 1.2fr); gap: 0.6rem; }
+      .cc-sv { position: relative; height: 130px; border-radius: 6px; cursor: crosshair; touch-action: none; }
+      .cc-sv-dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff;
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.4); transform: translate(-50%, -50%); pointer-events: none; }
+      .cc-picker-side { display: flex; flex-direction: column; gap: 0.45rem; }
+      .cc-hue { width: 100%; }
+      .cc-hex-row { display: flex; align-items: center; gap: 0.45rem; }
+      .cc-near { font-size: 0.68rem; color: var(--ink-soft); }
+      .cc-near-row { display: flex; gap: 0.35rem; margin-top: 0.25rem; }
+      .cc-near-item { flex: 1; min-width: 0; border: 1px solid #ece9e4; border-radius: 6px; background: #fff;
+        padding: 0.3rem; cursor: pointer; font-family: inherit; display: flex; flex-direction: column; gap: 0.15rem; }
+      .cc-near-sw { display: block; height: 22px; border-radius: 4px; }
+      .cc-near-item strong { font-size: 0.64rem; direction: ltr; }
+      .cc-near-item em { font-size: 0.6rem; font-style: normal; color: var(--ink-soft); direction: ltr;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .cc-summary { border: 1px solid #ece9e4; border-radius: 8px; padding: 0.6rem; background: #fff; }
+      .cc-summary-head { font-size: 0.76rem; font-weight: 700; margin-bottom: 0.4rem; }
+      .cc-summary-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.74rem; margin-bottom: 0.25rem; }
+      .cc-arrow { color: var(--ink-soft); }
+      .cc-results { margin-top: 1.2rem; }
+      .cc-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.9rem; margin-top: 0.7rem; }
+      .cc-result { border: 1px solid #ece9e4; border-radius: 8px; overflow: hidden; background: #fff; display: flex; flex-direction: column; }
+      .cc-result img { width: 100%; display: block; }
+      .cc-result-sum { display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0.5rem; }
+      .cc-result-pair { display: flex; align-items: center; gap: 0.2rem; font-size: 0.66rem; color: var(--ink-soft); }
+      .cc-result-actions { display: flex; gap: 0.4rem; padding: 0 0.5rem 0.5rem; }
+      .download-btn.sm { padding: 0.4rem 0.7rem; font-size: 0.74rem; }
+      @media (max-width: 980px) { .cc-work { grid-template-columns: 1fr; } }
 
       /* ===== ورقة التيك باك: معاينة كانفاس + لوحة تعديل ===== */
       .tp-work { display: block; }
