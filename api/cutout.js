@@ -15,7 +15,8 @@ export const config = {
   maxDuration: 120,
 };
 
-const MODEL = 'bria/rmbg-2.0';
+// النموذج الأساسي وأدقّهم على الحواف، والاحتياطي أرخص ويشتغل إن تعذّر الأول
+const MODELS = ['bria/remove-background', '851-labs/background-remover'];
 const CALL_TIMEOUT_MS = 90000;
 
 const pickFile = (f) => (Array.isArray(f) ? f[0] : f) || null;
@@ -55,34 +56,41 @@ export default async function handler(req, res) {
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), CALL_TIMEOUT_MS);
+  let lastStatus = 0;
 
   try {
-    const r = await fetch('https://api.replicate.com/v1/models/' + MODEL + '/predictions', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + token,
-        'Content-Type': 'application/json',
-        Prefer: 'wait',
-      },
-      signal: ctrl.signal,
-      body: JSON.stringify({ input: { image: dataUri } }),
-    });
+    for (const model of MODELS) {
+      const r = await fetch('https://api.replicate.com/v1/models/' + model + '/predictions', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + token,
+          'Content-Type': 'application/json',
+          Prefer: 'wait',
+        },
+        signal: ctrl.signal,
+        body: JSON.stringify({ input: { image: dataUri } }),
+      });
+
+      if (!r.ok) {
+        lastStatus = r.status;
+        let detail = '';
+        try { detail = (await r.text()).slice(0, 300); } catch (e) { detail = ''; }
+        if (typeof console !== 'undefined') console.warn('[gh] cutout status', model, r.status, detail);
+        continue;
+      }
+
+      const data = await r.json();
+      const out = Array.isArray(data.output) ? data.output[0] : data.output;
+      if (!out || typeof out !== 'string') {
+        lastStatus = 502;
+        if (typeof console !== 'undefined') console.warn('[gh] cutout output', model, data && data.status, data && data.error);
+        continue;
+      }
+      clearTimeout(timer);
+      return res.status(200).json({ url: out, model });
+    }
     clearTimeout(timer);
-
-    if (!r.ok) {
-      let detail = '';
-      try { detail = (await r.text()).slice(0, 300); } catch (e) { detail = ''; }
-      if (typeof console !== 'undefined') console.warn('[gh] cutout status', r.status, detail);
-      return res.status(502).json({ error: 'تعذّر عزل القطعة (' + r.status + ')' });
-    }
-
-    const data = await r.json();
-    const out = Array.isArray(data.output) ? data.output[0] : data.output;
-    if (!out || typeof out !== 'string') {
-      if (typeof console !== 'undefined') console.warn('[gh] cutout output', data && data.status, data && data.error);
-      return res.status(502).json({ error: 'تعذّر عزل القطعة' });
-    }
-    return res.status(200).json({ url: out });
+    return res.status(502).json({ error: 'تعذّر عزل القطعة (' + (lastStatus || 502) + ')' });
   } catch (e) {
     clearTimeout(timer);
     const aborted = e && e.name === 'AbortError';
