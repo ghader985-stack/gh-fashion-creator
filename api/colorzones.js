@@ -33,9 +33,17 @@ const getField = (f) => String((Array.isArray(f) ? f[0] : f) || '').trim();
 const pickFile = (f) => (Array.isArray(f) ? f[0] : f) || null;
 const str = (v) => (typeof v === 'string' ? v.trim() : '');
 
+const BOX = {
+  type: 'object',
+  properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } },
+  required: ['x1', 'y1', 'x2', 'y2'],
+  additionalProperties: false,
+};
+
 const SCHEMA = {
   type: 'object',
   properties: {
+    product: BOX,
     zones: {
       type: 'array',
       items: {
@@ -52,7 +60,7 @@ const SCHEMA = {
       },
     },
   },
-  required: ['zones'],
+  required: ['product', 'zones'],
   additionalProperties: false,
 };
 
@@ -68,6 +76,11 @@ For every number return:
 - where: where that colour sits on the product, 2 to 6 words, listing the real parts ("outer wrap panel, waistband, belt loops", "inner skirt layer and ruffle", "floral embroidery on front panel"). If it is not part of the product, say what it is ("studio background", "model's skin", "model's hair").
 - material: the material of that area in 1 to 4 words ("denim fabric", "beaded mesh", "silk tulle", "metal hardware", "embroidery thread"). Empty string if it is not a material.
 - part: garment for fabric areas of the piece, trim for zippers, buttons, beads, piping, embroidery and hardware, skin for the model's skin, hair for hair or a headscarf worn only as styling, background for the backdrop or floor, other for anything else.
+
+Also return product: the box around the product itself (the garment or item), in percent of the image:
+x1 and x2 from the left edge, y1 and y2 from the top edge, 0 to 100. Include every part of the garment
+including train, sleeves and any part that extends outward — but nothing of the background, furniture or
+flowers. If the garment fills the frame, return 0, 0, 100, 100.
 
 Return one entry per number, in the same order. Answer in English only.`;
 }
@@ -128,7 +141,7 @@ export default async function handler(req, res) {
           role: 'user',
           content: content.concat([{
             type: 'text',
-            text: 'Return ONLY one JSON object, no markdown: {"zones":[{"number":1,"name":"","where":"","material":"","part":"garment"}]}',
+            text: 'Return ONLY one JSON object, no markdown: {"product":{"x1":0,"y1":0,"x2":100,"y2":100},"zones":[{"number":1,"name":"","where":"","material":"","part":"garment"}]}',
           }]),
         }];
       }
@@ -171,6 +184,15 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'تعذّرت قراءة أسماء المناطق' });
   }
 
+  const num = (v, d) => (Number.isFinite(+v) ? Math.max(0, Math.min(100, +v)) : d);
+  const pb = (parsed && parsed.product) || {};
+  const product = {
+    x1: Math.min(num(pb.x1, 0), num(pb.x2, 100)),
+    y1: Math.min(num(pb.y1, 0), num(pb.y2, 100)),
+    x2: Math.max(num(pb.x1, 0), num(pb.x2, 100)),
+    y2: Math.max(num(pb.y1, 0), num(pb.y2, 100)),
+  };
+
   const out = (Array.isArray(parsed && parsed.zones) ? parsed.zones : []).map((z, i) => ({
     number: Number(z && z.number) || i + 1,
     name: str(z && z.name),
@@ -179,5 +201,5 @@ export default async function handler(req, res) {
     part: PART_ENUM.includes(str(z && z.part).toLowerCase()) ? str(z.part).toLowerCase() : 'other',
   }));
 
-  return res.status(200).json({ zones: out });
+  return res.status(200).json({ product, zones: out });
 }
