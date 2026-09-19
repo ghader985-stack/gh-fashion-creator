@@ -451,10 +451,20 @@ export default function Home() {
         fd.append('zones', JSON.stringify(zones.map((z) => ({ number: z.n, hex: z.hex, share: z.share }))));
         const r = await fetch('/api/colorzones', { method: 'POST', body: fd });
         const d = await r.json();
-        if (r.ok && d.product && !subject) {
-          map.box = d.product;
-          setCcData({ full, view, map, centers: det.centers, box: d.product,
-            maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers)) });
+        const headBox = d.head && d.head.x2 > d.head.x1 && d.head.y2 > d.head.y1 ? d.head : null;
+        if (r.ok && (headBox || (d.product && !subject))) {
+          if (headBox) map.headBox = headBox;
+          if (d.product && !subject) map.box = d.product;
+          setCcData((prev) => ({
+            full,
+            view,
+            map,
+            centers: det.centers,
+            headBox,
+            box: d.product && !subject ? d.product : null,
+            cutoutUrl: (prev && prev.cutoutUrl) || null,
+            maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers)),
+          }));
         }
         if (r.ok && Array.isArray(d.zones) && d.zones.length) {
           // الاسم يبقى اسم البانتون المحسوب من البكسل نفسه — أدقّ من التسمية بالنظر
@@ -507,6 +517,7 @@ export default function Home() {
       const fullMap = ccMasks(ccData.full, ccData.centers);
       fullMap.box = ccData.box || null;
       fullMap.hairIsGarment = ccHairOn;
+      fullMap.headBox = ccData.headBox || null;
       if (ccData.cutoutUrl) {
         fullMap.subject = await ccSubjectMask(ccData.cutoutUrl, ccData.full.width, ccData.full.height);
       }
@@ -1069,11 +1080,7 @@ export default function Home() {
                                 <span className="cc-zone-hex" dir="ltr">{z.mode === 'change' ? z.target : z.hex}</span>
                                 {z.pantone && <span className="cc-zone-pt" dir="ltr">PANTONE {z.pantone}</span>}
                               </div>
-                              <div className="cc-zone-where">
-                                {z.where || ('نسبة المساحة ' + z.share + '%')}
-                                {z.material ? ' · ' + z.material : ''}
-                                {z.part && z.part !== 'other' ? ' · ' + CC_PART_AR[z.part] : ''}
-                              </div>
+                              <div className="cc-zone-where">نسبة المساحة {z.share}%</div>
                             </div>
                             <div className="cc-zone-actions">
                               <button type="button" className={'cc-btn' + (z.mode === 'keep' ? ' active' : '')}
@@ -1585,14 +1592,6 @@ const CC_MAX_ZONES = 8;
 // وزن الإضاءة داخل المسافة اللونية: منخفض حتى لا تنقسم القطعة الواحدة إلى
 // مناطق حسب الظل والضوء — الظل والضوء لنفس اللون يبقيان منطقة واحدة.
 const CC_LW = 0.18;
-const CC_PART_AR = {
-  garment: 'قماش',
-  trim: 'تريم',
-  skin: 'بشرة',
-  hair: 'شعر أو حجاب',
-  background: 'خلفية',
-  other: 'غير محدد',
-};
 
 // ---------------------------------------------------------------------------
 // تحويلات الألوان
@@ -1806,57 +1805,6 @@ function ccDetectZones(src) {
   return { centers: keep.map((z) => z.lab), zones: keep };
 }
 
-// منطقة الرأس: أكبر بقعة بشرة في أعلى الصورة هي الوجه، وما حولها شعر
-function ccHeadMask(skin, w, h) {
-  const n = w * h;
-  const seen = new Uint8Array(n);
-  const stack = new Int32Array(n);
-  let best = null;
-  const limit = Math.floor(h * 0.6);
-  for (let start = 0; start < limit * w; start++) {
-    if (seen[start] || !skin[start]) continue;
-    let top = 0, len = 0;
-    let x1 = w, x2 = 0, y1 = h, y2 = 0;
-    stack[top++] = start;
-    seen[start] = 1;
-    while (top > 0) {
-      const i = stack[--top];
-      const x = i % w;
-      const y = (i - x) / w;
-      len++;
-      if (x < x1) x1 = x;
-      if (x > x2) x2 = x;
-      if (y < y1) y1 = y;
-      if (y > y2) y2 = y;
-      if (x > 0 && !seen[i - 1] && skin[i - 1]) { seen[i - 1] = 1; stack[top++] = i - 1; }
-      if (x < w - 1 && !seen[i + 1] && skin[i + 1]) { seen[i + 1] = 1; stack[top++] = i + 1; }
-      if (y > 0 && !seen[i - w] && skin[i - w]) { seen[i - w] = 1; stack[top++] = i - w; }
-      if (y < h - 1 && !seen[i + w] && skin[i + w]) { seen[i + w] = 1; stack[top++] = i + w; }
-    }
-    // الوجه بقعة صغيرة في الأعلى، لا الجسم كله: الأكبر من ذلك يُستبعد
-    const bw = x2 - x1 + 1;
-    const bh = y2 - y1 + 1;
-    if (bw > w * 0.3 || bh > h * 0.3) continue;
-    if (!best || len > best.len) best = { len, x1, x2, y1, y2 };
-  }
-  if (!best || best.len < n * 0.0015) return null;
-  const fw = best.x2 - best.x1 + 1;
-  const fh = best.y2 - best.y1 + 1;
-  const cx = (best.x1 + best.x2) / 2;
-  const cy = (best.y1 + best.y2) / 2 - fh * 0.42;
-  const rx = Math.min(fw * 1.7, w * 0.25);
-  const ry = Math.min(fh * 1.95, h * 0.22);
-  const head = new Uint8Array(n);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const dx = (x - cx) / rx;
-      const dy = (y - cy) / ry;
-      if (dx * dx + dy * dy <= 1) head[y * w + x] = 1;
-    }
-  }
-  return head;
-}
-
 // قناع القطعة: يُقرأ من شفافية صورة العزل، ويُمدّد على مقاس أي كانفاس
 async function ccSubjectMask(url, w, h) {
   const img = await tpLoadImage(proxied(url));
@@ -1929,8 +1877,7 @@ function ccMasks(canvas, centers) {
   }
   ccDespeckle(assign, canvas.width, canvas.height, centers.length);
   const bg = ccBackgroundMask(lab, canvas.width, canvas.height);
-  const head = ccHeadMask(skin, canvas.width, canvas.height);
-  return { lab, assign, skin, bg, head, w: canvas.width, h: canvas.height };
+  return { lab, assign, skin, bg, w: canvas.width, h: canvas.height };
 }
 
 // تصويت الجوار: يشيل النقاط المتناثرة داخل المنطقة فلا يطلع اللون مبقّع
@@ -1952,7 +1899,7 @@ function ccDespeckle(assign, w, h, k) {
 
 // تنعيم حواف القناع بمرور أفقي ورأسي بسيط
 function ccZoneMask(map, k, centerLab, centers) {
-  const { assign, skin, bg, head, hairIsGarment, box, subject, lab, w, h } = map;
+  const { assign, skin, bg, headBox, hairIsGarment, box, subject, lab, w, h } = map;
   const n = w * h;
   const m = new Float32Array(n);
   // انتماء متدرّج لكل بكسل: القماش المتدرّج يأخذ اللون بتدرّج مماثل،
@@ -1971,6 +1918,10 @@ function ccZoneMask(map, k, centerLab, centers) {
     bgZone = inZone > 0 && inBg / inZone > 0.6;
   }
   // خارج إطار القطعة لا يُلوَّن شيء: الجدران والأثاث والزهور تبقى كما هي
+  const hbx1 = headBox ? Math.floor((headBox.x1 / 100) * w) : 0;
+  const hbx2 = headBox ? Math.ceil((headBox.x2 / 100) * w) : 0;
+  const hby1 = headBox ? Math.floor((headBox.y1 / 100) * h) : 0;
+  const hby2 = headBox ? Math.ceil((headBox.y2 / 100) * h) : 0;
   const bx1 = box ? Math.floor((box.x1 / 100) * w) : 0;
   const bx2 = box ? Math.ceil((box.x2 / 100) * w) : w;
   const by1 = box ? Math.floor((box.y1 / 100) * h) : 0;
@@ -1998,7 +1949,11 @@ function ccZoneMask(map, k, centerLab, centers) {
     if (base === 0) { m[i] = 0; continue; }
     if (skin && skin[i]) { m[i] = 0; continue; }
     // الشعر لا يتلوّن إلا إذا اختارت المصممة أن غطاء الرأس جزء من التصميم
-    if (head && head[i] && !hairIsGarment) { m[i] = 0; continue; }
+    if (headBox && !hairIsGarment) {
+      const hx = i % w;
+      const hy = (i - hx) / w;
+      if (hx >= hbx1 && hx <= hbx2 && hy >= hby1 && hy <= hby2) { m[i] = 0; continue; }
+    }
     // القطعة معزولة: كل ما خارجها لا يُلمس، والحواف تأخذ شفافية العزل نفسها
     if (subject) { m[i] = subject[i] * base; continue; }
     if (bg && bg[i] && !bgZone) { m[i] = 0; continue; }
