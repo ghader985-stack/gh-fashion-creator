@@ -396,12 +396,35 @@ export default function Home() {
       const full = await tpFileToCanvas(file, CC_OUT_MAX);
       const view = ccScaled(full, CC_VIEW_MAX);
 
+      setCcStage('جارٍ عزل القطعة عن الخلفية…');
+      let subject = null;
+      let cutoutUrl = null;
+      try {
+        const cut = await new Promise((resolve, reject) => {
+          view.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), 'image/jpeg', 0.9);
+        });
+        const fdc = new FormData();
+        fdc.append('image', cut, 'cutout.jpg');
+        const rc = await fetch('/api/cutout', { method: 'POST', body: fdc });
+        const dc = await rc.json();
+        if (rc.ok && dc.url) {
+          cutoutUrl = dc.url;
+          subject = await ccSubjectMask(dc.url, view.width, view.height);
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] cutout', e && e.message);
+      }
+      if (!subject) {
+        setCcWarn('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
+      }
+
       setCcStage('جارٍ كشف مناطق الألوان…');
-      const det = ccDetectZones(view);
+      const det = ccDetectZones(view, subject, view.width, view.height);
       if (!det.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
       const map = ccMasks(view, det.centers);
+      if (subject) map.subject = subject;
       const maskCache = det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers));
-      setCcData({ full, view, map, centers: det.centers, maskCache });
+      setCcData({ full, view, map, centers: det.centers, cutoutUrl, maskCache });
 
       let zones = det.zones.map((z, i) => ({
         n: i + 1,
@@ -418,30 +441,6 @@ export default function Home() {
         target: z.hex,
       }));
       setCcZones(zones);
-
-      setCcStage('جارٍ عزل القطعة عن الخلفية…');
-      let subject = null;
-      try {
-        const cut = await new Promise((resolve, reject) => {
-          view.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), 'image/jpeg', 0.9);
-        });
-        const fdc = new FormData();
-        fdc.append('image', cut, 'cutout.jpg');
-        const rc = await fetch('/api/cutout', { method: 'POST', body: fdc });
-        const dc = await rc.json();
-        if (rc.ok && dc.url) {
-          subject = await ccSubjectMask(dc.url, view.width, view.height);
-          map.subject = subject;
-          setCcData({ full, view, map, centers: det.centers, cutoutUrl: dc.url,
-            maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers)) });
-        }
-        if (!subject) {
-          setCcWarn('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
-        }
-      } catch (e) {
-        if (typeof console !== 'undefined') console.warn('[gh] cutout', e && e.message);
-        setCcWarn('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
-      }
 
       setCcStage('جارٍ تسمية المناطق…');
       try {
@@ -1714,13 +1713,16 @@ const ccDist = (lab, i, c) => {
   return dl * dl + da * da + db * db;
 };
 
-function ccKmeans(lab, n, k, iters) {
+function ccKmeans(lab, n, k, iters, inside) {
   const cent = [];
   const step = Math.max(1, Math.floor(n / 600));
-  cent.push([lab[0], lab[1], lab[2]]);
+  let seed = 0;
+  if (inside) { while (seed < n && !inside[seed]) seed++; if (seed >= n) seed = 0; }
+  cent.push([lab[seed * 3], lab[seed * 3 + 1], lab[seed * 3 + 2]]);
   while (cent.length < k) {
     let far = 0, farD = -1;
     for (let i = 0; i < n; i += step) {
+      if (inside && !inside[i]) continue;
       let d = Infinity;
       for (const c of cent) {
         const dd = ccDist(lab, i, c);
@@ -1742,6 +1744,7 @@ function ccKmeans(lab, n, k, iters) {
     }
     const sums = cent.map(() => [0, 0, 0, 0]);
     for (let i = 0; i < n; i++) {
+      if (inside && !inside[i]) continue;
       const s = sums[assign[i]];
       s[0] += lab[i * 3]; s[1] += lab[i * 3 + 1]; s[2] += lab[i * 3 + 2]; s[3]++;
     }
@@ -1754,11 +1757,27 @@ const ccDeltaE = (a, b) => Math.sqrt(
   Math.pow((a[0] - b[0]) * CC_LW, 2) + Math.pow(a[1] - b[1], 2) + Math.pow(a[2] - b[2], 2));
 
 // المناطق: تجميع ألوان الصورة، دمج المتشابه، ثم ترتيبها بالمساحة
-function ccDetectZones(src) {
+function ccDetectZones(src, subject, sw, sh) {
   const small = ccScaled(src, CC_ANALYSIS_MAX);
   const w = small.width, h = small.height, n = w * h;
   const lab = ccLabBuffer(small);
-  const { cent, assign } = ccKmeans(lab, n, 16, 16);
+  // القطعة وحدها تدخل التقسيم: الخلفية والبشرة والشعر لا تأخذ أرقاماً أصلاً
+  const inside = new Uint8Array(n);
+  if (subject && sw && sh) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(sw - 1, Math.floor((x / w) * sw));
+        const sy = Math.min(sh - 1, Math.floor((y / h) * sh));
+        inside[y * w + x] = subject[sy * sw + sx] > 0.6 ? 1 : 0;
+      }
+    }
+  } else {
+    inside.fill(1);
+  }
+  let count = 0;
+  for (let i = 0; i < n; i++) if (inside[i]) count++;
+  if (count < n * 0.02) inside.fill(1);
+  const { cent, assign } = ccKmeans(lab, n, 16, 16, inside);
 
   // الدمج حسب عائلة اللون: كل درجات اللون الواحد (غامق، فاتح، ظل) منطقة
   // واحدة، فلا تنقسم قطعة القماش الواحدة إلى أرقام كثيرة
@@ -1767,11 +1786,12 @@ function ccDetectZones(src) {
   const sameFamily = (a, b) => {
     const ca = chromaOf(a);
     const cb = chromaOf(b);
-    if (ca < 9 && cb < 9) return Math.abs(a[0] - b[0]) < 45;   // رماديات
-    if (ca < 9 || cb < 9) return false;
+    if (ca < 8 && cb < 8) return Math.abs(a[0] - b[0]) < 40;   // رماديات
+    if (ca < 8 || cb < 8) return false;
+    if (ca / cb > 2.2 || cb / ca > 2.2) return false;          // مشبع لا يُدمج مع باهت
     let d = Math.abs(hueOf(a) - hueOf(b));
     if (d > 180) d = 360 - d;
-    return d < 32;
+    return d < 17;
   };
   const map = cent.map((_, i) => i);
   for (let i = 0; i < cent.length; i++) {
@@ -1780,7 +1800,10 @@ function ccDetectZones(src) {
     }
   }
   const groups = new Map();
+  let insideCount = 0;
+  for (let i = 0; i < n; i++) if (inside[i]) insideCount++;
   for (let i = 0; i < n; i++) {
+    if (!inside[i]) continue;
     const g = map[assign[i]];
     let e = groups.get(g);
     if (!e) { e = { count: 0, sum: [0, 0, 0], sx: 0, sy: 0 }; groups.set(g, e); }
@@ -1790,8 +1813,8 @@ function ccDetectZones(src) {
   }
   const zones = [];
   groups.forEach((e, g) => {
-    const share = e.count / n;
-    if (share < 0.007) return;
+    const share = e.count / Math.max(insideCount, 1);
+    if (share < 0.02) return;
     const mean = [e.sum[0] / e.count, e.sum[1] / e.count, e.sum[2] / e.count];
     zones.push({ g, share, lab: mean, cx: e.sx / e.count, cy: e.sy / e.count });
   });
@@ -1802,7 +1825,7 @@ function ccDetectZones(src) {
   keep.forEach((z) => {
     let bx = z.cx, by = z.cy, bd = Infinity;
     for (let i = 0; i < n; i++) {
-      if (map[assign[i]] !== z.g) continue;
+      if (!inside[i] || map[assign[i]] !== z.g) continue;
       const x = i % w, y = Math.floor(i / w);
       const d = Math.pow(x - z.cx, 2) + Math.pow(y - z.cy, 2);
       if (d < bd) { bd = d; bx = x; by = y; }
