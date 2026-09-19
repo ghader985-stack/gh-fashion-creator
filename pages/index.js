@@ -1588,7 +1588,7 @@ function clusterColors(points, k) {
 const CC_ANALYSIS_MAX = 260;   // دقة كشف المناطق
 const CC_VIEW_MAX = 1000;      // دقة المعاينة الحية
 const CC_OUT_MAX = 2200;       // دقة الصورة النهائية
-const CC_MAX_ZONES = 8;
+const CC_MAX_ZONES = 6;
 // وزن الإضاءة داخل المسافة اللونية: منخفض حتى لا تنقسم القطعة الواحدة إلى
 // مناطق حسب الظل والضوء — الظل والضوء لنفس اللون يبقيان منطقة واحدة.
 const CC_LW = 0.18;
@@ -1760,11 +1760,23 @@ function ccDetectZones(src) {
   const lab = ccLabBuffer(small);
   const { cent, assign } = ccKmeans(lab, n, 16, 16);
 
-  // دمج المراكز المتقاربة لوناً
+  // الدمج حسب عائلة اللون: كل درجات اللون الواحد (غامق، فاتح، ظل) منطقة
+  // واحدة، فلا تنقسم قطعة القماش الواحدة إلى أرقام كثيرة
+  const hueOf = (c) => Math.atan2(c[2], c[1]) * 180 / Math.PI;
+  const chromaOf = (c) => Math.sqrt(c[1] * c[1] + c[2] * c[2]);
+  const sameFamily = (a, b) => {
+    const ca = chromaOf(a);
+    const cb = chromaOf(b);
+    if (ca < 9 && cb < 9) return Math.abs(a[0] - b[0]) < 45;   // رماديات
+    if (ca < 9 || cb < 9) return false;
+    let d = Math.abs(hueOf(a) - hueOf(b));
+    if (d > 180) d = 360 - d;
+    return d < 32;
+  };
   const map = cent.map((_, i) => i);
   for (let i = 0; i < cent.length; i++) {
     for (let j = 0; j < i; j++) {
-      if (map[j] === j && ccDeltaE(cent[i], cent[j]) < 10) { map[i] = j; break; }
+      if (map[j] === j && sameFamily(cent[i], cent[j])) { map[i] = j; break; }
     }
   }
   const groups = new Map();
@@ -1905,7 +1917,7 @@ function ccZoneMask(map, k, centerLab, centers) {
   // انتماء متدرّج لكل بكسل: القماش المتدرّج يأخذ اللون بتدرّج مماثل،
   // فلا تظهر بقع ولا حدود مقصوصة داخل القطعة
   const soft = lab && centers && centers.length > 1;
-  const sig2 = 2 * 13 * 13;
+  const sig2 = 2 * 26 * 26;
   // وإذا كانت المنطقة هي الخلفية نفسها تُلوَّن عادي، وإلا تُستثنى بكسلات الخلفية
   let bgZone = false;
   if (bg) {
