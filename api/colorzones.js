@@ -72,7 +72,7 @@ Numbers and their sampled colours:
 ${list}
 
 For every number return:
-- name: the colour as a fashion professional would name it, 1 to 3 words ("Medium Denim Blue", "Deep Aubergine", "Crimson Red").
+- name: leave it an empty string. The colour name is computed from the pixels themselves.
 - where: where that colour sits on the product, 2 to 6 words, listing the real parts ("outer wrap panel, waistband, belt loops", "inner skirt layer and ruffle", "floral embroidery on front panel"). If it is not part of the product, say what it is ("studio background", "model's skin", "model's hair").
 - material: the material of that area in 1 to 4 words ("denim fabric", "beaded mesh", "silk tulle", "metal hardware", "embroidery thread"). Empty string if it is not a material.
 - part: garment for fabric areas of the piece, trim for zippers, buttons, beads, piping, embroidery and hardware, skin for the model's skin, hair for hair or a headscarf worn only as styling, background for the backdrop or floor, other for anything else.
