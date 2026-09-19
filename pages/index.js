@@ -84,6 +84,7 @@ export default function Home() {
   const [ccBusy, setCcBusy] = useState(false);
   const [ccError, setCcError] = useState('');
   const [ccWarn, setCcWarn] = useState('');
+  const [ccHairOn, setCcHairOn] = useState(false);
 
   // ===== التيك باك =====
   const [tpImage, setTpImage] = useState(null);
@@ -399,7 +400,7 @@ export default function Home() {
       const det = ccDetectZones(view);
       if (!det.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
       const map = ccMasks(view, det.centers);
-      const maskCache = det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i]));
+      const maskCache = det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers));
       setCcData({ full, view, map, centers: det.centers, maskCache });
 
       let zones = det.zones.map((z, i) => ({
@@ -432,7 +433,7 @@ export default function Home() {
           subject = await ccSubjectMask(dc.url, view.width, view.height);
           map.subject = subject;
           setCcData({ full, view, map, centers: det.centers, cutoutUrl: dc.url,
-            maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i])) });
+            maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers)) });
         }
         if (!subject) {
           setCcWarn('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
@@ -453,12 +454,13 @@ export default function Home() {
         if (r.ok && d.product && !subject) {
           map.box = d.product;
           setCcData({ full, view, map, centers: det.centers, box: d.product,
-            maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i])) });
+            maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers)) });
         }
         if (r.ok && Array.isArray(d.zones) && d.zones.length) {
+          // الاسم يبقى اسم البانتون المحسوب من البكسل نفسه — أدقّ من التسمية بالنظر
           zones = zones.map((z) => {
             const m = d.zones.find((x) => x.number === z.n);
-            return m ? { ...z, name: m.name || z.name, where: m.where, material: m.material, part: m.part } : z;
+            return m ? { ...z, where: m.where, material: m.material, part: m.part } : z;
           });
           setCcZones(zones);
         }
@@ -472,6 +474,16 @@ export default function Home() {
     }
     setCcLoading(false);
     setCcStage('');
+  };
+
+  // تبديل «غطاء الرأس جزء من التصميم» يعيد بناء الأقنعة فوراً
+  const ccToggleHair = (on) => {
+    setCcHairOn(on);
+    setCcData((d) => {
+      if (!d) return d;
+      d.map.hairIsGarment = on;
+      return { ...d, maskCache: d.centers.map((c, i) => ccZoneMask(d.map, i, c, d.centers)) };
+    });
   };
 
   const ccSetZone = (i, patch) => {
@@ -494,6 +506,7 @@ export default function Home() {
         .filter((c) => c.on);
       const fullMap = ccMasks(ccData.full, ccData.centers);
       fullMap.box = ccData.box || null;
+      fullMap.hairIsGarment = ccHairOn;
       if (ccData.cutoutUrl) {
         fullMap.subject = await ccSubjectMask(ccData.cutoutUrl, ccData.full.width, ccData.full.height);
       }
@@ -1041,6 +1054,10 @@ export default function Home() {
 
                     <div className="cc-panel">
                       <div className="cc-panel-head">مناطق الألوان — {ccZones.length}</div>
+                      <label className="cc-hair">
+                        <input type="checkbox" checked={ccHairOn} onChange={(e) => ccToggleHair(e.target.checked)} />
+                        <span>غطاء الرأس جزء من التصميم (حجاب أو طرحة)</span>
+                      </label>
                       {ccZones.map((z, i) => (
                         <div className={'cc-zone' + (z.mode === 'change' ? ' on' : '')} key={'z' + i}>
                           <div className="cc-zone-head">
@@ -1789,6 +1806,57 @@ function ccDetectZones(src) {
   return { centers: keep.map((z) => z.lab), zones: keep };
 }
 
+// منطقة الرأس: أكبر بقعة بشرة في أعلى الصورة هي الوجه، وما حولها شعر
+function ccHeadMask(skin, w, h) {
+  const n = w * h;
+  const seen = new Uint8Array(n);
+  const stack = new Int32Array(n);
+  let best = null;
+  const limit = Math.floor(h * 0.6);
+  for (let start = 0; start < limit * w; start++) {
+    if (seen[start] || !skin[start]) continue;
+    let top = 0, len = 0;
+    let x1 = w, x2 = 0, y1 = h, y2 = 0;
+    stack[top++] = start;
+    seen[start] = 1;
+    while (top > 0) {
+      const i = stack[--top];
+      const x = i % w;
+      const y = (i - x) / w;
+      len++;
+      if (x < x1) x1 = x;
+      if (x > x2) x2 = x;
+      if (y < y1) y1 = y;
+      if (y > y2) y2 = y;
+      if (x > 0 && !seen[i - 1] && skin[i - 1]) { seen[i - 1] = 1; stack[top++] = i - 1; }
+      if (x < w - 1 && !seen[i + 1] && skin[i + 1]) { seen[i + 1] = 1; stack[top++] = i + 1; }
+      if (y > 0 && !seen[i - w] && skin[i - w]) { seen[i - w] = 1; stack[top++] = i - w; }
+      if (y < h - 1 && !seen[i + w] && skin[i + w]) { seen[i + w] = 1; stack[top++] = i + w; }
+    }
+    // الوجه بقعة صغيرة في الأعلى، لا الجسم كله: الأكبر من ذلك يُستبعد
+    const bw = x2 - x1 + 1;
+    const bh = y2 - y1 + 1;
+    if (bw > w * 0.3 || bh > h * 0.3) continue;
+    if (!best || len > best.len) best = { len, x1, x2, y1, y2 };
+  }
+  if (!best || best.len < n * 0.0015) return null;
+  const fw = best.x2 - best.x1 + 1;
+  const fh = best.y2 - best.y1 + 1;
+  const cx = (best.x1 + best.x2) / 2;
+  const cy = (best.y1 + best.y2) / 2 - fh * 0.42;
+  const rx = Math.min(fw * 1.7, w * 0.25);
+  const ry = Math.min(fh * 1.95, h * 0.22);
+  const head = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (x - cx) / rx;
+      const dy = (y - cy) / ry;
+      if (dx * dx + dy * dy <= 1) head[y * w + x] = 1;
+    }
+  }
+  return head;
+}
+
 // قناع القطعة: يُقرأ من شفافية صورة العزل، ويُمدّد على مقاس أي كانفاس
 async function ccSubjectMask(url, w, h) {
   const img = await tpLoadImage(proxied(url));
@@ -1861,7 +1929,8 @@ function ccMasks(canvas, centers) {
   }
   ccDespeckle(assign, canvas.width, canvas.height, centers.length);
   const bg = ccBackgroundMask(lab, canvas.width, canvas.height);
-  return { lab, assign, skin, bg, w: canvas.width, h: canvas.height };
+  const head = ccHeadMask(skin, canvas.width, canvas.height);
+  return { lab, assign, skin, bg, head, w: canvas.width, h: canvas.height };
 }
 
 // تصويت الجوار: يشيل النقاط المتناثرة داخل المنطقة فلا يطلع اللون مبقّع
@@ -1882,10 +1951,14 @@ function ccDespeckle(assign, w, h, k) {
 }
 
 // تنعيم حواف القناع بمرور أفقي ورأسي بسيط
-function ccZoneMask(map, k, centerLab) {
-  const { assign, skin, bg, box, subject, w, h } = map;
+function ccZoneMask(map, k, centerLab, centers) {
+  const { assign, skin, bg, head, hairIsGarment, box, subject, lab, w, h } = map;
   const n = w * h;
   const m = new Float32Array(n);
+  // انتماء متدرّج لكل بكسل: القماش المتدرّج يأخذ اللون بتدرّج مماثل،
+  // فلا تظهر بقع ولا حدود مقصوصة داخل القطعة
+  const soft = lab && centers && centers.length > 1;
+  const sig2 = 2 * 13 * 13;
   // وإذا كانت المنطقة هي الخلفية نفسها تُلوَّن عادي، وإلا تُستثنى بكسلات الخلفية
   let bgZone = false;
   if (bg) {
@@ -1903,17 +1976,38 @@ function ccZoneMask(map, k, centerLab) {
   const by1 = box ? Math.floor((box.y1 / 100) * h) : 0;
   const by2 = box ? Math.ceil((box.y2 / 100) * h) : h;
   for (let i = 0; i < n; i++) {
-    if (assign[i] !== k) { m[i] = 0; continue; }
+    let base;
+    if (soft) {
+      let best = 0;
+      let mine = 0;
+      for (let c = 0; c < centers.length; c++) {
+        const dl = (lab[i * 3] - centers[c][0]) * CC_LW;
+        const da = lab[i * 3 + 1] - centers[c][1];
+        const db = lab[i * 3 + 2] - centers[c][2];
+        const e = Math.exp(-(dl * dl + da * da + db * db) / sig2);
+        if (e > best) best = e;
+        if (c === k) mine = e;
+      }
+      // أقرب منطقة تأخذ اللون كاملاً، والجوار يتدرّج بدل أن ينقطع
+      const rel = best > 0 ? mine / best : 0;
+      base = rel * rel;
+      if (base < 0.03) base = 0;
+    } else {
+      base = assign[i] === k ? 1 : 0;
+    }
+    if (base === 0) { m[i] = 0; continue; }
     if (skin && skin[i]) { m[i] = 0; continue; }
+    // الشعر لا يتلوّن إلا إذا اختارت المصممة أن غطاء الرأس جزء من التصميم
+    if (head && head[i] && !hairIsGarment) { m[i] = 0; continue; }
     // القطعة معزولة: كل ما خارجها لا يُلمس، والحواف تأخذ شفافية العزل نفسها
-    if (subject) { m[i] = subject[i]; continue; }
+    if (subject) { m[i] = subject[i] * base; continue; }
     if (bg && bg[i] && !bgZone) { m[i] = 0; continue; }
     if (box && !bgZone) {
       const x = i % w;
       const y = (i - x) / w;
       if (x < bx1 || x >= bx2 || y < by1 || y >= by2) { m[i] = 0; continue; }
     }
-    m[i] = 1;
+    m[i] = base;
   }
   // بلا عزل: تُستبعد القطع المنفصلة البعيدة عن جسم القطعة
   if (!subject && box && !bgZone) ccKeepCore(m, w, h, {
@@ -1980,7 +2074,7 @@ function ccRecolor(canvas, map, centers, changes) {
   let touched = false;
 
   changes.forEach((ch) => {
-    const mask = ch.mask || ccZoneMask(map, ch.zone, centers[ch.zone]);
+    const mask = ch.mask || ccZoneMask(map, ch.zone, centers[ch.zone], centers);
     const src = centers[ch.zone];
     const t = rgbToLab(ccHexRgb(ch.hex));
     const srcC = Math.max(Math.sqrt(src[1] * src[1] + src[2] * src[2]), 0.001);
@@ -1992,11 +2086,11 @@ function ccRecolor(canvas, map, centers, changes) {
       const a = map.lab[i * 3 + 1];
       const b = map.lab[i * 3 + 2];
       const chroma = Math.sqrt(a * a + b * b);
-      const ratio = Math.max(0.7, Math.min(1.2, chroma / srcC));
-      const mix = 0.75 * ratio + 0.25;
+      const ratio = Math.max(0.55, Math.min(1.35, chroma / srcC));
+      const mix = 0.8 * ratio + 0.2;
       // فرق الإضاءة يُضغط حتى لا يبتلع اللون المختار: اللون يبقى هو هو،
       // والظل والضوء يظهران كتفاوت خفيف حوله
-      const nl = Math.max(2, Math.min(98, t[0] + (L - src[0]) * 0.55));
+      const nl = Math.max(2, Math.min(98, t[0] + (L - src[0]) * 0.8));
       out[i * 3] = out[i * 3] * (1 - w) + nl * w;
       out[i * 3 + 1] = out[i * 3 + 1] * (1 - w) + t[1] * mix * w;
       out[i * 3 + 2] = out[i * 3 + 2] * (1 - w) + t[2] * mix * w;
@@ -4222,6 +4316,8 @@ function StyleBlock() {
       .cc-near-item strong { font-size: 0.64rem; direction: ltr; }
       .cc-near-item em { font-size: 0.6rem; font-style: normal; color: var(--ink-soft); direction: ltr;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .cc-hair { display: flex; align-items: center; gap: 0.45rem; font-size: 0.75rem; color: var(--ink-soft);
+        border: 1px solid #ece9e4; border-radius: 8px; padding: 0.5rem 0.6rem; background: #fff; }
       .cc-summary { border: 1px solid #ece9e4; border-radius: 8px; padding: 0.6rem; background: #fff; }
       .cc-summary-head { font-size: 0.76rem; font-weight: 700; margin-bottom: 0.4rem; }
       .cc-summary-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.74rem; margin-bottom: 0.25rem; }
