@@ -83,6 +83,7 @@ export default function Home() {
   const [ccStage, setCcStage] = useState('');
   const [ccBusy, setCcBusy] = useState(false);
   const [ccError, setCcError] = useState('');
+  const [ccWarn, setCcWarn] = useState('');
 
   // ===== التيك باك =====
   const [tpImage, setTpImage] = useState(null);
@@ -383,6 +384,7 @@ export default function Home() {
     if (!file) return;
     if (!gate()) return;
     setCcError('');
+    setCcWarn('');
     setCcZones([]);
     setCcData(null);
     setCcOpenZone(-1);
@@ -432,8 +434,12 @@ export default function Home() {
           setCcData({ full, view, map, centers: det.centers, cutoutUrl: dc.url,
             maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i])) });
         }
+        if (!subject) {
+          setCcWarn('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
+        }
       } catch (e) {
         if (typeof console !== 'undefined') console.warn('[gh] cutout', e && e.message);
+        setCcWarn('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
       }
 
       setCcStage('جارٍ تسمية المناطق…');
@@ -1020,6 +1026,7 @@ export default function Home() {
                     </div>
                   </div>
                   {ccError && <div className="err">{ccError}</div>}
+                  {ccWarn && !ccError && <div className="tp-audit" style={{ marginTop: '0.8rem' }}>{ccWarn}</div>}
                 </section>
 
                 {ccLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{ccStage || 'جارٍ التحضير…'}</p></div>}
@@ -1879,12 +1886,6 @@ function ccZoneMask(map, k, centerLab) {
   const { assign, skin, bg, box, subject, w, h } = map;
   const n = w * h;
   const m = new Float32Array(n);
-  // إذا كانت المنطقة نفسها بلون بشرة (قماش نود مثلاً) يُلغى حارس البشرة
-  let skinZone = false;
-  if (skin && centerLab) {
-    const rgb = ccLab2Rgb(centerLab[0], centerLab[1], centerLab[2]);
-    skinZone = ccIsSkin(rgb[0], rgb[1], rgb[2]);
-  }
   // وإذا كانت المنطقة هي الخلفية نفسها تُلوَّن عادي، وإلا تُستثنى بكسلات الخلفية
   let bgZone = false;
   if (bg) {
@@ -1903,7 +1904,7 @@ function ccZoneMask(map, k, centerLab) {
   const by2 = box ? Math.ceil((box.y2 / 100) * h) : h;
   for (let i = 0; i < n; i++) {
     if (assign[i] !== k) { m[i] = 0; continue; }
-    if (skin && skin[i] && !skinZone) { m[i] = 0; continue; }
+    if (skin && skin[i]) { m[i] = 0; continue; }
     // القطعة معزولة: كل ما خارجها لا يُلمس، والحواف تأخذ شفافية العزل نفسها
     if (subject) { m[i] = subject[i]; continue; }
     if (bg && bg[i] && !bgZone) { m[i] = 0; continue; }
