@@ -398,7 +398,7 @@ export default function Home() {
       const det = ccDetectZones(view);
       if (!det.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
       const map = ccMasks(view, det.centers);
-      const maskCache = det.zones.map((z, i) => ccZoneMask(map, i));
+      const maskCache = det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i]));
       setCcData({ full, view, map, centers: det.centers, maskCache });
 
       let zones = det.zones.map((z, i) => ({
@@ -1563,7 +1563,7 @@ const CC_OUT_MAX = 2200;       // دقة الصورة النهائية
 const CC_MAX_ZONES = 8;
 // وزن الإضاءة داخل المسافة اللونية: منخفض حتى لا تنقسم القطعة الواحدة إلى
 // مناطق حسب الظل والضوء — الظل والضوء لنفس اللون يبقيان منطقة واحدة.
-const CC_LW = 0.3;
+const CC_LW = 0.18;
 const CC_PART_AR = {
   garment: 'قماش',
   trim: 'تريم',
@@ -1738,13 +1738,13 @@ function ccDetectZones(src) {
   const small = ccScaled(src, CC_ANALYSIS_MAX);
   const w = small.width, h = small.height, n = w * h;
   const lab = ccLabBuffer(small);
-  const { cent, assign } = ccKmeans(lab, n, 10, 14);
+  const { cent, assign } = ccKmeans(lab, n, 16, 16);
 
   // دمج المراكز المتقاربة لوناً
   const map = cent.map((_, i) => i);
   for (let i = 0; i < cent.length; i++) {
     for (let j = 0; j < i; j++) {
-      if (map[j] === j && ccDeltaE(cent[i], cent[j]) < 11) { map[i] = j; break; }
+      if (map[j] === j && ccDeltaE(cent[i], cent[j]) < 10) { map[i] = j; break; }
     }
   }
   const groups = new Map();
@@ -1759,7 +1759,7 @@ function ccDetectZones(src) {
   const zones = [];
   groups.forEach((e, g) => {
     const share = e.count / n;
-    if (share < 0.012) return;
+    if (share < 0.007) return;
     const mean = [e.sum[0] / e.count, e.sum[1] / e.count, e.sum[2] / e.count];
     zones.push({ g, share, lab: mean, cx: e.sx / e.count, cy: e.sy / e.count });
   });
@@ -1785,6 +1785,13 @@ function ccDetectZones(src) {
   return { centers: keep.map((z) => z.lab), zones: keep };
 }
 
+// كشف بكسلات البشرة: معادلة YCbCr المعروفة، تعمل على كل درجات البشرة
+function ccIsSkin(r, g, b) {
+  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  return cb > 77 && cb < 130 && cr > 133 && cr < 176 && r > 60 && r > b;
+}
+
 // خريطة انتماء كل بكسل لأقرب مركز، مع قناع ناعم الحواف لكل منطقة
 function ccMasks(canvas, centers) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -1793,9 +1800,11 @@ function ccMasks(canvas, centers) {
   const n = canvas.width * canvas.height;
   const lab = new Float32Array(n * 3);
   const assign = new Uint8Array(n);
+  const skin = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     const L = rgbToLab([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]);
     lab[i * 3] = L[0]; lab[i * 3 + 1] = L[1]; lab[i * 3 + 2] = L[2];
+    skin[i] = ccIsSkin(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) ? 1 : 0;
     let bi = 0, bd = Infinity;
     for (let c = 0; c < centers.length; c++) {
       const dl = (L[0] - centers[c][0]) * CC_LW;
@@ -1807,7 +1816,7 @@ function ccMasks(canvas, centers) {
     assign[i] = bi;
   }
   ccDespeckle(assign, canvas.width, canvas.height, centers.length);
-  return { lab, assign, w: canvas.width, h: canvas.height };
+  return { lab, assign, skin, w: canvas.width, h: canvas.height };
 }
 
 // تصويت الجوار: يشيل النقاط المتناثرة داخل المنطقة فلا يطلع اللون مبقّع
@@ -1828,11 +1837,19 @@ function ccDespeckle(assign, w, h, k) {
 }
 
 // تنعيم حواف القناع بمرور أفقي ورأسي بسيط
-function ccZoneMask(map, k) {
-  const { assign, w, h } = map;
+function ccZoneMask(map, k, centerLab) {
+  const { assign, skin, w, h } = map;
   const n = w * h;
   const m = new Float32Array(n);
-  for (let i = 0; i < n; i++) m[i] = assign[i] === k ? 1 : 0;
+  // إذا كانت المنطقة نفسها بلون بشرة (قماش نود مثلاً) يُلغى الحارس
+  let skinZone = false;
+  if (skin && centerLab) {
+    const rgb = ccLab2Rgb(centerLab[0], centerLab[1], centerLab[2]);
+    skinZone = ccIsSkin(rgb[0], rgb[1], rgb[2]);
+  }
+  for (let i = 0; i < n; i++) {
+    m[i] = assign[i] === k && !(skin && skin[i] && !skinZone) ? 1 : 0;
+  }
   const t = new Float32Array(n);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -1863,7 +1880,7 @@ function ccRecolor(canvas, map, centers, changes) {
   let touched = false;
 
   changes.forEach((ch) => {
-    const mask = ch.mask || ccZoneMask(map, ch.zone);
+    const mask = ch.mask || ccZoneMask(map, ch.zone, centers[ch.zone]);
     const src = centers[ch.zone];
     const t = rgbToLab(ccHexRgb(ch.hex));
     const srcC = Math.max(Math.sqrt(src[1] * src[1] + src[2] * src[2]), 0.001);
@@ -4081,12 +4098,19 @@ function StyleBlock() {
       .cc-search-row:hover { background: #f7f5f2; }
       .cc-code { direction: ltr; font-weight: 700; }
       .cc-name { direction: ltr; color: var(--ink-soft); }
-      .cc-picker-main { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(150px, 1.2fr); gap: 0.6rem; }
-      .cc-sv { position: relative; height: 130px; border-radius: 6px; cursor: crosshair; touch-action: none; }
+      .cc-picker-main { display: flex; flex-direction: column; gap: 0.55rem; }
+      .cc-sv { position: relative; height: 170px; border-radius: 6px; cursor: crosshair; touch-action: none; }
       .cc-sv-dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff;
         box-shadow: 0 0 0 1px rgba(0,0,0,0.4); transform: translate(-50%, -50%); pointer-events: none; }
       .cc-picker-side { display: flex; flex-direction: column; gap: 0.45rem; }
-      .cc-hue { width: 100%; }
+      .cc-hue { width: 100%; direction: ltr; -webkit-appearance: none; appearance: none; height: 16px;
+        border-radius: 8px; border: 1px solid #e3dfd8; cursor: pointer;
+        background: linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%,
+          #0000ff 67%, #ff00ff 83%, #ff0000 100%); }
+      .cc-hue::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+        background: #fff; border: 2px solid #1d1b1a; box-shadow: 0 1px 3px rgba(0,0,0,0.3); cursor: pointer; }
+      .cc-hue::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff;
+        border: 2px solid #1d1b1a; cursor: pointer; }
       .cc-hex-row { display: flex; align-items: center; gap: 0.45rem; }
       .cc-near { font-size: 0.68rem; color: var(--ink-soft); }
       .cc-near-row { display: flex; gap: 0.35rem; margin-top: 0.25rem; }
