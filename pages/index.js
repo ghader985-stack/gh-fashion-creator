@@ -439,7 +439,7 @@ export default function Home() {
       setCcStage('جارٍ كشف مناطق الألوان…');
       const det = ccDetectZones(view, subject, view.width, view.height, headBox, skinBoxes);
       if (!det.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
-      const map = ccMasks(view, det.defs, skinBoxes);
+      const map = ccMasks(view, det.defs, skinBoxes, headBox, subject);
       if (subject) map.subject = subject;
       if (headBox) map.headBox = headBox;
       const maskCache = det.zones.map((z, i) => ccZoneMask(map, i));
@@ -499,13 +499,14 @@ export default function Home() {
       const changes = ccZones
         .map((z, i) => ({ zone: i, hex: z.target, on: z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex }))
         .filter((c) => c.on);
-      const fullMap = ccMasks(ccData.full, ccData.defs, ccData.skinBoxes);
+      const fullSubject = ccData.cutoutUrl
+        ? await ccSubjectMask(ccData.cutoutUrl, ccData.full.width, ccData.full.height)
+        : null;
+      const fullMap = ccMasks(ccData.full, ccData.defs, ccData.skinBoxes, ccData.headBox, fullSubject);
       fullMap.box = ccData.box || null;
       fullMap.hairIsGarment = ccHairOn;
       fullMap.headBox = ccData.headBox || null;
-      if (ccData.cutoutUrl) {
-        fullMap.subject = await ccSubjectMask(ccData.cutoutUrl, ccData.full.width, ccData.full.height);
-      }
+      if (fullSubject) fullMap.subject = fullSubject;
       const out = ccRecolor(ccData.full, fullMap, ccData.centers, changes);
       const rec = {
         id: 'cc' + Date.now(),
@@ -1721,21 +1722,84 @@ function ccIsSkin(r, g, b) {
   return cb > 77 && cb < 130 && cr > 133 && cr < 176 && r > 60 && r > b;
 }
 
-// البشرة تُعلَّم داخل الصناديق التي حدّدها التحليل فقط
-function ccMarkSkin(skin, d, w, h, boxes) {
-  if (!boxes || !boxes.length) return;
-  boxes.forEach((bx) => {
-    const x1 = Math.max(0, Math.floor((bx.x1 / 100) * w));
-    const x2 = Math.min(w, Math.ceil((bx.x2 / 100) * w));
-    const y1 = Math.max(0, Math.floor((bx.y1 / 100) * h));
-    const y2 = Math.min(h, Math.ceil((bx.y2 / 100) * h));
-    for (let y = y1; y < y2; y++) {
-      for (let x = x1; x < x2; x++) {
-        const i = y * w + x;
-        if (ccIsSkin(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) skin[i] = 1;
-      }
+// لون بشرة العارضة يُقاس من وجهها في هذه الصورة بالذات، فلا نعتمد على
+// معادلة عامة تبتلع النود والبيج والكاميل والزيتي وتحسبها بشرة
+function ccSkinTone(d, w, h, headBox, subject) {
+  if (!headBox) return null;
+  const x1 = Math.max(0, Math.floor((headBox.x1 / 100) * w));
+  const x2 = Math.min(w, Math.ceil((headBox.x2 / 100) * w));
+  const y1 = Math.max(0, Math.floor((headBox.y1 / 100) * h));
+  const y2 = Math.min(h, Math.ceil((headBox.y2 / 100) * h));
+  const found = [];
+  for (let y = y1; y < y2; y++) {
+    for (let x = x1; x < x2; x++) {
+      const i = y * w + x;
+      // الخلفية حول الرأس ليست بشرة: العيّنة من داخل القطعة المعزولة فقط
+      if (subject && subject[i] < 0.6) continue;
+      if (!ccIsSkin(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) continue;
+      found.push(rgbToLab([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]));
     }
-  });
+  }
+  if (found.length < 40) return null;
+  // الوجه المضيء هو المرجع: حافة الشعر والظلّ يسحبان العيّنة نحو الغامق
+  found.sort((a, b) => a[0] - b[0]);
+  const lo = Math.floor(found.length * 0.5);
+  const hi = found.length;
+  const sum = [0, 0, 0];
+  for (let i = lo; i < hi; i++) { sum[0] += found[i][0]; sum[1] += found[i][1]; sum[2] += found[i][2]; }
+  const k = Math.max(1, hi - lo);
+  const mean = [sum[0] / k, sum[1] / k, sum[2] / k];
+  // تفاوت درجة البشرة نفسها (مكياج، ظلّ، إضاءة) يحدّد سعة المطابقة،
+  // فلا نشدّ على بشرة متفاوتة ولا نتوسّع على بشرة موحّدة
+  let varSum = 0;
+  for (let i = lo; i < hi; i++) {
+    const da = found[i][1] - mean[1];
+    const db = found[i][2] - mean[2];
+    varSum += da * da + db * db;
+  }
+  const sigma = Math.sqrt(varSum / k);
+  return { lab: mean, tol: Math.min(17, Math.max(10, sigma * 2.2)) };
+}
+
+// البشرة = ما يطابق لون وجه العارضة فعلاً، أو ما وقع داخل صناديق البشرة
+// التي حدّدها التحليل. القماش بلون قريب لكنه مختلف عن بشرتها يبقى قماشاً.
+function ccMarkSkin(skin, d, w, h, boxes, tone, subject) {
+  if (boxes && boxes.length) {
+    boxes.forEach((bx) => {
+      const x1 = Math.max(0, Math.floor((bx.x1 / 100) * w));
+      const x2 = Math.min(w, Math.ceil((bx.x2 / 100) * w));
+      const y1 = Math.max(0, Math.floor((bx.y1 / 100) * h));
+      const y2 = Math.min(h, Math.ceil((bx.y2 / 100) * h));
+      for (let y = y1; y < y2; y++) {
+        for (let x = x1; x < x2; x++) {
+          const i = y * w + x;
+          if (subject && subject[i] < 0.6) continue;
+          if (ccIsSkin(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) skin[i] = 1;
+        }
+      }
+    });
+  }
+  if (!tone) return;
+  const ref = tone.lab;
+  const tol = tone.tol;
+  const n = w * h;
+  for (let i = 0; i < n; i++) {
+    if (skin[i]) continue;
+    if (subject && subject[i] < 0.6) continue;
+    const r = d[i * 4];
+    const g = d[i * 4 + 1];
+    const b = d[i * 4 + 2];
+    if (!ccIsSkin(r, g, b)) continue;
+    const L = rgbToLab([r, g, b]);
+    const dl = L[0] - ref[0];
+    const da = L[1] - ref[1];
+    const db = L[2] - ref[2];
+    // الضوء يختلف كثيراً بين الوجه والصدر والذراع والساق، أمّا درجة البشرة
+    // فثابتة — لذلك المطابقة على الدرجة، والإضاءة مجرّد ضابط خفيف
+    const C = Math.sqrt(L[1] * L[1] + L[2] * L[2]);
+    if (C < 6 || C > 45) continue;
+    if (Math.sqrt(dl * dl * 0.03 + da * da + db * db) < tol) skin[i] = 1;
+  }
 }
 
 // الخلفية: انتشار من حواف الصورة إلى الداخل ما دام اللون متقارباً.
@@ -1846,14 +1910,31 @@ function ccBuildDefs(lab, inside, n) {
   if (peak > 0) {
     const picked = [];
     for (let i = 0; i < BINS; i++) {
-      if (sm[i] < peak * 0.05) continue;
+      if (sm[i] < peak * 0.08) continue;
       if (sm[i] < sm[(i + BINS - 1) % BINS] || sm[i] < sm[(i + 1) % BINS]) continue;
       picked.push({ bin: i, v: sm[i] });
     }
     picked.sort((x, y) => y.v - x.v);
+    // أقلّ قيمة على الطريق الأقصر بين درجتين: الوادي العميق يعني قماشين
+    // مختلفين، وغيابه يعني تدرّجاً واحداً بينهما (حواف الاندماج)
+    const valleyBetween = (i, j) => {
+      let fwd = (j - i + BINS) % BINS;
+      let lo = Infinity;
+      if (fwd <= BINS - fwd) {
+        for (let k = 1; k < fwd; k++) lo = Math.min(lo, sm[(i + k) % BINS]);
+      } else {
+        for (let k = 1; k < BINS - fwd; k++) lo = Math.min(lo, sm[(i - k + BINS) % BINS]);
+      }
+      return lo === Infinity ? 0 : lo;
+    };
+    const kept = [];
     picked.forEach((p) => {
       const hue = (p.bin + 0.5) * (360 / BINS);
       if (defs.some((d) => ccHueGap(d.hue, hue) < CC_HUE_MERGE)) return;
+      // درجة بلا وادٍ يفصلها عن درجة أقوى = حافة اندماج، لا قماش مستقل
+      const blend = kept.some((q) => valleyBetween(q.bin, p.bin) > p.v * 0.55);
+      if (blend) return;
+      kept.push(p);
       defs.push({ neutral: false, hue });
     });
   }
@@ -1962,8 +2043,23 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
   // القطعة وحدها تدخل التقسيم: الخلفية والبشرة والشعر لا تأخذ أرقاماً أصلاً
   const inside = new Uint8Array(n);
   const sdata = small.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  // قناع القطعة بمقاس صورة التحليل، ليُستعمل في قياس لون البشرة وتعليمها
+  let subjSmall = null;
+  if (subject && sw && sh) {
+    subjSmall = new Float32Array(n);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const sx = Math.min(sw - 1, Math.floor((x / w) * sw));
+        const sy = Math.min(sh - 1, Math.floor((y / h) * sh));
+        subjSmall[y * w + x] = subject[sy * sw + sx];
+      }
+    }
+  }
+  // الخلفية المتصلة بحواف الصورة تُستبعد كمان، حتى لو تسرّبت من العزل:
+  // ورق أبيض أو جدار سادة ما بياخد رقماً ولا يدخل في النِّسَب
+  const bgPx = ccBackgroundMask(lab, w, h);
   const skinPx = new Uint8Array(n);
-  ccMarkSkin(skinPx, sdata, w, h, skinBoxes);
+  ccMarkSkin(skinPx, sdata, w, h, skinBoxes, ccSkinTone(sdata, w, h, headBox, subjSmall), subjSmall);
   const hx1 = headBox ? (headBox.x1 / 100) * w : -1;
   const hx2 = headBox ? (headBox.x2 / 100) * w : -1;
   const hy1 = headBox ? (headBox.y1 / 100) * h : -1;
@@ -2029,8 +2125,41 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
     }
     return [sum[0] / take, sum[1] / take, sum[2] / take];
   };
-  const order = defs.map((d, i) => i).filter((i) => acc[i].count > 0)
+  // لون حافة الصورة = لون الخلفية. أي منطقة هي الخلفية نفسها لوناً وأغلب
+  // بكسلاتها خلفية، تُحذف: ورق أبيض أو جدار سادة تسرّب من العزل لا يصير قماشاً
+  let border = null;
+  {
+    const sum = [0, 0, 0];
+    let k = 0;
+    const add = (i) => { sum[0] += lab[i * 3]; sum[1] += lab[i * 3 + 1]; sum[2] += lab[i * 3 + 2]; k++; };
+    for (let x = 0; x < w; x++) { add(x); add((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { add(y * w); add(y * w + w - 1); }
+    if (k) border = [sum[0] / k, sum[1] / k, sum[2] / k];
+  }
+  const bgShare = defs.map(() => ({ bg: 0, all: 0 }));
+  for (let i = 0; i < n; i++) {
+    if (!inside[i]) continue;
+    const e = bgShare[assign[i]];
+    e.all++;
+    if (bgPx[i]) e.bg++;
+  }
+  const isBackgroundZone = (i) => {
+    const e = bgShare[i];
+    if (!e.all || e.bg / e.all < 0.5 || !border) return false;
+    const m = acc[i];
+    if (!m.count) return false;
+    const mean = [m.sum[0] / m.count, m.sum[1] / m.count, m.sum[2] / m.count];
+    const dl = mean[0] - border[0];
+    const da = mean[1] - border[1];
+    const db = mean[2] - border[2];
+    return Math.sqrt(dl * dl + da * da + db * db) < 12;
+  };
+  let order = defs.map((d, i) => i).filter((i) => acc[i].count > 0 && !isBackgroundZone(i))
     .sort((x, y) => acc[y].count - acc[x].count);
+  if (!order.length) {
+    order = defs.map((d, i) => i).filter((i) => acc[i].count > 0)
+      .sort((x, y) => acc[y].count - acc[x].count);
+  }
 
   const zones = order.map((i) => {
     const e = acc[i];
@@ -2093,7 +2222,7 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
   return { defs: order.map((i) => defs[i]), centers: zones.map((z) => z.lab), zones };
 }
 
-function ccMasks(canvas, defs, skinBoxes) {
+function ccMasks(canvas, defs, skinBoxes, headBox, subject) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = img.data;
@@ -2109,7 +2238,8 @@ function ccMasks(canvas, defs, skinBoxes) {
     assign[i] = ccPickZone(L[0], C, ccHue(L[1], L[2]), defs);
   }
   ccDespeckle(assign, canvas.width, canvas.height, defs.length);
-  ccMarkSkin(skin, d, canvas.width, canvas.height, skinBoxes);
+  ccMarkSkin(skin, d, canvas.width, canvas.height, skinBoxes,
+    ccSkinTone(d, canvas.width, canvas.height, headBox, subject), subject);
   const bg = ccBackgroundMask(lab, canvas.width, canvas.height);
   return { lab, assign, skin, bg, defs, w: canvas.width, h: canvas.height };
 }
