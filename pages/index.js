@@ -418,18 +418,38 @@ export default function Home() {
         setCcWarn('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
       }
 
+      setCcStage('جارٍ تحديد القطعة والرأس…');
+      let headBox = null;
+      let skinBoxes = [];
+      try {
+        const vb = await new Promise((resolve, reject) => {
+          view.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), 'image/jpeg', 0.9);
+        });
+        const fdb = new FormData();
+        fdb.append('image', vb, 'view.jpg');
+        fdb.append('zones', '[]');
+        const rb = await fetch('/api/colorzones', { method: 'POST', body: fdb });
+        const db = await rb.json();
+        if (rb.ok && db.head && db.head.x2 > db.head.x1 && db.head.y2 > db.head.y1) headBox = db.head;
+        if (rb.ok && Array.isArray(db.skin)) skinBoxes = db.skin;
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] head box', e && e.message);
+      }
+
       setCcStage('جارٍ كشف مناطق الألوان…');
-      const det = ccDetectZones(view, subject, view.width, view.height);
+      const det = ccDetectZones(view, subject, view.width, view.height, headBox, skinBoxes);
       if (!det.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
-      const map = ccMasks(view, det.centers);
+      const map = ccMasks(view, det.defs, skinBoxes);
       if (subject) map.subject = subject;
-      const maskCache = det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers));
-      setCcData({ full, view, map, centers: det.centers, cutoutUrl, maskCache });
+      if (headBox) map.headBox = headBox;
+      const maskCache = det.zones.map((z, i) => ccZoneMask(map, i));
+      setCcData({ full, view, map, centers: det.centers, defs: det.defs, cutoutUrl, headBox, skinBoxes, maskCache });
 
       let zones = det.zones.map((z, i) => ({
         n: i + 1,
         x: z.x,
         y: z.y,
+        points: z.points || [{ x: z.x, y: z.y }],
         hex: z.hex,
         share: Math.max(1, Math.round(z.share * 100)),
         pantone: z.pantone,
@@ -442,40 +462,6 @@ export default function Home() {
       }));
       setCcZones(zones);
 
-      setCcStage('جارٍ تسمية المناطق…');
-      try {
-        const blob = await ccPinnedBlob(view, det.zones);
-        const fd = new FormData();
-        fd.append('image', blob, 'zones.jpg');
-        fd.append('zones', JSON.stringify(zones.map((z) => ({ number: z.n, hex: z.hex, share: z.share }))));
-        const r = await fetch('/api/colorzones', { method: 'POST', body: fd });
-        const d = await r.json();
-        const headBox = d.head && d.head.x2 > d.head.x1 && d.head.y2 > d.head.y1 ? d.head : null;
-        if (r.ok && (headBox || (d.product && !subject))) {
-          if (headBox) map.headBox = headBox;
-          if (d.product && !subject) map.box = d.product;
-          setCcData((prev) => ({
-            full,
-            view,
-            map,
-            centers: det.centers,
-            headBox,
-            box: d.product && !subject ? d.product : null,
-            cutoutUrl: (prev && prev.cutoutUrl) || null,
-            maskCache: det.zones.map((z, i) => ccZoneMask(map, i, det.centers[i], det.centers)),
-          }));
-        }
-        if (r.ok && Array.isArray(d.zones) && d.zones.length) {
-          // الاسم يبقى اسم البانتون المحسوب من البكسل نفسه — أدقّ من التسمية بالنظر
-          zones = zones.map((z) => {
-            const m = d.zones.find((x) => x.number === z.n);
-            return m ? { ...z, where: m.where, material: m.material, part: m.part } : z;
-          });
-          setCcZones(zones);
-        }
-      } catch (e) {
-        if (typeof console !== 'undefined') console.warn('[gh] colorzones', e && e.message);
-      }
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] colorchanger', e && e.message);
       setCcError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
@@ -491,7 +477,7 @@ export default function Home() {
     setCcData((d) => {
       if (!d) return d;
       d.map.hairIsGarment = on;
-      return { ...d, maskCache: d.centers.map((c, i) => ccZoneMask(d.map, i, c, d.centers)) };
+      return { ...d, maskCache: d.centers.map((c, i) => ccZoneMask(d.map, i)) };
     });
   };
 
@@ -513,7 +499,7 @@ export default function Home() {
       const changes = ccZones
         .map((z, i) => ({ zone: i, hex: z.target, on: z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex }))
         .filter((c) => c.on);
-      const fullMap = ccMasks(ccData.full, ccData.centers);
+      const fullMap = ccMasks(ccData.full, ccData.defs, ccData.skinBoxes);
       fullMap.box = ccData.box || null;
       fullMap.hairIsGarment = ccHairOn;
       fullMap.headBox = ccData.headBox || null;
@@ -1588,9 +1574,6 @@ const CC_ANALYSIS_MAX = 260;   // دقة كشف المناطق
 const CC_VIEW_MAX = 1000;      // دقة المعاينة الحية
 const CC_OUT_MAX = 2200;       // دقة الصورة النهائية
 const CC_MAX_ZONES = 6;
-// وزن الإضاءة داخل المسافة اللونية: منخفض حتى لا تنقسم القطعة الواحدة إلى
-// مناطق حسب الظل والضوء — الظل والضوء لنفس اللون يبقيان منطقة واحدة.
-const CC_LW = 0.18;
 
 // ---------------------------------------------------------------------------
 // تحويلات الألوان
@@ -1706,139 +1689,6 @@ function ccLabBuffer(canvas) {
   return lab;
 }
 
-const ccDist = (lab, i, c) => {
-  const dl = (lab[i * 3] - c[0]) * CC_LW;
-  const da = lab[i * 3 + 1] - c[1];
-  const db = lab[i * 3 + 2] - c[2];
-  return dl * dl + da * da + db * db;
-};
-
-function ccKmeans(lab, n, k, iters, inside) {
-  const cent = [];
-  const step = Math.max(1, Math.floor(n / 600));
-  let seed = 0;
-  if (inside) { while (seed < n && !inside[seed]) seed++; if (seed >= n) seed = 0; }
-  cent.push([lab[seed * 3], lab[seed * 3 + 1], lab[seed * 3 + 2]]);
-  while (cent.length < k) {
-    let far = 0, farD = -1;
-    for (let i = 0; i < n; i += step) {
-      if (inside && !inside[i]) continue;
-      let d = Infinity;
-      for (const c of cent) {
-        const dd = ccDist(lab, i, c);
-        if (dd < d) d = dd;
-      }
-      if (d > farD) { farD = d; far = i; }
-    }
-    cent.push([lab[far * 3], lab[far * 3 + 1], lab[far * 3 + 2]]);
-  }
-  const assign = new Uint8Array(n);
-  for (let it = 0; it < iters; it++) {
-    for (let i = 0; i < n; i++) {
-      let bi = 0, bd = Infinity;
-      for (let c = 0; c < cent.length; c++) {
-        const d = ccDist(lab, i, cent[c]);
-        if (d < bd) { bd = d; bi = c; }
-      }
-      assign[i] = bi;
-    }
-    const sums = cent.map(() => [0, 0, 0, 0]);
-    for (let i = 0; i < n; i++) {
-      if (inside && !inside[i]) continue;
-      const s = sums[assign[i]];
-      s[0] += lab[i * 3]; s[1] += lab[i * 3 + 1]; s[2] += lab[i * 3 + 2]; s[3]++;
-    }
-    sums.forEach((s, c) => { if (s[3]) cent[c] = [s[0] / s[3], s[1] / s[3], s[2] / s[3]]; });
-  }
-  return { cent, assign };
-}
-
-const ccDeltaE = (a, b) => Math.sqrt(
-  Math.pow((a[0] - b[0]) * CC_LW, 2) + Math.pow(a[1] - b[1], 2) + Math.pow(a[2] - b[2], 2));
-
-// المناطق: تجميع ألوان الصورة، دمج المتشابه، ثم ترتيبها بالمساحة
-function ccDetectZones(src, subject, sw, sh) {
-  const small = ccScaled(src, CC_ANALYSIS_MAX);
-  const w = small.width, h = small.height, n = w * h;
-  const lab = ccLabBuffer(small);
-  // القطعة وحدها تدخل التقسيم: الخلفية والبشرة والشعر لا تأخذ أرقاماً أصلاً
-  const inside = new Uint8Array(n);
-  if (subject && sw && sh) {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const sx = Math.min(sw - 1, Math.floor((x / w) * sw));
-        const sy = Math.min(sh - 1, Math.floor((y / h) * sh));
-        inside[y * w + x] = subject[sy * sw + sx] > 0.6 ? 1 : 0;
-      }
-    }
-  } else {
-    inside.fill(1);
-  }
-  let count = 0;
-  for (let i = 0; i < n; i++) if (inside[i]) count++;
-  if (count < n * 0.02) inside.fill(1);
-  const { cent, assign } = ccKmeans(lab, n, 16, 16, inside);
-
-  // الدمج حسب عائلة اللون: كل درجات اللون الواحد (غامق، فاتح، ظل) منطقة
-  // واحدة، فلا تنقسم قطعة القماش الواحدة إلى أرقام كثيرة
-  const hueOf = (c) => Math.atan2(c[2], c[1]) * 180 / Math.PI;
-  const chromaOf = (c) => Math.sqrt(c[1] * c[1] + c[2] * c[2]);
-  const sameFamily = (a, b) => {
-    const ca = chromaOf(a);
-    const cb = chromaOf(b);
-    if (ca < 8 && cb < 8) return Math.abs(a[0] - b[0]) < 40;   // رماديات
-    if (ca < 8 || cb < 8) return false;
-    if (ca / cb > 2.2 || cb / ca > 2.2) return false;          // مشبع لا يُدمج مع باهت
-    let d = Math.abs(hueOf(a) - hueOf(b));
-    if (d > 180) d = 360 - d;
-    return d < 17;
-  };
-  const map = cent.map((_, i) => i);
-  for (let i = 0; i < cent.length; i++) {
-    for (let j = 0; j < i; j++) {
-      if (map[j] === j && sameFamily(cent[i], cent[j])) { map[i] = j; break; }
-    }
-  }
-  const groups = new Map();
-  let insideCount = 0;
-  for (let i = 0; i < n; i++) if (inside[i]) insideCount++;
-  for (let i = 0; i < n; i++) {
-    if (!inside[i]) continue;
-    const g = map[assign[i]];
-    let e = groups.get(g);
-    if (!e) { e = { count: 0, sum: [0, 0, 0], sx: 0, sy: 0 }; groups.set(g, e); }
-    e.count++;
-    e.sum[0] += lab[i * 3]; e.sum[1] += lab[i * 3 + 1]; e.sum[2] += lab[i * 3 + 2];
-    e.sx += i % w; e.sy += Math.floor(i / w);
-  }
-  const zones = [];
-  groups.forEach((e, g) => {
-    const share = e.count / Math.max(insideCount, 1);
-    if (share < 0.02) return;
-    const mean = [e.sum[0] / e.count, e.sum[1] / e.count, e.sum[2] / e.count];
-    zones.push({ g, share, lab: mean, cx: e.sx / e.count, cy: e.sy / e.count });
-  });
-  zones.sort((a, b) => b.share - a.share);
-  const keep = zones.slice(0, CC_MAX_ZONES);
-
-  // علامة الرقم تُوضع على أقرب بكسل فعلي للمنطقة، لا على مركز حسابي قد يقع خارجها
-  keep.forEach((z) => {
-    let bx = z.cx, by = z.cy, bd = Infinity;
-    for (let i = 0; i < n; i++) {
-      if (!inside[i] || map[assign[i]] !== z.g) continue;
-      const x = i % w, y = Math.floor(i / w);
-      const d = Math.pow(x - z.cx, 2) + Math.pow(y - z.cy, 2);
-      if (d < bd) { bd = d; bx = x; by = y; }
-    }
-    z.x = bx / w;
-    z.y = by / h;
-    z.hex = toHex(ccLab2Rgb(z.lab[0], z.lab[1], z.lab[2]));
-    const pt = nearestPantone(z.hex);
-    z.pantone = pt ? pt.code : '';
-    z.pantoneName = pt ? pt.name : '';
-  });
-  return { centers: keep.map((z) => z.lab), zones: keep };
-}
 
 // قناع القطعة: يُقرأ من شفافية صورة العزل، ويُمدّد على مقاس أي كانفاس
 async function ccSubjectMask(url, w, h) {
@@ -1848,16 +1698,44 @@ async function ccSubjectMask(url, w, h) {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, 0, w, h);
   const d = ctx.getImageData(0, 0, w, h).data;
-  const m = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) m[i] = d[i * 4 + 3] / 255;
+  const n = w * h;
+  const m = new Float32Array(n);
+  const solid = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    m[i] = d[i * 4 + 3] / 255;
+    solid[i] = m[i] > 0.5 ? 1 : 0;
+  }
+  // أي كتلة منفصلة عن القطعة تسرّبت من العزل (جدار أو أثاث) تُشال من القناع،
+  // فلا يصل التلوين إلى شيء خارج القطعة مهما كان لونه
+  ccKeepLargest(solid, w, h);
+  for (let i = 0; i < n; i++) if (!solid[i]) m[i] = 0;
   return m;
 }
 
-// كشف بكسلات البشرة: معادلة YCbCr المعروفة، تعمل على كل درجات البشرة
+// كشف بكسلات البشرة: معادلة YCbCr المعروفة. تشمل أيضاً ألوان أقمشة قريبة
+// من البشرة (نود، بيج، كاميل، زيتي)، لذلك لا تُستعمل وحدها أبداً — بل داخل
+// صناديق البشرة التي يحدّدها التحليل فقط، فلا يُحذف قماش بلون قريب منها.
 function ccIsSkin(r, g, b) {
   const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
   const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
   return cb > 77 && cb < 130 && cr > 133 && cr < 176 && r > 60 && r > b;
+}
+
+// البشرة تُعلَّم داخل الصناديق التي حدّدها التحليل فقط
+function ccMarkSkin(skin, d, w, h, boxes) {
+  if (!boxes || !boxes.length) return;
+  boxes.forEach((bx) => {
+    const x1 = Math.max(0, Math.floor((bx.x1 / 100) * w));
+    const x2 = Math.min(w, Math.ceil((bx.x2 / 100) * w));
+    const y1 = Math.max(0, Math.floor((bx.y1 / 100) * h));
+    const y2 = Math.min(h, Math.ceil((bx.y2 / 100) * h));
+    for (let y = y1; y < y2; y++) {
+      for (let x = x1; x < x2; x++) {
+        const i = y * w + x;
+        if (ccIsSkin(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) skin[i] = 1;
+      }
+    }
+  });
 }
 
 // الخلفية: انتشار من حواف الصورة إلى الداخل ما دام اللون متقارباً.
@@ -1887,8 +1765,335 @@ function ccBackgroundMask(lab, w, h) {
   return bg;
 }
 
-// خريطة انتماء كل بكسل لأقرب مركز، مع قناع ناعم الحواف لكل منطقة
-function ccMasks(canvas, centers) {
+// ---------------------------------------------------------------------------
+// تعريف المناطق: عائلة لونية لكل قماش
+// ---------------------------------------------------------------------------
+// القماش الواحد له درجة لونية واحدة، وله في الصورة ضوء وظلّ وحواف داكنة.
+// لذلك تُبنى المناطق على عائلة اللون (الدرجة على دائرة الألوان) لا على
+// مستوى الإضاءة: كل بنفسجي القطعة — الفاتح والغامق والظل — منطقة واحدة
+// برقم واحد، فيتغيّر القماش كاملاً بضغطة. والرماديات (أبيض/أسود/بيج بلا
+// لون) تُجمَّع حسب الإضاءة لأن لا درجة لونية لها.
+const CC_CHROMA_REF = 14;      // حدّ اللون الواضح: تحته تصير الدرجة غير موثوقة
+const CC_HUE_MERGE = 34;       // درجتان أقرب من هذا الفرق = قماش واحد
+const CC_NEUTRAL_DL = 30;      // فرق الإضاءة بين رماديين مستقلّين
+const CC_L_SPLIT = 30;         // فرق الإضاءة بين قماشين من نفس الدرجة
+const CC_MIN_SHARE = 0.03;     // منطقة أصغر من هذا تُدمج في أقرب منطقة
+
+const ccHue = (a, b) => {
+  let d = (Math.atan2(b, a) * 180) / Math.PI;
+  return d < 0 ? d + 360 : d;
+};
+const ccHueGap = (p, q) => {
+  const d = Math.abs(p - q) % 360;
+  return d > 180 ? 360 - d : d;
+};
+
+// مسافة البكسل عن تعريف منطقة. البكسل الباهت أو الداكن درجته غير موثوقة،
+// فيُعاقَب على الانضمام لعائلة لونية ويُفضَّل الرمادي — والعكس بالعكس.
+function ccZoneCost(L, C, hue, def) {
+  if (def.neutral) return Math.abs(L - def.L) * 0.9 + C * 4;
+  let d = ccHueGap(hue, def.hue) + Math.max(0, CC_CHROMA_REF - C) * 1.6;
+  // قماشان بنفس الدرجة يختلفان بالفاتح والغامق (برغندي وnود مثلاً)
+  if (def.L != null) d += Math.abs(L - def.L) * 0.55;
+  return d;
+}
+
+function ccPickZone(L, C, hue, defs) {
+  let bi = 0;
+  let bd = Infinity;
+  for (let i = 0; i < defs.length; i++) {
+    const d = ccZoneCost(L, C, hue, defs[i]);
+    if (d < bd) { bd = d; bi = i; }
+  }
+  return bi;
+}
+
+// بناء التعريفات من بكسلات القطعة وحدها
+function ccBuildDefs(lab, inside, n) {
+  const BINS = 72;
+  const hist = new Float64Array(BINS);
+  let neutral = 0;
+  let total = 0;
+  const lHist = new Float64Array(32);
+  for (let i = 0; i < n; i++) {
+    if (!inside[i]) continue;
+    total++;
+    const L = lab[i * 3];
+    const a = lab[i * 3 + 1];
+    const b = lab[i * 3 + 2];
+    const C = Math.sqrt(a * a + b * b);
+    if (C >= CC_CHROMA_REF) {
+      const bin = Math.min(BINS - 1, Math.floor((ccHue(a, b) / 360) * BINS));
+      // الوزن بالمساحة أساساً مع ميل بسيط للّون الأوضح: قماش واسع باهت
+      // (نود، بيج، رمادي مائل) يبقى له وجود أمام قماش صغير فاقع
+      hist[bin] += 1 + C / 40;
+    } else {
+      neutral++;
+      lHist[Math.min(31, Math.max(0, Math.floor((L / 100) * 32)))]++;
+    }
+  }
+  if (!total) return [{ neutral: true, L: 50 }];
+
+  // تنعيم دائري ثم التقاط القمم
+  const sm = new Float64Array(BINS);
+  for (let i = 0; i < BINS; i++) {
+    sm[i] = hist[(i + BINS - 2) % BINS] * 0.5 + hist[(i + BINS - 1) % BINS]
+      + hist[i] * 1.5 + hist[(i + 1) % BINS] + hist[(i + 2) % BINS] * 0.5;
+  }
+  let peak = 0;
+  for (let i = 0; i < BINS; i++) if (sm[i] > peak) peak = sm[i];
+  const defs = [];
+  if (peak > 0) {
+    const picked = [];
+    for (let i = 0; i < BINS; i++) {
+      if (sm[i] < peak * 0.05) continue;
+      if (sm[i] < sm[(i + BINS - 1) % BINS] || sm[i] < sm[(i + 1) % BINS]) continue;
+      picked.push({ bin: i, v: sm[i] });
+    }
+    picked.sort((x, y) => y.v - x.v);
+    picked.forEach((p) => {
+      const hue = (p.bin + 0.5) * (360 / BINS);
+      if (defs.some((d) => ccHueGap(d.hue, hue) < CC_HUE_MERGE)) return;
+      defs.push({ neutral: false, hue });
+    });
+  }
+
+  // الرماديات: تُصبح مناطق فقط إن كانت جزءاً حقيقياً من التصميم
+  if (neutral / total > 0.12 || !defs.length) {
+    const groups = [];
+    for (let i = 0; i < 32; i++) {
+      if (!lHist[i]) continue;
+      const L = (i + 0.5) * (100 / 32);
+      const near = groups.find((g) => Math.abs(g.L - L) < CC_NEUTRAL_DL);
+      if (near) {
+        near.L = (near.L * near.w + L * lHist[i]) / (near.w + lHist[i]);
+        near.w += lHist[i];
+      } else {
+        groups.push({ L, w: lHist[i] });
+      }
+    }
+    groups.sort((a, b) => b.w - a.w);
+    groups.slice(0, defs.length ? 2 : 3).forEach((g) => {
+      const share = g.w / total;
+      if (!defs.length) { defs.push({ neutral: true, L: g.L }); return; }
+      // الداكن جداً غالباً ظلّ القماش الملوّن لا قماش أسود: لا يصير منطقة
+      // إلا إذا كانت مساحته كبيرة، وعندها هو فعلاً أسود التصميم
+      if (g.L < 32 && share < 0.2) return;
+      if (share < 0.05) return;
+      defs.push({ neutral: true, L: g.L });
+    });
+  }
+  // قماشان من نفس الدرجة اللونية لكن أحدهما فاتح والآخر غامق (برغندي ونود)
+  // يُفصلان بالإضاءة — بشرط قمّتين واضحتين بينهما وادٍ عميق، حتى لا ينقسم
+  // القماش الواحد بسبب تدرّج الظلّ
+  const hueDefs = defs.filter((d) => !d.neutral);
+  if (hueDefs.length) {
+    const bandL = hueDefs.map(() => new Float64Array(32));
+    for (let i = 0; i < n; i++) {
+      if (!inside[i]) continue;
+      const a = lab[i * 3 + 1];
+      const b = lab[i * 3 + 2];
+      const C = Math.sqrt(a * a + b * b);
+      if (C < CC_CHROMA_REF) continue;
+      const hue = ccHue(a, b);
+      let bi = 0, bd = Infinity;
+      hueDefs.forEach((d, k) => { const g = ccHueGap(hue, d.hue); if (g < bd) { bd = g; bi = k; } });
+      bandL[bi][Math.min(31, Math.max(0, Math.floor((lab[i * 3] / 100) * 32)))]++;
+    }
+    hueDefs.forEach((d, k) => {
+      const raw = bandL[k];
+      const sm2 = new Float64Array(32);
+      for (let i = 0; i < 32; i++) {
+        sm2[i] = (raw[Math.max(0, i - 1)] + raw[i] * 2 + raw[Math.min(31, i + 1)]) / 4;
+      }
+      let top = 0;
+      let tot = 0;
+      for (let i = 0; i < 32; i++) { tot += sm2[i]; if (sm2[i] > top) top = sm2[i]; }
+      if (!tot) return;
+      const peaks = [];
+      for (let i = 1; i < 31; i++) {
+        if (sm2[i] < top * 0.18) continue;
+        if (sm2[i] < sm2[i - 1] || sm2[i] < sm2[i + 1]) continue;
+        peaks.push(i);
+      }
+      if (peaks.length < 2) return;
+      const first = peaks[0];
+      const last = peaks[peaks.length - 1];
+      const L1 = (first + 0.5) * (100 / 32);
+      const L2 = (last + 0.5) * (100 / 32);
+      if (L2 - L1 < CC_L_SPLIT) return;
+      let valley = Infinity;
+      for (let i = first + 1; i < last; i++) if (sm2[i] < valley) valley = sm2[i];
+      if (valley > Math.min(sm2[first], sm2[last]) * 0.55) return;
+      d.L = L1;
+      defs.push({ neutral: false, hue: d.hue, L: L2 });
+    });
+  }
+
+  if (!defs.length) defs.push({ neutral: true, L: 50 });
+  return defs;
+}
+
+// إسقاط المناطق الصغيرة: بكسلاتها تنضمّ لأقرب منطقة باقية
+function ccPruneDefs(lab, inside, n, defs) {
+  let cur = defs;
+  for (let pass = 0; pass < 3 && cur.length > 1; pass++) {
+    const counts = new Array(cur.length).fill(0);
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+      if (!inside[i]) continue;
+      const a = lab[i * 3 + 1];
+      const b = lab[i * 3 + 2];
+      const C = Math.sqrt(a * a + b * b);
+      counts[ccPickZone(lab[i * 3], C, ccHue(a, b), cur)]++;
+      total++;
+    }
+    const keep = cur.filter((d, i) => counts[i] / Math.max(total, 1) >= CC_MIN_SHARE);
+    if (keep.length === cur.length || !keep.length) break;
+    cur = keep;
+  }
+  return cur.slice(0, CC_MAX_ZONES);
+}
+
+function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
+  const small = ccScaled(src, CC_ANALYSIS_MAX);
+  const w = small.width, h = small.height, n = w * h;
+  const lab = ccLabBuffer(small);
+  // القطعة وحدها تدخل التقسيم: الخلفية والبشرة والشعر لا تأخذ أرقاماً أصلاً
+  const inside = new Uint8Array(n);
+  const sdata = small.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  const skinPx = new Uint8Array(n);
+  ccMarkSkin(skinPx, sdata, w, h, skinBoxes);
+  const hx1 = headBox ? (headBox.x1 / 100) * w : -1;
+  const hx2 = headBox ? (headBox.x2 / 100) * w : -1;
+  const hy1 = headBox ? (headBox.y1 / 100) * h : -1;
+  const hy2 = headBox ? (headBox.y2 / 100) * h : -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      let ok = 1;
+      if (subject && sw && sh) {
+        const sx = Math.min(sw - 1, Math.floor((x / w) * sw));
+        const sy = Math.min(sh - 1, Math.floor((y / h) * sh));
+        ok = subject[sy * sw + sx] > 0.6 ? 1 : 0;
+      }
+      // لا رقم على بشرة ولا على الرأس: هذول مو جزء من التصميم
+      if (ok && skinPx[i]) ok = 0;
+      if (ok && headBox && x >= hx1 && x <= hx2 && y >= hy1 && y <= hy2) ok = 0;
+      inside[i] = ok;
+    }
+  }
+  let count = 0;
+  for (let i = 0; i < n; i++) if (inside[i]) count++;
+  if (count < n * 0.02) inside.fill(1);
+
+  // القطعة جسم واحد: أي كتلة منفصلة عنها (زهور أو أثاث تسرّب من العزل)
+  // تُستبعد قبل أي حساب، فلا تأخذ رقماً ولا تدخل في النِّسَب
+  ccKeepLargest(inside, w, h);
+  const defs = ccPruneDefs(lab, inside, n, ccBuildDefs(lab, inside, n));
+
+  // إسناد كل بكسل من القطعة لمنطقته، ثم تصويت الجوار لإزالة التناثر
+  const assign = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const aa = lab[i * 3 + 1];
+    const bb = lab[i * 3 + 2];
+    assign[i] = ccPickZone(lab[i * 3], Math.sqrt(aa * aa + bb * bb), ccHue(aa, bb), defs);
+  }
+  ccDespeckle(assign, w, h, defs.length);
+
+  let insideCount = 0;
+  for (let i = 0; i < n; i++) if (inside[i]) insideCount++;
+  const acc = defs.map(() => ({ count: 0, sum: [0, 0, 0], px: [] }));
+  for (let i = 0; i < n; i++) {
+    if (!inside[i]) continue;
+    const e = acc[assign[i]];
+    e.count++;
+    e.sum[0] += lab[i * 3]; e.sum[1] += lab[i * 3 + 1]; e.sum[2] += lab[i * 3 + 2];
+    e.px.push(i);
+  }
+
+  // لون المنطقة المعروض: متوسّط أوضح نصف بكسلاتها لوناً — هذا لون القماش
+  // كما تراه العين، بينما المتوسّط الكامل يسحبه الظلّ نحو الأسود
+  const zoneColor = (e, isNeutral) => {
+    if (!e.count) return [50, 0, 0];
+    const key = e.px.map((i) => {
+      const a2 = lab[i * 3 + 1];
+      const b2 = lab[i * 3 + 2];
+      return { i, v: isNeutral ? lab[i * 3] : Math.sqrt(a2 * a2 + b2 * b2) };
+    }).sort((x, y) => y.v - x.v);
+    const take = Math.max(1, Math.round(key.length * 0.5));
+    const sum = [0, 0, 0];
+    for (let j = 0; j < take; j++) {
+      const i = key[j].i;
+      sum[0] += lab[i * 3]; sum[1] += lab[i * 3 + 1]; sum[2] += lab[i * 3 + 2];
+    }
+    return [sum[0] / take, sum[1] / take, sum[2] / take];
+  };
+  const order = defs.map((d, i) => i).filter((i) => acc[i].count > 0)
+    .sort((x, y) => acc[y].count - acc[x].count);
+
+  const zones = order.map((i) => {
+    const e = acc[i];
+    const mean = [e.sum[0] / e.count, e.sum[1] / e.count, e.sum[2] / e.count];
+    const shown = zoneColor(e, defs[i].neutral);
+    const z = {
+      def: i,
+      share: e.count / Math.max(insideCount, 1),
+      lab: mean,
+      hex: toHex(ccLab2Rgb(shown[0], shown[1], shown[2])),
+    };
+    const pt = nearestPantone(z.hex);
+    z.pantone = pt ? pt.code : '';
+    z.pantoneName = pt ? pt.name : '';
+
+    // كل قطعة منفصلة من نفس اللون تأخذ الرقم نفسه: الصدر والأكمام والتنورة
+    const belongs = new Uint8Array(n);
+    let total = 0;
+    for (let j = 0; j < n; j++) {
+      if (inside[j] && assign[j] === i) { belongs[j] = 1; total++; }
+    }
+    const seen = new Uint8Array(n);
+    const stack = new Int32Array(n);
+    const parts = [];
+    for (let start = 0; start < n; start++) {
+      if (seen[start] || !belongs[start]) continue;
+      let top = 0, len = 0, sx = 0, sy = 0;
+      stack[top++] = start;
+      seen[start] = 1;
+      while (top > 0) {
+        const j = stack[--top];
+        const x = j % w;
+        const y = (j - x) / w;
+        len++; sx += x; sy += y;
+        if (x > 0 && !seen[j - 1] && belongs[j - 1]) { seen[j - 1] = 1; stack[top++] = j - 1; }
+        if (x < w - 1 && !seen[j + 1] && belongs[j + 1]) { seen[j + 1] = 1; stack[top++] = j + 1; }
+        if (y > 0 && !seen[j - w] && belongs[j - w]) { seen[j - w] = 1; stack[top++] = j - w; }
+        if (y < h - 1 && !seen[j + w] && belongs[j + w]) { seen[j + w] = 1; stack[top++] = j + w; }
+      }
+      parts.push({ len, cx: sx / len, cy: sy / len });
+    }
+    parts.sort((x, y) => y.len - x.len);
+    const pts = parts.filter((pp) => pp.len >= Math.max(total * 0.10, 30)).slice(0, 4).map((pp) => {
+      let bx = pp.cx, by = pp.cy, bd = Infinity;
+      for (let j = 0; j < n; j++) {
+        if (!belongs[j]) continue;
+        const x = j % w;
+        const y = (j - x) / w;
+        const dd = Math.pow(x - pp.cx, 2) + Math.pow(y - pp.cy, 2);
+        if (dd < bd) { bd = dd; bx = x; by = y; }
+      }
+      return { x: bx / w, y: by / h };
+    });
+    z.points = pts.length ? pts : [{ x: 0.5, y: 0.5 }];
+    z.x = z.points[0].x;
+    z.y = z.points[0].y;
+    return z;
+  });
+
+  return { defs: order.map((i) => defs[i]), centers: zones.map((z) => z.lab), zones };
+}
+
+function ccMasks(canvas, defs, skinBoxes) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = img.data;
@@ -1899,20 +2104,47 @@ function ccMasks(canvas, centers) {
   for (let i = 0; i < n; i++) {
     const L = rgbToLab([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]);
     lab[i * 3] = L[0]; lab[i * 3 + 1] = L[1]; lab[i * 3 + 2] = L[2];
-    skin[i] = ccIsSkin(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) ? 1 : 0;
-    let bi = 0, bd = Infinity;
-    for (let c = 0; c < centers.length; c++) {
-      const dl = (L[0] - centers[c][0]) * CC_LW;
-      const da = L[1] - centers[c][1];
-      const db = L[2] - centers[c][2];
-      const dd = dl * dl + da * da + db * db;
-      if (dd < bd) { bd = dd; bi = c; }
-    }
-    assign[i] = bi;
+    skin[i] = 0;
+    const C = Math.sqrt(L[1] * L[1] + L[2] * L[2]);
+    assign[i] = ccPickZone(L[0], C, ccHue(L[1], L[2]), defs);
   }
-  ccDespeckle(assign, canvas.width, canvas.height, centers.length);
+  ccDespeckle(assign, canvas.width, canvas.height, defs.length);
+  ccMarkSkin(skin, d, canvas.width, canvas.height, skinBoxes);
   const bg = ccBackgroundMask(lab, canvas.width, canvas.height);
-  return { lab, assign, skin, bg, w: canvas.width, h: canvas.height };
+  return { lab, assign, skin, bg, defs, w: canvas.width, h: canvas.height };
+}
+
+// يبقي الكتل الكبيرة المتصلة ويشيل ما انفصل عنها
+function ccKeepLargest(mask, w, h) {
+  const n = w * h;
+  const seen = new Uint8Array(n);
+  const stack = new Int32Array(n);
+  const comp = new Int32Array(n);
+  const blobs = [];
+  for (let start = 0; start < n; start++) {
+    if (seen[start] || !mask[start]) continue;
+    let top = 0, len = 0;
+    stack[top++] = start;
+    seen[start] = 1;
+    while (top > 0) {
+      const i = stack[--top];
+      comp[len++] = i;
+      const x = i % w;
+      const y = (i - x) / w;
+      if (x > 0 && !seen[i - 1] && mask[i - 1]) { seen[i - 1] = 1; stack[top++] = i - 1; }
+      if (x < w - 1 && !seen[i + 1] && mask[i + 1]) { seen[i + 1] = 1; stack[top++] = i + 1; }
+      if (y > 0 && !seen[i - w] && mask[i - w]) { seen[i - w] = 1; stack[top++] = i - w; }
+      if (y < h - 1 && !seen[i + w] && mask[i + w]) { seen[i + w] = 1; stack[top++] = i + w; }
+    }
+    blobs.push(comp.slice(0, len));
+  }
+  if (blobs.length < 2) return;
+  let big = 0;
+  blobs.forEach((b) => { if (b.length > big) big = b.length; });
+  blobs.forEach((b) => {
+    if (b.length >= big * 0.15) return;
+    for (let j = 0; j < b.length; j++) mask[b[j]] = 0;
+  });
 }
 
 // تصويت الجوار: يشيل النقاط المتناثرة داخل المنطقة فلا يطلع اللون مبقّع
@@ -1933,14 +2165,10 @@ function ccDespeckle(assign, w, h, k) {
 }
 
 // تنعيم حواف القناع بمرور أفقي ورأسي بسيط
-function ccZoneMask(map, k, centerLab, centers) {
-  const { assign, skin, bg, headBox, hairIsGarment, box, subject, lab, w, h } = map;
+function ccZoneMask(map, k) {
+  const { assign, skin, bg, headBox, hairIsGarment, box, subject, w, h } = map;
   const n = w * h;
   const m = new Float32Array(n);
-  // انتماء متدرّج لكل بكسل: القماش المتدرّج يأخذ اللون بتدرّج مماثل،
-  // فلا تظهر بقع ولا حدود مقصوصة داخل القطعة
-  const soft = lab && centers && centers.length > 1;
-  const sig2 = 2 * 26 * 26;
   // وإذا كانت المنطقة هي الخلفية نفسها تُلوَّن عادي، وإلا تُستثنى بكسلات الخلفية
   let bgZone = false;
   if (bg) {
@@ -1962,25 +2190,8 @@ function ccZoneMask(map, k, centerLab, centers) {
   const by1 = box ? Math.floor((box.y1 / 100) * h) : 0;
   const by2 = box ? Math.ceil((box.y2 / 100) * h) : h;
   for (let i = 0; i < n; i++) {
-    let base;
-    if (soft) {
-      let best = 0;
-      let mine = 0;
-      for (let c = 0; c < centers.length; c++) {
-        const dl = (lab[i * 3] - centers[c][0]) * CC_LW;
-        const da = lab[i * 3 + 1] - centers[c][1];
-        const db = lab[i * 3 + 2] - centers[c][2];
-        const e = Math.exp(-(dl * dl + da * da + db * db) / sig2);
-        if (e > best) best = e;
-        if (c === k) mine = e;
-      }
-      // أقرب منطقة تأخذ اللون كاملاً، والجوار يتدرّج بدل أن ينقطع
-      const rel = best > 0 ? mine / best : 0;
-      base = rel * rel;
-      if (base < 0.03) base = 0;
-    } else {
-      base = assign[i] === k ? 1 : 0;
-    }
+    // كل بكسل لمنطقة واحدة فقط: لا رقمان يتنازعان نفس المكان
+    const base = assign[i] === k ? 1 : 0;
     if (base === 0) { m[i] = 0; continue; }
     if (skin && skin[i]) { m[i] = 0; continue; }
     // الشعر لا يتلوّن إلا إذا اختارت المصممة أن غطاء الرأس جزء من التصميم
@@ -2064,7 +2275,7 @@ function ccRecolor(canvas, map, centers, changes) {
   let touched = false;
 
   changes.forEach((ch) => {
-    const mask = ch.mask || ccZoneMask(map, ch.zone, centers[ch.zone], centers);
+    const mask = ch.mask || ccZoneMask(map, ch.zone);
     const src = centers[ch.zone];
     const t = rgbToLab(ccHexRgb(ch.hex));
     const srcC = Math.max(Math.sqrt(src[1] * src[1] + src[2] * src[2]), 0.001);
@@ -2095,33 +2306,6 @@ function ccRecolor(canvas, map, centers, changes) {
   const res = tpCanvas(canvas.width, canvas.height);
   res.getContext('2d').putImageData(img, 0, 0);
   return res;
-}
-
-// صورة مرقّمة تُرسل للتسمية
-function ccPinnedBlob(view, zones) {
-  const c = tpCanvas(view.width, view.height);
-  const ctx = c.getContext('2d');
-  ctx.drawImage(view, 0, 0);
-  const r = Math.max(13, Math.round(Math.min(c.width, c.height) * 0.028));
-  ctx.font = '700 ' + Math.round(r * 1.15) + 'px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  zones.forEach((z, i) => {
-    const x = z.x * c.width;
-    const y = z.y * c.height;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.94)';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#111';
-    ctx.stroke();
-    ctx.fillStyle = '#111';
-    ctx.fillText(String(i + 1), x, y + 1);
-  });
-  return new Promise((resolve, reject) => {
-    c.toBlob((b) => (b ? resolve(b) : reject(new Error('pin'))), 'image/jpeg', 0.86);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -2223,17 +2407,19 @@ function CcPreview({ data, zones, showPins }) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       zones.forEach((z, i) => {
-        const x = z.x * c.width;
-        const y = z.y * c.height;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.92)';
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = z.mode === 'change' ? '#1d7a4c' : '#111';
-        ctx.stroke();
-        ctx.fillStyle = '#111';
-        ctx.fillText(String(i + 1), x, y + 1);
+        (z.points || [{ x: z.x, y: z.y }]).forEach((pt) => {
+          const x = pt.x * c.width;
+          const y = pt.y * c.height;
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = z.mode === 'change' ? '#1d7a4c' : '#111';
+          ctx.stroke();
+          ctx.fillStyle = '#111';
+          ctx.fillText(String(i + 1), x, y + 1);
+        });
       });
     }
   }, [data, zones, showPins]);
