@@ -85,6 +85,7 @@ export default function Home() {
   const [ccError, setCcError] = useState('');
   const [ccWarn, setCcWarn] = useState('');
   const [ccHairOn, setCcHairOn] = useState(false);
+  const [ccPicking, setCcPicking] = useState(false);
 
   // ===== التيك باك =====
   const [tpImage, setTpImage] = useState(null);
@@ -458,6 +459,8 @@ export default function Home() {
 
       let zones = det.zones.map((z, i) => ({
         n: i + 1,
+        autoIndex: i,
+        manual: false,
         x: z.x,
         y: z.y,
         points: z.points || [{ x: z.x, y: z.y }],
@@ -496,6 +499,66 @@ export default function Home() {
     setCcZones((list) => list.map((z, j) => (j === i ? { ...z, ...patch } : z)));
   };
 
+  // المصممة ضغطت ع تفصيلة بالصورة: بتصير منطقة جديدة برقمها الخاص
+  const ccAddManual = (u, v) => {
+    if (!ccData) return;
+    // بنبلّش ضيّق: توسيع التحديد بالشريط أسهل وأوضح من انفجاره ع القطعة كلها
+    const tol = 18;
+    const region = ccPickRegion(ccData.map, u, v, tol);
+    const info = ccRegionInfo(ccData.map, region);
+    if (!info || info.count < 40) {
+      setCcError('ما قدرت أمسك تفصيلة هون — جرّبي جوّا القطعة، وإذا الضغطة ع بشرة أو ع الرأس ما بتنمسك');
+      return;
+    }
+    setCcError('');
+    const pt = nearestPantone(info.hex);
+    setCcZones((list) => list.concat([{
+      n: list.length + 1,
+      manual: true,
+      seed: { x: u, y: v },
+      tol,
+      center: info.center,
+      x: info.point.x,
+      y: info.point.y,
+      points: [info.point],
+      hex: info.hex,
+      share: Math.max(1, Math.round(info.share * 100)),
+      pantone: pt ? pt.code : '',
+      name: pt ? pt.name : info.hex,
+      where: '',
+      material: '',
+      part: 'other',
+      mode: 'change',
+      target: info.hex,
+    }]));
+    setCcOpenZone(ccZones.length);
+    setCcPicking(false);
+  };
+
+  // شريط سعة التحديد: بيوسّع أو بيضيّق المنطقة اليدوية فوراً
+  const ccSetManualTol = (i, tol) => {
+    if (!ccData) return;
+    setCcZones((list) => list.map((z, j) => {
+      if (j !== i || !z.manual) return z;
+      const info = ccRegionInfo(ccData.map, ccPickRegion(ccData.map, z.seed.x, z.seed.y, tol));
+      if (!info || info.count < 20) return { ...z, tol };
+      return {
+        ...z,
+        tol,
+        center: info.center,
+        x: info.point.x,
+        y: info.point.y,
+        points: [info.point],
+        share: Math.max(1, Math.round(info.share * 100)),
+      };
+    }));
+  };
+
+  const ccRemoveZone = (i) => {
+    setCcOpenZone(-1);
+    setCcZones((list) => list.filter((z, j) => j !== i).map((z, j) => ({ ...z, n: j + 1 })));
+  };
+
   const ccChangedZones = ccZones.filter((z) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex);
 
   // النتيجة النهائية بدقّة الصورة الكاملة، وتنزل PNG على جهاز المصممة مباشرة
@@ -507,9 +570,6 @@ export default function Home() {
     setCcError('');
     setCcBusy(true);
     try {
-      const changes = ccZones
-        .map((z, i) => ({ zone: i, hex: z.target, on: z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex }))
-        .filter((c) => c.on);
       const fullSubject = ccData.cutoutUrl
         ? await ccSubjectMask(ccData.cutoutUrl, ccData.full.width, ccData.full.height)
         : null;
@@ -518,6 +578,13 @@ export default function Home() {
       fullMap.hairIsGarment = ccHairOn;
       fullMap.headBox = ccData.headBox || null;
       if (fullSubject) fullMap.subject = fullSubject;
+      // الأقنعة تُبنى من جديد بدقّة الصورة الكاملة — بما فيها المناطق اليدوية،
+      // فنقطة الضغط محفوظة بالنِّسَب لا بالبكسل
+      const fullMasks = ccChangeMasks(fullMap, ccZones, null);
+      const changes = ccZones
+        .map((z, i) => ({ i, z }))
+        .filter(({ z }) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex)
+        .map(({ i, z }) => ({ zone: fullMasks[i].zone, hex: z.target, mask: fullMasks[i].mask, center: fullMasks[i].center }));
       const out = ccRecolor(ccData.full, fullMap, ccData.centers, changes);
       const rec = {
         id: 'cc' + Date.now(),
@@ -1056,12 +1123,19 @@ export default function Home() {
                 {ccData && ccZones.length > 0 && (
                   <div className="cc-work">
                     <div className="cc-stage">
-                      <CcPreview data={ccData} zones={ccZones} showPins />
-                      <div className="cc-stage-note">الأرقام على الصورة هي نفس أرقام المناطق تحت</div>
+                      <CcPreview data={ccData} zones={ccZones} showPins
+                        picking={ccPicking} onPick={ccAddManual} />
+                      <div className="cc-stage-note">
+                        {ccPicking ? 'اضغطي ع التفصيلة اللي بدك تغيّري لونها' : 'الأرقام على الصورة هي نفس أرقام المناطق تحت'}
+                      </div>
                     </div>
 
                     <div className="cc-panel">
                       <div className="cc-panel-head">مناطق الألوان — {ccZones.length}</div>
+                      <button type="button" className={'cc-pickbtn' + (ccPicking ? ' on' : '')}
+                        onClick={() => { setCcPicking(!ccPicking); setCcError(''); }}>
+                        {ccPicking ? 'إلغاء التحديد بالضغط' : 'حدّدي تفصيلة بالضغط ع الصورة'}
+                      </button>
                       <label className="cc-hair">
                         <input type="checkbox" checked={ccHairOn} onChange={(e) => ccToggleHair(e.target.checked)} />
                         <span>غطاء الرأس جزء من التصميم (حجاب أو طرحة)</span>
@@ -1077,15 +1151,29 @@ export default function Home() {
                                 <span className="cc-zone-hex" dir="ltr">{z.mode === 'change' ? z.target : z.hex}</span>
                                 {z.pantone && <span className="cc-zone-pt" dir="ltr">PANTONE {z.pantone}</span>}
                               </div>
-                              <div className="cc-zone-where">نسبة المساحة {z.share}%</div>
+                              <div className="cc-zone-where">
+                                نسبة المساحة {z.share}%{z.manual ? ' · تحديد يدوي' : ''}
+                              </div>
                             </div>
                             <div className="cc-zone-actions">
                               <button type="button" className={'cc-btn' + (z.mode === 'keep' ? ' active' : '')}
                                 onClick={() => { ccSetZone(i, { mode: 'keep' }); setCcOpenZone(-1); }}>متل ما هي</button>
                               <button type="button" className={'cc-btn' + (z.mode === 'change' ? ' active' : '')}
                                 onClick={() => { ccSetZone(i, { mode: 'change' }); setCcOpenZone(ccOpenZone === i ? -1 : i); }}>غيّري اللون</button>
+                              {z.manual && (
+                                <button type="button" className="cc-btn del"
+                                  onClick={() => ccRemoveZone(i)}>احذفيها</button>
+                              )}
                             </div>
                           </div>
+                          {z.manual && (
+                            <div className="cc-tol">
+                              <span>سعة التحديد</span>
+                              <input type="range" min="6" max="70" value={z.tol}
+                                onChange={(e) => ccSetManualTol(i, Number(e.target.value))} />
+                              <span dir="ltr">{z.tol}</span>
+                            </div>
+                          )}
                           {ccOpenZone === i && z.mode === 'change' && (
                             <CcPicker value={z.target} onPick={(hex) => ccSetZone(i, { target: hex, mode: 'change' })} />
                           )}
@@ -1787,6 +1875,11 @@ function ccMarkSkin(skin, d, w, h, boxes, tone, subject) {
   // الصندوق يضبط المكان، فبنتساهل باللون: الذراع والساق إضاءتهن تختلف عن
   // الوجه، والمطلوب بس رفض قماش واضح الاختلاف وقع جوّا الصندوق
   const gate = tone ? tone.tol * 1.8 : 0;
+  // البشرة درجتها هادية. قماش أفقع بكتير من وجه العارضة مو بشرة مهما كان
+  // الصندوق واسع — هيك بودي ستربلس برتقالي فاقع جوّا صندوق «صدر وكتفين»
+  // بيضلّ قماش وبياخد رقمه
+  const refC = tone ? Math.sqrt(tone.lab[1] * tone.lab[1] + tone.lab[2] * tone.lab[2]) : 0;
+  const maxC = tone ? refC + 25 : Infinity;
   boxes.forEach((bx) => {
     const x1 = Math.max(0, Math.floor((bx.x1 / 100) * w));
     const x2 = Math.min(w, Math.ceil((bx.x2 / 100) * w));
@@ -1803,6 +1896,7 @@ function ccMarkSkin(skin, d, w, h, boxes, tone, subject) {
         if (!ccIsSkin(r, g, b)) continue;
         if (ref) {
           const L = rgbToLab([r, g, b]);
+          if (Math.sqrt(L[1] * L[1] + L[2] * L[2]) > maxC) continue;
           const dl = L[0] - ref[0];
           const da = L[1] - ref[1];
           const db = L[2] - ref[2];
@@ -1855,6 +1949,57 @@ function ccBackgroundMask(lab, w, h, subject) {
     if (y < h - 1 && !bg[i + w] && near(i, i + w)) push(i + w);
   }
   return bg;
+}
+
+// قناع التلوين: قناع العزل بعد تآكل شريط رفيع من حافته.
+//
+// قناع bria أحياناً بيطلع أوسع من القطعة بشريط رفيع حواليها، وهالشريط
+// بيتلوّن مع الفستان فتطلع الخلفية ملوّنة. التآكل بيشيله.
+//
+// جرّبت أقصّه باللون (كل بكسل جوّا القناع قريب من الخلفية اللي جنبه)
+// وقِست النتيجة: أكل من 30% لـ54% من الفستان على أقنعة سليمة، فرميتها.
+//
+// ومهمّ: التآكل بيأثّر على **التلوين وحده**، ما بينزل على قناع العزل نفسه.
+// لأن كشف الخلفية بيبلّش من البكسلات اللي برّا القناع، فلو تآكل القناع
+// بيصير الشريط المتآكل بذرة وبينتشر لجوّا القماش ويبلع منطقة كاملة —
+// صار فعلاً بفحص «ثلاثة ألوان» واختفت منطقة الذهبي.
+function ccPaintMask(subject, w, h) {
+  if (!subject) return null;
+  const n = w * h;
+  const r = Math.max(2, Math.min(6, Math.round(Math.min(w, h) * 0.005)));
+  const solid = new Uint8Array(n);
+  for (let i = 0; i < n; i++) solid[i] = subject[i] > 0.5 ? 1 : 0;
+  // تآكل مفصول: مرور أفقي ثم رأسي. خارج الصورة ما بينحسب خلفية، فقطعة
+  // مقصوصة عند حافة الصورة ما بتنقصّ
+  const tmp = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let on = 1;
+      for (let k = -r; k <= r && on; k++) {
+        const xx = x + k;
+        if (xx >= 0 && xx < w && !solid[y * w + xx]) on = 0;
+      }
+      tmp[y * w + x] = on;
+    }
+  }
+  const keep = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let on = 1;
+      for (let k = -r; k <= r && on; k++) {
+        const yy = y + k;
+        if (yy >= 0 && yy < h && !tmp[yy * w + x]) on = 0;
+      }
+      keep[y * w + x] = on;
+    }
+  }
+  let was = 0, now = 0;
+  for (let i = 0; i < n; i++) { if (solid[i]) was++; if (keep[i]) now++; }
+  // قطعة رفيعة (رسمة خطّية مثلاً) ممكن يمحيها التآكل كلّه — عندها منتركها
+  if (!was || now / was < 0.5) return subject;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = keep[i] ? subject[i] : 0;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -2106,7 +2251,7 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
   const hx1 = headBox ? (headBox.x1 / 100) * w - hw * 0.12 : -1;
   const hx2 = headBox ? (headBox.x2 / 100) * w + hw * 0.12 : -1;
   const hy1 = headBox ? (headBox.y1 / 100) * h - hh2 * 0.10 : -1;
-  const hy2 = headBox ? (headBox.y2 / 100) * h + hh2 * 0.30 : -1;
+  const hy2 = headBox ? (headBox.y2 / 100) * h + hh2 * 0.12 : -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
@@ -2305,7 +2450,9 @@ function ccMasks(canvas, defs, skinBoxes, headBox, subject) {
   ccMarkSkin(skin, d, canvas.width, canvas.height, skinBoxes,
     ccSkinTone(d, canvas.width, canvas.height, headBox, subject), subject);
   const bg = ccBackgroundMask(lab, canvas.width, canvas.height, subject);
-  return { lab, assign, skin, bg, defs, w: canvas.width, h: canvas.height };
+  // قناع التلوين متآكل شوي عن قناع العزل، فالهالة ما بتتلوّن
+  const paint = ccPaintMask(subject, canvas.width, canvas.height);
+  return { lab, assign, skin, bg, paint, defs, w: canvas.width, h: canvas.height };
 }
 
 // يبقي الكتل الكبيرة المتصلة ويشيل ما انفصل عنها
@@ -2361,6 +2508,7 @@ function ccDespeckle(assign, w, h, k) {
 // تنعيم حواف القناع بمرور أفقي ورأسي بسيط
 function ccZoneMask(map, k) {
   const { assign, skin, bg, headBox, hairIsGarment, box, subject, w, h } = map;
+  const paint = map.paint || subject;
   const n = w * h;
   const m = new Float32Array(n);
   // وإذا كانت المنطقة هي الخلفية نفسها تُلوَّن عادي، وإلا تُستثنى بكسلات الخلفية
@@ -2375,14 +2523,15 @@ function ccZoneMask(map, k) {
     bgZone = inZone > 0 && inBg / inZone > 0.6;
   }
   // خارج إطار القطعة لا يُلوَّن شيء: الجدران والأثاث والزهور تبقى كما هي
-  // هامش أمان حول الرأس: الذقن والرقبة وأطراف الشعر غالباً خارج الصندوق
-  // بقليل، وتركها بلا حماية يعني وجهاً ملوّناً
+  // هامش أمان حول الرأس: الذقن وأطراف الشعر غالباً خارج الصندوق بقليل.
+  // الهامش تحت الصندوق ضيّق عن قصد (12%): بفستان ستربلس القطعة الفوقانية
+  // بتبلّش مباشرة تحت الترقوة، وهامش واسع كان بياكلها فتطلع بلا رقم.
   const hbw = headBox ? ((headBox.x2 - headBox.x1) / 100) * w : 0;
   const hbh = headBox ? ((headBox.y2 - headBox.y1) / 100) * h : 0;
   const hbx1 = headBox ? Math.floor((headBox.x1 / 100) * w - hbw * 0.12) : 0;
   const hbx2 = headBox ? Math.ceil((headBox.x2 / 100) * w + hbw * 0.12) : 0;
   const hby1 = headBox ? Math.floor((headBox.y1 / 100) * h - hbh * 0.10) : 0;
-  const hby2 = headBox ? Math.ceil((headBox.y2 / 100) * h + hbh * 0.30) : 0;
+  const hby2 = headBox ? Math.ceil((headBox.y2 / 100) * h + hbh * 0.12) : 0;
   const bx1 = box ? Math.floor((box.x1 / 100) * w) : 0;
   const bx2 = box ? Math.ceil((box.x2 / 100) * w) : w;
   const by1 = box ? Math.floor((box.y1 / 100) * h) : 0;
@@ -2398,13 +2547,11 @@ function ccZoneMask(map, k) {
       const hy = (i - hx) / w;
       if (hx >= hbx1 && hx <= hbx2 && hy >= hby1 && hy <= hby2) { m[i] = 0; continue; }
     }
-    // الخلفية تُستثنى حتى لو كان في عزل: قناع العزل بيوسّع شوي على الحواف
-    // وبيسرّب جدار أو أرضية جوّاه، وبكسلات الجدار هاي بتتلوّن مع الفستان.
-    // انتشار الخلفية بيبلّش من حواف الصورة وبرّا القطعة، فبيمسك المتسرّب
-    // وما بياكل القماش.
+    // القطعة معزولة: كل ما خارجها لا يُلمس، والحواف تأخذ شفافية العزل نفسها.
+    // قناع العزل هو المرجع هون، مو انتشار الخلفية: على صورة فوتوغرافية
+    // نَعِمة الانتشار بيعبر حدّ القماش وبيغطّي الصورة كلها، فما بينفع كحكم.
+    if (paint) { m[i] = paint[i] * base; continue; }
     if (bg && bg[i] && !bgZone) { m[i] = 0; continue; }
-    // القطعة معزولة: كل ما خارجها لا يُلمس، والحواف تأخذ شفافية العزل نفسها
-    if (subject) { m[i] = subject[i] * base; continue; }
     if (box && !bgZone) {
       const x = i % w;
       const y = (i - x) / w;
@@ -2467,6 +2614,177 @@ function ccKeepCore(m, w, h, core) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// التحديد اليدوي: المصممة تضغط على التفصيلة
+// ---------------------------------------------------------------------------
+// الكشف الآلي بيقسّم باللون، وفي تصاميم ما بينفع: فستان متدرّج من الأحمر
+// للبرتقالي للأصفر كلّه درجة وحدة ممتدّة، وألواحه منفصلة بالمكان لا باللون.
+// لهيك المصممة بتقدر تضغط ع أي تفصيلة فتصير منطقة برقمها الخاص، وبتوسّع
+// أو بتضيّق التحديد بشريط. نقطة الضغط محفوظة بنِسَب الصورة، فينعاد بناء
+// نفس المنطقة بدقّة الصورة الكاملة وقت التنزيل.
+function ccRegionAllowed(map, i) {
+  const { skin, headBox, hairIsGarment, w } = map;
+  const subject = map.paint || map.subject;
+  if (subject && subject[i] < 0.4) return false;
+  if (skin && skin[i]) return false;
+  if (headBox && !hairIsGarment) {
+    const hw = ((headBox.x2 - headBox.x1) / 100) * w;
+    const hh = ((headBox.y2 - headBox.y1) / 100) * map.h;
+    const x = i % w;
+    const y = (i - x) / w;
+    if (x >= (headBox.x1 / 100) * w - hw * 0.12 && x <= (headBox.x2 / 100) * w + hw * 0.12
+      && y >= (headBox.y1 / 100) * map.h - hh * 0.10 && y <= (headBox.y2 / 100) * map.h + hh * 0.12) return false;
+  }
+  return true;
+}
+
+// tol: 1 = ضيّق جداً، 100 = واسع. المسافة بالـ Lab مع وزن أخفّ للإضاءة
+// حتى يمسك التحديد القماش بظلّه وضوئه لا بالبقعة المضيئة وحدها
+function ccPickRegion(map, u, v, tol) {
+  const { lab, w, h } = map;
+  const n = w * h;
+  const sx = Math.max(0, Math.min(w - 1, Math.round(u * w)));
+  const sy = Math.max(0, Math.min(h - 1, Math.round(v * h)));
+  const region = new Uint8Array(n);
+  // مرجع اللون = متوسّط جوار صغير، فما يتأثّر التحديد ببكسل شاذّ
+  let rl = 0, ra = 0, rb = 0, cnt = 0;
+  const rad = Math.max(1, Math.round(Math.min(w, h) * 0.004));
+  for (let y = Math.max(0, sy - rad); y <= Math.min(h - 1, sy + rad); y++) {
+    for (let x = Math.max(0, sx - rad); x <= Math.min(w - 1, sx + rad); x++) {
+      const i = y * w + x;
+      rl += lab[i * 3]; ra += lab[i * 3 + 1]; rb += lab[i * 3 + 2]; cnt++;
+    }
+  }
+  if (!cnt) return region;
+  rl /= cnt; ra /= cnt; rb /= cnt;
+  const lim = Math.max(4, tol) * 0.9;
+  const near = (i) => {
+    const dl = (lab[i * 3] - rl) * 0.7;
+    const da = lab[i * 3 + 1] - ra;
+    const db = lab[i * 3 + 2] - rb;
+    return Math.sqrt(dl * dl + da * da + db * db) < lim;
+  };
+  // حدّ الحافة: الانتشار بيوقف عند الخياطة أو الكسرة أو حدّ اللوح، حتى لو
+  // كان اللون على الجهة التانية قريب. بفستان متدرّج الألواح متلاصقة بالدرجة
+  // ومفصولة بخط غامق، وبلا هالاختبار ضغطة وحدة بتبلع التنورة كلها.
+  const edgeLim = Math.max(6, lim * 0.45);
+  const stepOk = (i, j) => {
+    const dl = lab[i * 3] - lab[j * 3];
+    const da = lab[i * 3 + 1] - lab[j * 3 + 1];
+    const db = lab[i * 3 + 2] - lab[j * 3 + 2];
+    return Math.sqrt(dl * dl + da * da + db * db) < edgeLim;
+  };
+  const seed = sy * w + sx;
+  if (!ccRegionAllowed(map, seed)) return region;
+  const stack = new Int32Array(n);
+  let top = 0;
+  region[seed] = 1;
+  stack[top++] = seed;
+  const push = (from, i) => {
+    if (region[i]) return;
+    if (!ccRegionAllowed(map, i) || !near(i) || !stepOk(from, i)) return;
+    region[i] = 1;
+    stack[top++] = i;
+  };
+  while (top > 0) {
+    const i = stack[--top];
+    const x = i % w;
+    const y = (i - x) / w;
+    if (x > 0) push(i, i - 1);
+    if (x < w - 1) push(i, i + 1);
+    if (y > 0) push(i, i - w);
+    if (y < h - 1) push(i, i + w);
+  }
+  return region;
+}
+
+// قناع ناعم من منطقة يدوية، بنفس تنعيم أقنعة المناطق الآلية
+function ccRegionMask(region, w, h) {
+  const n = w * h;
+  const m = new Float32Array(n);
+  for (let i = 0; i < n; i++) m[i] = region[i] ? 1 : 0;
+  const t = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const l = x > 0 ? m[i - 1] : m[i];
+      const r = x < w - 1 ? m[i + 1] : m[i];
+      t[i] = (l + m[i] * 2 + r) / 4;
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const u = y > 0 ? t[i - w] : t[i];
+      const dn = y < h - 1 ? t[i + w] : t[i];
+      m[i] = (u + t[i] * 2 + dn) / 4;
+    }
+  }
+  return m;
+}
+
+// وسط المنطقة ولونها ونقطة الرقم عليها
+function ccRegionInfo(map, region) {
+  const { lab, w, h } = map;
+  const n = w * h;
+  let cnt = 0, sl = 0, sa = 0, sb = 0, sx = 0, sy = 0;
+  let x1 = w, x2 = -1, y1 = h, y2 = -1;
+  for (let i = 0; i < n; i++) {
+    if (!region[i]) continue;
+    cnt++;
+    sl += lab[i * 3]; sa += lab[i * 3 + 1]; sb += lab[i * 3 + 2];
+    const x = i % w;
+    const y = (i - x) / w;
+    sx += x; sy += y;
+    if (x < x1) x1 = x; if (x > x2) x2 = x;
+    if (y < y1) y1 = y; if (y > y2) y2 = y;
+  }
+  if (!cnt) return null;
+  const center = [sl / cnt, sa / cnt, sb / cnt];
+  // نقطة الرقم: مركز الثقل إن كان داخل المنطقة، وإلا أقرب بكسل منها
+  let px = Math.round(sx / cnt);
+  let py = Math.round(sy / cnt);
+  if (!region[py * w + px]) {
+    let best = Infinity;
+    for (let i = 0; i < n; i++) {
+      if (!region[i]) continue;
+      const x = i % w;
+      const y = (i - x) / w;
+      const d = (x - sx / cnt) * (x - sx / cnt) + (y - sy / cnt) * (y - sy / cnt);
+      if (d < best) { best = d; px = x; py = y; }
+    }
+  }
+  return {
+    count: cnt,
+    share: cnt / n,
+    center,
+    hex: toHex(ccLab2Rgb(center[0], center[1], center[2])),
+    point: { x: (px + 0.5) / w, y: (py + 0.5) / h },
+    box: { x1: x1 / w, y1: y1 / h, x2: (x2 + 1) / w, y2: (y2 + 1) / h },
+  };
+}
+
+// أقنعة التغيير: المنطقة اليدوية بتغلب الآلية على بكسلاتها، فما يتنازع
+// رقمان على نفس المكان ولا يتلوّن بكسل مرّتين
+function ccChangeMasks(map, zones, cache) {
+  const n = map.w * map.h;
+  const manual = [];
+  const out = zones.map((z, i) => {
+    if (!z.manual) return null;
+    const m = ccRegionMask(ccPickRegion(map, z.seed.x, z.seed.y, z.tol), map.w, map.h);
+    manual.push(m);
+    return { zone: i, mask: m, center: z.center };
+  });
+  zones.forEach((z, i) => {
+    if (z.manual) return;
+    const base = cache && cache[i] ? cache[i] : ccZoneMask(map, z.autoIndex != null ? z.autoIndex : i);
+    const m = new Float32Array(base);
+    manual.forEach((mm) => { for (let k = 0; k < n; k++) if (mm[k] > 0) m[k] *= 1 - Math.min(1, mm[k]); });
+    out[i] = { zone: z.autoIndex != null ? z.autoIndex : i, mask: m, center: null };
+  });
+  return out;
+}
+
 // التلوين نفسه: تُحفظ الإضاءة وتفاوت التشبّع، ويُستبدل اللون
 function ccRecolor(canvas, map, centers, changes) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -2478,7 +2796,8 @@ function ccRecolor(canvas, map, centers, changes) {
 
   changes.forEach((ch) => {
     const mask = ch.mask || ccZoneMask(map, ch.zone);
-    const src = centers[ch.zone];
+    const src = ch.center || centers[ch.zone];
+    if (!src) return;
     const t = rgbToLab(ccHexRgb(ch.hex));
     const srcC = Math.max(Math.sqrt(src[1] * src[1] + src[2] * src[2]), 0.001);
     touched = true;
@@ -2589,14 +2908,15 @@ function CcPicker({ value, onPick }) {
 }
 
 // معاينة حية: الصورة بعد التلوين مع أرقام المناطق
-function CcPreview({ data, zones, showPins }) {
+function CcPreview({ data, zones, showPins, picking, onPick }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!data || !ref.current) return;
+    const masks = ccChangeMasks(data.map, zones, data.maskCache);
     const changes = zones
-      .map((z, i) => ({ zone: i, hex: z.target, on: z.mode === 'change' && tpHexOk(z.target) }))
-      .filter((c) => c.on)
-      .map((c) => ({ zone: c.zone, hex: c.hex, mask: data.maskCache[c.zone] }));
+      .map((z, i) => ({ i, z }))
+      .filter(({ z }) => z.mode === 'change' && tpHexOk(z.target))
+      .map(({ i, z }) => ({ zone: masks[i].zone, hex: z.target, mask: masks[i].mask, center: masks[i].center }));
     const out = changes.length ? ccRecolor(data.view, data.map, data.centers, changes) : data.view;
     const c = ref.current;
     c.width = data.view.width;
@@ -2624,8 +2944,18 @@ function CcPreview({ data, zones, showPins }) {
         });
       });
     }
-  }, [data, zones, showPins]);
-  return <canvas ref={ref} className="cc-canvas" />;
+  }, [data, zones, showPins, picking]);
+  const hit = (e) => {
+    if (!picking || !onPick || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    const p = e.touches && e.touches[0] ? e.touches[0] : e;
+    if (!r.width || !r.height) return;
+    onPick((p.clientX - r.left) / r.width, (p.clientY - r.top) / r.height);
+  };
+  return (
+    <canvas ref={ref} className={'cc-canvas' + (picking ? ' picking' : '')}
+      onClick={hit} onTouchStart={(e) => { e.preventDefault(); hit(e); }} />
+  );
 }
 
 // ============================================================================
@@ -4663,6 +4993,15 @@ function StyleBlock() {
       .cc-btn { border: 1px solid #e3dfd8; background: #fff; border-radius: 6px; font-size: 0.72rem;
         padding: 0.35rem 0.6rem; cursor: pointer; font-family: inherit; white-space: nowrap; }
       .cc-btn.active { background: #1d1b1a; color: #fff; border-color: #1d1b1a; }
+      .cc-pickbtn { width: 100%; border: 1px dashed #c8c2b8; border-radius: 8px; background: #fbfaf8;
+        padding: 0.5rem; font-family: inherit; font-size: 0.78rem; font-weight: 700; color: var(--ink);
+        cursor: pointer; margin-bottom: 0.2rem; }
+      .cc-pickbtn.on { border-style: solid; border-color: #1d7a4c; background: #eef7f1; color: #16603c; }
+      .cc-canvas.picking { cursor: crosshair; outline: 2px solid #1d7a4c; outline-offset: 2px; }
+      .cc-btn.del { color: #9a3b3b; }
+      .cc-tol { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.45rem;
+        font-size: 0.7rem; color: var(--ink-soft); }
+      .cc-tol input { flex: 1; direction: ltr; }
       .cc-picker { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 0.5rem; }
       .cc-search, .cc-hex { width: 100%; box-sizing: border-box; border: 1px solid #e3dfd8; border-radius: 6px;
         padding: 0.4rem 0.55rem; font-size: 0.76rem; font-family: inherit; background: #fdfcfa; }
