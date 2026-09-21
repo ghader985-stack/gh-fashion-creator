@@ -78,8 +78,8 @@ For every number return:
 
 Also return skin: boxes around the person's BARE SKIN only — face and neck, shoulders and chest, each arm, each hand, each leg, each foot — in percent of the image, as many as needed up to 6, each fitted closely around the skin and not around the garment. Empty array if there is no person or no bare skin is visible. Never include a box over fabric, even fabric in a skin-like colour (nude, beige, camel, blush), and never over skin that is covered by sheer or illusion fabric — that area is fabric, not skin.
 
-Also return head: the box around the model's head — hair, hairstyle, headscarf and face together,
-in percent of the image, generous enough to cover every strand. If there is no person, return 0,0,0,0.
+Also return head: the box around the model's head AND neck — hair, hairstyle, headscarf, face, jaw
+and neck down to the collarbone — in percent of the image, generous enough to cover every strand. If there is no person, return 0,0,0,0.
 
 Also return product: the box around the product itself (the garment or item), in percent of the image:
 x1 and x2 from the left edge, y1 and y2 from the top edge, 0 to 100. Include every part of the garment
