@@ -414,27 +414,38 @@ export default function Home() {
       } catch (e) {
         if (typeof console !== 'undefined') console.warn('[gh] cutout', e && e.message);
       }
+      const warns = [];
       if (!subject) {
-        setCcWarn('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
+        warns.push('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
       }
 
       setCcStage('جارٍ تحديد القطعة والرأس…');
       let headBox = null;
       let skinBoxes = [];
-      try {
-        const vb = await new Promise((resolve, reject) => {
-          view.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), 'image/jpeg', 0.9);
-        });
-        const fdb = new FormData();
-        fdb.append('image', vb, 'view.jpg');
-        fdb.append('zones', '[]');
-        const rb = await fetch('/api/colorzones', { method: 'POST', body: fdb });
-        const db = await rb.json();
-        if (rb.ok && db.head && db.head.x2 > db.head.x1 && db.head.y2 > db.head.y1) headBox = db.head;
-        if (rb.ok && Array.isArray(db.skin)) skinBoxes = db.skin;
-      } catch (e) {
-        if (typeof console !== 'undefined') console.warn('[gh] head box', e && e.message);
+      let readOk = false;
+      // هذا الكشف هو المصدر الوحيد لموقع البشرة والرأس، فبنحاول مرّتين
+      for (let attempt = 0; attempt < 2 && !readOk; attempt++) {
+        try {
+          const vb = await new Promise((resolve, reject) => {
+            view.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), 'image/jpeg', 0.9);
+          });
+          const fdb = new FormData();
+          fdb.append('image', vb, 'view.jpg');
+          fdb.append('zones', '[]');
+          const rb = await fetch('/api/colorzones', { method: 'POST', body: fdb });
+          const db = await rb.json();
+          if (!rb.ok) continue;
+          readOk = true;
+          if (db.head && db.head.x2 > db.head.x1 && db.head.y2 > db.head.y1) headBox = db.head;
+          if (Array.isArray(db.skin)) skinBoxes = db.skin;
+        } catch (e) {
+          if (typeof console !== 'undefined') console.warn('[gh] head box', e && e.message);
+        }
       }
+      if (!readOk) {
+        warns.push('تعذّرت قراءة الصورة لتحديد الوجه والبشرة — إذا في عارضة بالصورة ممكن ياخد جلدها رقم');
+      }
+      setCcWarn(warns.join(' · '));
 
       setCcStage('جارٍ كشف مناطق الألوان…');
       const det = ccDetectZones(view, subject, view.width, view.height, headBox, skinBoxes);
@@ -1761,57 +1772,74 @@ function ccSkinTone(d, w, h, headBox, subject) {
   return { lab: mean, tol: Math.min(17, Math.max(10, sigma * 2.2)) };
 }
 
-// البشرة = ما يطابق لون وجه العارضة فعلاً، أو ما وقع داخل صناديق البشرة
-// التي حدّدها التحليل. القماش بلون قريب لكنه مختلف عن بشرتها يبقى قماشاً.
+// البشرة تُحدَّد من التحليل وحده: صناديق البشرة التي رجّعها كشف الصورة،
+// وداخل كل صندوق نشترط لون بشرة فعلي قريب من درجة وجه العارضة، حتى لا
+// يُحذف قماش وقع داخل صندوق واسع.
+//
+// ما في انتشار لوني تلقائي خارج الصناديق عن قصد: قماش بلون قريب من البشرة
+// (نود، بيج، كاميل، موڤ، تول تراب) يبقى قماشاً. ابتلاع الفستان كلّه لأنّ
+// لونه قريب من البشرة أسوأ بكتير من رقم زائد على ذراع.
 function ccMarkSkin(skin, d, w, h, boxes, tone, subject) {
-  if (boxes && boxes.length) {
-    boxes.forEach((bx) => {
-      const x1 = Math.max(0, Math.floor((bx.x1 / 100) * w));
-      const x2 = Math.min(w, Math.ceil((bx.x2 / 100) * w));
-      const y1 = Math.max(0, Math.floor((bx.y1 / 100) * h));
-      const y2 = Math.min(h, Math.ceil((bx.y2 / 100) * h));
-      for (let y = y1; y < y2; y++) {
-        for (let x = x1; x < x2; x++) {
-          const i = y * w + x;
-          if (subject && subject[i] < 0.6) continue;
-          if (ccIsSkin(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) skin[i] = 1;
-        }
-      }
-    });
-  }
-  if (!tone) return;
-  const ref = tone.lab;
-  const tol = tone.tol;
+  if (!boxes || !boxes.length) return;
   const n = w * h;
+  const marked = [];
+  const ref = tone ? tone.lab : null;
+  // الصندوق يضبط المكان، فبنتساهل باللون: الذراع والساق إضاءتهن تختلف عن
+  // الوجه، والمطلوب بس رفض قماش واضح الاختلاف وقع جوّا الصندوق
+  const gate = tone ? tone.tol * 1.8 : 0;
+  boxes.forEach((bx) => {
+    const x1 = Math.max(0, Math.floor((bx.x1 / 100) * w));
+    const x2 = Math.min(w, Math.ceil((bx.x2 / 100) * w));
+    const y1 = Math.max(0, Math.floor((bx.y1 / 100) * h));
+    const y2 = Math.min(h, Math.ceil((bx.y2 / 100) * h));
+    for (let y = y1; y < y2; y++) {
+      for (let x = x1; x < x2; x++) {
+        const i = y * w + x;
+        if (skin[i]) continue;
+        if (subject && subject[i] < 0.6) continue;
+        const r = d[i * 4];
+        const g = d[i * 4 + 1];
+        const b = d[i * 4 + 2];
+        if (!ccIsSkin(r, g, b)) continue;
+        if (ref) {
+          const L = rgbToLab([r, g, b]);
+          const dl = L[0] - ref[0];
+          const da = L[1] - ref[1];
+          const db = L[2] - ref[2];
+          if (Math.sqrt(dl * dl * 0.25 + da * da + db * db) > gate) continue;
+        }
+        skin[i] = 1;
+        marked.push(i);
+      }
+    }
+  });
+  // ضمانة أخيرة: قطعة ملبوسة ما بتكون بمعظمها بشرة. لو طلعت هيك فالصناديق
+  // غلط أو واقعة على القماش، فبنلغيها كلها — الفستان أهمّ من صندوق
+  let inside = 0;
+  let onSkin = 0;
   for (let i = 0; i < n; i++) {
-    if (skin[i]) continue;
-    if (subject && subject[i] < 0.6) continue;
-    const r = d[i * 4];
-    const g = d[i * 4 + 1];
-    const b = d[i * 4 + 2];
-    if (!ccIsSkin(r, g, b)) continue;
-    const L = rgbToLab([r, g, b]);
-    const dl = L[0] - ref[0];
-    const da = L[1] - ref[1];
-    const db = L[2] - ref[2];
-    // الضوء يختلف كثيراً بين الوجه والصدر والذراع والساق، أمّا درجة البشرة
-    // فثابتة — لذلك المطابقة على الدرجة، والإضاءة مجرّد ضابط خفيف
-    const C = Math.sqrt(L[1] * L[1] + L[2] * L[2]);
-    if (C < 6 || C > 45) continue;
-    if (Math.sqrt(dl * dl * 0.03 + da * da + db * db) < tol) skin[i] = 1;
+    if (subject && subject[i] < 0.4) continue;
+    inside++;
+    if (skin[i]) onSkin++;
+  }
+  if (inside > 0 && onSkin / inside > 0.5) {
+    for (let j = 0; j < marked.length; j++) skin[marked[j]] = 0;
   }
 }
 
 // الخلفية: انتشار من حواف الصورة إلى الداخل ما دام اللون متقارباً.
 // الجدار والأرضية والسماء تُعزل هكذا، فلا تتلوّن مع القطعة لو تشابه اللون.
-function ccBackgroundMask(lab, w, h) {
+function ccBackgroundMask(lab, w, h, subject) {
   const n = w * h;
   const bg = new Uint8Array(n);
   const queue = new Int32Array(n);
   let head = 0, tail = 0;
+  // القطعة قد تلامس حافة الصورة، فلا يُبدأ الانتشار من بكسلاتها هي —
+  // وإلا حُسب طرف التنورة خلفيةً واختفى القماش
+  const seed = (i) => { if (subject && subject[i] > 0.4) return; push(i); };
   const push = (i) => { if (!bg[i]) { bg[i] = 1; queue[tail++] = i; } };
-  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
-  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
   const near = (a, b) => {
     const dl = lab[a * 3] - lab[b * 3];
     const da = lab[a * 3 + 1] - lab[b * 3 + 1];
@@ -1915,26 +1943,14 @@ function ccBuildDefs(lab, inside, n) {
       picked.push({ bin: i, v: sm[i] });
     }
     picked.sort((x, y) => y.v - x.v);
-    // أقلّ قيمة على الطريق الأقصر بين درجتين: الوادي العميق يعني قماشين
-    // مختلفين، وغيابه يعني تدرّجاً واحداً بينهما (حواف الاندماج)
-    const valleyBetween = (i, j) => {
-      let fwd = (j - i + BINS) % BINS;
-      let lo = Infinity;
-      if (fwd <= BINS - fwd) {
-        for (let k = 1; k < fwd; k++) lo = Math.min(lo, sm[(i + k) % BINS]);
-      } else {
-        for (let k = 1; k < BINS - fwd; k++) lo = Math.min(lo, sm[(i - k + BINS) % BINS]);
-      }
-      return lo === Infinity ? 0 : lo;
-    };
-    const kept = [];
+    // ملاحظة: ما منرفض قمّة لأنّ الوادي اللي قبلها مو عميق. بفستان متدرّج
+    // (ماجنتا ← كحلي) التدرّج بيملا الوادي بين اللونين، فاختبار المُدرَّج
+    // بيرمي اللون التاني ويطلع الفستان بلون واحد. الفرق بين قماش حقيقي
+    // وشريط اندماج بينظهر بالمكان لا بالمُدرَّج، ومنقيسه بـ ccSolidRatio
+    // بعد الإسناد: القماش بيصمد بعد تآكل حوافه، والشريط الرفيع بيختفي.
     picked.forEach((p) => {
       const hue = (p.bin + 0.5) * (360 / BINS);
       if (defs.some((d) => ccHueGap(d.hue, hue) < CC_HUE_MERGE)) return;
-      // درجة بلا وادٍ يفصلها عن درجة أقوى = حافة اندماج، لا قماش مستقل
-      const blend = kept.some((q) => valleyBetween(q.bin, p.bin) > p.v * 0.55);
-      if (blend) return;
-      kept.push(p);
       defs.push({ neutral: false, hue });
     });
   }
@@ -2015,6 +2031,31 @@ function ccBuildDefs(lab, inside, n) {
   return defs;
 }
 
+// نسبة الجزء المصمت من المنطقة: القماش الحقيقي يبقى بعد تآكل حوافه،
+// أمّا شريط الاندماج بين قماشين فهو خيط رفيع يختفي كلّه
+function ccSolidRatio(assign, inside, w, h, k, r) {
+  let total = 0;
+  let solid = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!inside[i] || assign[i] !== k) continue;
+      total++;
+      let ok = 1;
+      for (let dy = -r; dy <= r && ok; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) { ok = 0; break; }
+        for (let dx = -r; dx <= r; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= w || assign[ny * w + nx] !== k) { ok = 0; break; }
+        }
+      }
+      if (ok) solid++;
+    }
+  }
+  return total ? solid / total : 0;
+}
+
 // إسقاط المناطق الصغيرة: بكسلاتها تنضمّ لأقرب منطقة باقية
 function ccPruneDefs(lab, inside, n, defs) {
   let cur = defs;
@@ -2057,13 +2098,15 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
   }
   // الخلفية المتصلة بحواف الصورة تُستبعد كمان، حتى لو تسرّبت من العزل:
   // ورق أبيض أو جدار سادة ما بياخد رقماً ولا يدخل في النِّسَب
-  const bgPx = ccBackgroundMask(lab, w, h);
+  const bgPx = ccBackgroundMask(lab, w, h, subjSmall);
   const skinPx = new Uint8Array(n);
   ccMarkSkin(skinPx, sdata, w, h, skinBoxes, ccSkinTone(sdata, w, h, headBox, subjSmall), subjSmall);
-  const hx1 = headBox ? (headBox.x1 / 100) * w : -1;
-  const hx2 = headBox ? (headBox.x2 / 100) * w : -1;
-  const hy1 = headBox ? (headBox.y1 / 100) * h : -1;
-  const hy2 = headBox ? (headBox.y2 / 100) * h : -1;
+  const hw = headBox ? ((headBox.x2 - headBox.x1) / 100) * w : 0;
+  const hh2 = headBox ? ((headBox.y2 - headBox.y1) / 100) * h : 0;
+  const hx1 = headBox ? (headBox.x1 / 100) * w - hw * 0.12 : -1;
+  const hx2 = headBox ? (headBox.x2 / 100) * w + hw * 0.12 : -1;
+  const hy1 = headBox ? (headBox.y1 / 100) * h - hh2 * 0.10 : -1;
+  const hy2 = headBox ? (headBox.y2 / 100) * h + hh2 * 0.30 : -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
@@ -2076,6 +2119,7 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
       // لا رقم على بشرة ولا على الرأس: هذول مو جزء من التصميم
       if (ok && skinPx[i]) ok = 0;
       if (ok && headBox && x >= hx1 && x <= hx2 && y >= hy1 && y <= hy2) ok = 0;
+      if (ok && bgPx[i] && !subject) ok = 0;
       inside[i] = ok;
     }
   }
@@ -2090,12 +2134,29 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
 
   // إسناد كل بكسل من القطعة لمنطقته، ثم تصويت الجوار لإزالة التناثر
   const assign = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    const aa = lab[i * 3 + 1];
-    const bb = lab[i * 3 + 2];
-    assign[i] = ccPickZone(lab[i * 3], Math.sqrt(aa * aa + bb * bb), ccHue(aa, bb), defs);
+  const assignAll = (list) => {
+    for (let i = 0; i < n; i++) {
+      const aa = lab[i * 3 + 1];
+      const bb = lab[i * 3 + 2];
+      assign[i] = ccPickZone(lab[i * 3], Math.sqrt(aa * aa + bb * bb), ccHue(aa, bb), list);
+    }
+    ccDespeckle(assign, w, h, list.length);
+  };
+  assignAll(defs);
+
+  // ما ليس كتلة مصمتة ليس قماشاً: شريط الاندماج بين لونين يُحذف وتعود
+  // بكسلاته لأقرب قماش حقيقي
+  for (let pass = 0; pass < 3 && defs.length > 1; pass++) {
+    let worst = -1;
+    let worstR = 1;
+    for (let k = 0; k < defs.length; k++) {
+      const r = ccSolidRatio(assign, inside, w, h, k, 2);
+      if (r < worstR) { worstR = r; worst = k; }
+    }
+    if (worst < 0 || worstR >= 0.22) break;
+    defs.splice(worst, 1);
+    assignAll(defs);
   }
-  ccDespeckle(assign, w, h, defs.length);
 
   let insideCount = 0;
   for (let i = 0; i < n; i++) if (inside[i]) insideCount++;
@@ -2145,7 +2206,10 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
   }
   const isBackgroundZone = (i) => {
     const e = bgShare[i];
-    if (!e.all || e.bg / e.all < 0.5 || !border) return false;
+    if (!e.all) return false;
+    // منطقة كلّها خلفية متصلة بحواف الصورة = تسرّب من العزل، مهما كان لونها
+    if (e.bg / e.all > 0.7) return true;
+    if (e.bg / e.all < 0.5 || !border) return false;
     const m = acc[i];
     if (!m.count) return false;
     const mean = [m.sum[0] / m.count, m.sum[1] / m.count, m.sum[2] / m.count];
@@ -2240,7 +2304,7 @@ function ccMasks(canvas, defs, skinBoxes, headBox, subject) {
   ccDespeckle(assign, canvas.width, canvas.height, defs.length);
   ccMarkSkin(skin, d, canvas.width, canvas.height, skinBoxes,
     ccSkinTone(d, canvas.width, canvas.height, headBox, subject), subject);
-  const bg = ccBackgroundMask(lab, canvas.width, canvas.height);
+  const bg = ccBackgroundMask(lab, canvas.width, canvas.height, subject);
   return { lab, assign, skin, bg, defs, w: canvas.width, h: canvas.height };
 }
 
@@ -2311,10 +2375,14 @@ function ccZoneMask(map, k) {
     bgZone = inZone > 0 && inBg / inZone > 0.6;
   }
   // خارج إطار القطعة لا يُلوَّن شيء: الجدران والأثاث والزهور تبقى كما هي
-  const hbx1 = headBox ? Math.floor((headBox.x1 / 100) * w) : 0;
-  const hbx2 = headBox ? Math.ceil((headBox.x2 / 100) * w) : 0;
-  const hby1 = headBox ? Math.floor((headBox.y1 / 100) * h) : 0;
-  const hby2 = headBox ? Math.ceil((headBox.y2 / 100) * h) : 0;
+  // هامش أمان حول الرأس: الذقن والرقبة وأطراف الشعر غالباً خارج الصندوق
+  // بقليل، وتركها بلا حماية يعني وجهاً ملوّناً
+  const hbw = headBox ? ((headBox.x2 - headBox.x1) / 100) * w : 0;
+  const hbh = headBox ? ((headBox.y2 - headBox.y1) / 100) * h : 0;
+  const hbx1 = headBox ? Math.floor((headBox.x1 / 100) * w - hbw * 0.12) : 0;
+  const hbx2 = headBox ? Math.ceil((headBox.x2 / 100) * w + hbw * 0.12) : 0;
+  const hby1 = headBox ? Math.floor((headBox.y1 / 100) * h - hbh * 0.10) : 0;
+  const hby2 = headBox ? Math.ceil((headBox.y2 / 100) * h + hbh * 0.30) : 0;
   const bx1 = box ? Math.floor((box.x1 / 100) * w) : 0;
   const bx2 = box ? Math.ceil((box.x2 / 100) * w) : w;
   const by1 = box ? Math.floor((box.y1 / 100) * h) : 0;
@@ -2330,9 +2398,13 @@ function ccZoneMask(map, k) {
       const hy = (i - hx) / w;
       if (hx >= hbx1 && hx <= hbx2 && hy >= hby1 && hy <= hby2) { m[i] = 0; continue; }
     }
+    // الخلفية تُستثنى حتى لو كان في عزل: قناع العزل بيوسّع شوي على الحواف
+    // وبيسرّب جدار أو أرضية جوّاه، وبكسلات الجدار هاي بتتلوّن مع الفستان.
+    // انتشار الخلفية بيبلّش من حواف الصورة وبرّا القطعة، فبيمسك المتسرّب
+    // وما بياكل القماش.
+    if (bg && bg[i] && !bgZone) { m[i] = 0; continue; }
     // القطعة معزولة: كل ما خارجها لا يُلمس، والحواف تأخذ شفافية العزل نفسها
     if (subject) { m[i] = subject[i] * base; continue; }
-    if (bg && bg[i] && !bgZone) { m[i] = 0; continue; }
     if (box && !bgZone) {
       const x = i % w;
       const y = (i - x) / w;
