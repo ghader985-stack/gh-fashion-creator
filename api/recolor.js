@@ -234,11 +234,12 @@ export default async function handler(req, res) {
 
     // الشكل الأول هو المطلوب، والثاني هو الشكل المُثبت بالإنتاج.
     // الطلب المرفوض قبل إنشاء الـprediction لا يُحاسَب عليه رصيد.
-    // أول محاولة تطلب نفس نسبة الصورة، والثانية تستعمل أقرب نسبة قياسية
-    // وهي الشكل المُستعمل أصلاً في «الفلات سكتش» على النشرة.
+    // المحاولة الأولى شكلها مطابق حرفياً للاستدعاء الشغّال في «الفلات سكتش»
+    // على النشرة: prompt + image_input + aspect_ratio + output_format، بلا
+    // أي حقل غير مُجرَّب. والثانية أضيق منها إن رُفض حقل.
     const attempts = [
-      { prompt, image_input: [source], aspect_ratio: 'match_input_image', output_format: 'jpg' },
       { prompt, image_input: [source], aspect_ratio: nearestRatio(w, h), output_format: 'jpg' },
+      { prompt, image_input: [source] },
     ];
 
     let prediction = null;
