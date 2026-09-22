@@ -86,6 +86,10 @@ export default function Home() {
   const [ccWarn, setCcWarn] = useState('');
   const [ccHairOn, setCcHairOn] = useState(false);
   const [ccPicking, setCcPicking] = useState(false);
+  const [ccTexOn, setCcTexOn] = useState(false);
+  const [ccCount, setCcCount] = useState(1);
+  const [ccResults, setCcResults] = useState([]);
+  const [ccProgress, setCcProgress] = useState('');
 
   // ===== التيك باك =====
   const [tpImage, setTpImage] = useState(null);
@@ -390,6 +394,9 @@ export default function Home() {
     setCcZones([]);
     setCcData(null);
     setCcOpenZone(-1);
+    setCcResults([]);
+    setCcProgress('');
+    setCcTexOn(false);
     setCcPreview(URL.createObjectURL(file));
     setCcLoading(true);
     try {
@@ -495,6 +502,16 @@ export default function Home() {
     });
   };
 
+  // «قماش مخرّز أو مطرّز»: بيعيد بناء الأقنعة فوراً بقرار الأغلبية
+  const ccToggleTex = (on) => {
+    setCcTexOn(on);
+    setCcData((d) => {
+      if (!d) return d;
+      d.map.textured = on;
+      return { ...d, maskCache: d.centers.map((c, i) => ccZoneMask(d.map, i)) };
+    });
+  };
+
   const ccSetZone = (i, patch) => {
     setCcZones((list) => list.map((z, j) => (j === i ? { ...z, ...patch } : z)));
   };
@@ -561,61 +578,202 @@ export default function Home() {
 
   const ccChangedZones = ccZones.filter((z) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex);
 
-  // النتيجة النهائية بدقّة الصورة الكاملة، وتنزل PNG على جهاز المصممة مباشرة
-  const ccGenerate = async () => {
+  // رصيد الاشتراك: كل صورة تُرسَم تكلّف، فالخصم بعدد الصور التي خرجت فعلاً
+  // لا بعدد الضغطات. التحديث دالّي لأن الاستدعاءات متوازية والقيمة المقروءة
+  // من الحالة تكون قديمة عند رجوع آخر واحدة.
+  const ccSpend = (k) => {
+    if (!k || user?.plan === 'admin') return;
+    setUsageCount((c) => {
+      const n = c + k;
+      localStorage.setItem('gh_usage', n.toString());
+      return n;
+    });
+  };
+
+  // كم صورة يسمح بها الرصيد المتبقّي الآن
+  const ccAffordable = () => {
+    if (!user) return 0;
+    if (user.plan === 'admin') return CC_MAX_RESULTS;
+    const limit = plans[user.plan]?.limit || 0;
+    return Math.max(0, Math.floor((limit - usageCount) / CC_CREDITS_PER_IMAGE));
+  };
+
+  // المسار المجاني: التلوين كله داخل المتصفح، بلا نموذج وبلا نقاط وبلا انتظار.
+  // يمشي على القماش السادة والمطبوع؛ الخرز والتطريز هما اللي بدهم النموذج.
+  const ccLocal = () => {
     if (!ccData || !ccChangedZones.length) {
       setCcError('اختاري لون جديد لمنطقة وحدة عالأقل');
       return;
     }
     setCcError('');
     setCcBusy(true);
+    setCcProgress('جارٍ التلوين…');
     try {
-      const fullSubject = ccData.cutoutUrl
-        ? await ccSubjectMask(ccData.cutoutUrl, ccData.full.width, ccData.full.height)
+      const fullSubject = ccData.map.subject
+        ? ccResampleMask(ccData.map.subject, ccData.map.w, ccData.map.h, ccData.full.width, ccData.full.height)
         : null;
       const fullMap = ccMasks(ccData.full, ccData.defs, ccData.skinBoxes, ccData.headBox, fullSubject);
       fullMap.box = ccData.box || null;
       fullMap.hairIsGarment = ccHairOn;
+      fullMap.textured = ccTexOn;
       fullMap.headBox = ccData.headBox || null;
       if (fullSubject) fullMap.subject = fullSubject;
-      // الأقنعة تُبنى من جديد بدقّة الصورة الكاملة — بما فيها المناطق اليدوية،
-      // فنقطة الضغط محفوظة بالنِّسَب لا بالبكسل
+
       const fullMasks = ccChangeMasks(fullMap, ccZones, null, ccData.map);
       const changes = ccZones
         .map((z, i) => ({ i, z }))
         .filter(({ z }) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex)
         .map(({ i, z }) => ({ zone: fullMasks[i].zone, hex: z.target, mask: fullMasks[i].mask, center: fullMasks[i].center }));
+
       const out = ccRecolor(ccData.full, fullMap, ccData.centers, changes);
-      const rec = {
-        id: 'cc' + Date.now(),
-        createdAt: Date.now(),
-        url: out.toDataURL('image/png'),
-        summary: changes.map((c) => {
-          const pt = nearestPantone(c.hex);
-          return {
-            fromHex: ccZones[c.zone].hex,
-            fromName: ccZones[c.zone].name,
-            toHex: c.hex,
-            toName: pt ? pt.name : '',
-            toCode: pt ? pt.code : '',
-          };
-        }),
-      };
-      ccDownload(rec);
+      if (!out) throw tpUserError('تعذّر التلوين — جرّبي صورة ثانية');
+      ccDownload({ createdAt: Date.now(), url: out.toDataURL('image/png') });
     } catch (e) {
-      if (typeof console !== 'undefined') console.warn('[gh] cc generate', e && e.message);
-      setCcError('تعذّر إنشاء النتيجة، جرّبي مرة ثانية');
+      if (typeof console !== 'undefined') console.warn('[gh] cc local', e && e.message);
+      setCcError((e && e.userMessage) || 'تعذّر التلوين، جرّبي مرة ثانية');
     }
     setCcBusy(false);
+    setCcProgress('');
   };
 
+  // المسار المدفوع: النموذج يعيد رسم الصورة بالألوان الجديدة.
+  // المتصفح يجهّز دليل ألوان مسطّح من نفس الأقنعة، والنموذج يصبغ عليه
+  // فيبقى الخرز والتطريز والظلّ والملمس كما هو.
+  const ccGenerate = async () => {
+    if (!ccData || !ccChangedZones.length) {
+      setCcError('اختاري لون جديد لمنطقة وحدة عالأقل');
+      return;
+    }
+    if (!gate()) return;
+
+    // الرصيد يُفحص قبل أي طلب: ما بنبلّش رسمة ما فيه رصيد يغطّيها
+    const want = Math.max(1, Math.min(CC_MAX_RESULTS, Number(ccCount) || 1));
+    const can = ccAffordable();
+    if (can < 1) {
+      setCcError('رصيد باقتك ما بيكفي لصورة وحدة — جدّدي الاشتراك');
+      setShowPricing(true);
+      return;
+    }
+    const n = Math.min(want, can);
+    const trimmed = n < want ? want : 0;
+
+    setCcError('');
+    setCcBusy(true);
+    setCcResults([]);
+    setCcProgress('جارٍ تجهيز دليل الألوان…');
+
+    try {
+      // الدليل يُبنى بدقّة الإرسال لا بدقّة الملف: الأقنعة اليدوية محسوبة
+      // على مقاس المعاينة ثمّ تُكبّر، فاللي بتشوفيه هو اللي بينرسم
+      const send = ccScaled(ccData.full, CC_SEND_MAX);
+      // قناع العزل يُكبَّر من قناع المعاينة بدل إعادة جلبه: رابط العزل من
+      // Replicate بينتهي بعد ساعة، وما في داعي نعتمد عليه بعد ما انقرأ مرّة
+      const sendSubject = ccData.map.subject
+        ? ccResampleMask(ccData.map.subject, ccData.map.w, ccData.map.h, send.width, send.height)
+        : null;
+      const sendMap = ccMasks(send, ccData.defs, ccData.skinBoxes, ccData.headBox, sendSubject);
+      sendMap.box = ccData.box || null;
+      sendMap.hairIsGarment = ccHairOn;
+      sendMap.textured = ccTexOn;
+      sendMap.headBox = ccData.headBox || null;
+      if (sendSubject) sendMap.subject = sendSubject;
+
+      const sendMasks = ccChangeMasks(sendMap, ccZones, null, ccData.map);
+      const picked = ccZones
+        .map((z, i) => ({ i, z }))
+        .filter(({ z }) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex);
+      // الدليل بيقول للنموذج «هاي المنطقة»، فلازم يكون مصمتاً. الشرائط
+      // الرفيعة والخرز بيخلّوا القناع منقّط بكسل بكسل، والمنطقة بتطلع نصّها
+      // مدهون — فالنموذج بيفهم إنه نصّها بس بدّه يتغيّر. قرار الأغلبية
+      // بيسدّ هالفراغات، ومحصور بقناع التلوين والبشرة فما بيتعدّى القطعة.
+      const fills = picked.map(({ i, z }) => ({
+        hex: z.target,
+        mask: ccSmoothMask(sendMasks[i].mask, send.width, send.height,
+          sendMap.paint || sendSubject, sendMap.skin, CC_GUIDE_DIV),
+      }));
+      const guide = ccGuide(send, fills);
+      if (!guide) throw tpUserError('تعذّر تجهيز دليل الألوان — جرّبي صورة ثانية');
+
+      const summary = picked.map(({ z }) => {
+        const pt = nearestPantone(z.target);
+        return {
+          where: z.where || '',
+          material: z.material || '',
+          fromHex: z.hex,
+          fromName: z.name || '',
+          toHex: z.target,
+          toName: pt ? pt.name : '',
+          toCode: pt ? pt.code : '',
+        };
+      });
+
+      // الأصل JPEG عالي الجودة (حجم معقول)، والدليل PNG (ألوان مسطّحة بلا فقدان)
+      const [imgBlob, guideBlob] = await Promise.all([
+        ccBlob(send, 'image/jpeg', 0.92),
+        ccBlob(guide, 'image/png'),
+      ]);
+      let done = 0;
+      let failed = 0;
+      setCcProgress('جارٍ الرسم… 0 من ' + n);
+
+      // استدعاء مستقلّ لكل نتيجة: فشل وحدة ما بيوقّف الباقيات، ولا واحدة
+      // منهن بترمي خطأ للبرّا حتى تضلّ النتائج الناجحة ظاهرة
+      const runOne = async (k) => {
+        try {
+          const fd = new FormData();
+          fd.append('image', imgBlob, 'image.jpg');
+          fd.append('guide', guideBlob, 'guide.png');
+          fd.append('changes', JSON.stringify(summary));
+          const r = await fetch('/api/recolor', { method: 'POST', body: fd });
+          let d = null;
+          try { d = await r.json(); } catch (e) { d = null; }
+          done += 1;
+          setCcProgress('جارٍ الرسم… ' + done + ' من ' + n);
+          if (!r.ok || !d || !d.url) {
+            failed += 1;
+            return { error: (d && d.error) || ('تعذّر الرسم (' + r.status + ')') };
+          }
+          return {
+            id: 'cc' + Date.now() + '-' + k,
+            createdAt: Date.now(),
+            url: d.url,
+            summary,
+          };
+        } catch (e) {
+          if (typeof console !== 'undefined') console.warn('[gh] cc recolor', e && e.message);
+          done += 1;
+          failed += 1;
+          setCcProgress('جارٍ الرسم… ' + done + ' من ' + n);
+          return { error: 'انقطع الاتصال بخدمة الرسم' };
+        }
+      };
+
+      const settled = await Promise.all(Array.from({ length: n }, (v, k) => runOne(k)));
+      const ok = settled.filter((s) => s && s.url);
+      setCcResults(ok);
+      // الخصم بعدد الصور الناجحة وحدها: الفاشلة ما بتتحاسب عالمصمّمة
+      ccSpend(ok.length * CC_CREDITS_PER_IMAGE);
+
+      if (!ok.length) {
+        const first = settled.find((s) => s && s.error);
+        setCcError((first && first.error) || 'تعذّر إنشاء النتيجة، جرّبي مرة ثانية');
+      } else if (failed) {
+        setCcError('طلعت ' + ok.length + ' من ' + n + ' — الباقي فشل، جرّبيه مرة ثانية');
+      } else if (trimmed) {
+        setCcError('رصيدك بيكفي لـ' + n + ' من ' + trimmed + ' — طلعت ' + n);
+      }
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] cc generate', e && e.message);
+      setCcError((e && e.userMessage) || 'تعذّر إنشاء النتيجة، جرّبي مرة ثانية');
+    }
+    setCcBusy(false);
+    setCcProgress('');
+  };
+
+  // التنزيل يمرّ عبر وسيط الصور: رابط النموذج من نطاق آخر
   const ccDownload = (rec) => {
-    const a = document.createElement('a');
-    a.href = rec.url;
-    a.download = 'color-' + new Date(rec.createdAt).toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.png';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const name = 'color-' + new Date(rec.createdAt).toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    downloadFlat(rec.url, name);
   };
 
   // ===== بناء ورقة التيك باك =====
@@ -1140,6 +1298,10 @@ export default function Home() {
                         <input type="checkbox" checked={ccHairOn} onChange={(e) => ccToggleHair(e.target.checked)} />
                         <span>غطاء الرأس جزء من التصميم (حجاب أو طرحة)</span>
                       </label>
+                      <label className="cc-hair">
+                        <input type="checkbox" checked={ccTexOn} onChange={(e) => ccToggleTex(e.target.checked)} />
+                        <span>قماش مخرّز أو مطرّز</span>
+                      </label>
                       {ccZones.map((z, i) => (
                         <div className={'cc-zone' + (z.mode === 'change' ? ' on' : '')} key={'z' + i}>
                           <div className="cc-zone-head">
@@ -1197,9 +1359,42 @@ export default function Home() {
                         </div>
                       )}
 
-                      <button className="cta" onClick={ccGenerate} disabled={ccBusy || !ccChangedZones.length}>
-                        {ccBusy ? <><span className="spinner"></span> جارٍ التجهيز…</> : 'نزّلي النتيجة PNG'}
+                      <div className="cc-count">
+                        <span>عدد النتائج · {ccCount * CC_CREDITS_PER_IMAGE} نقطة</span>
+                        <div className="cc-count-btns">
+                          {[1, 2, 3, 4].map((k) => (
+                            <button type="button" key={'n' + k}
+                              className={'cc-btn' + (ccCount === k ? ' active' : '')}
+                              disabled={k > ccAffordable()}
+                              onClick={() => setCcCount(k)}>{k}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <button className="cta" onClick={ccGenerate}
+                        disabled={ccBusy || !ccChangedZones.length || ccAffordable() < 1}>
+                        {ccBusy ? <><span className="spinner"></span> {ccProgress || 'جارٍ الرسم…'}</> : 'ارسمي النتيجة'}
                       </button>
+
+                      <div className="cc-split">بلا نقاط</div>
+
+                      <button className="cta ghost" onClick={ccLocal} disabled={ccBusy || !ccChangedZones.length}>
+                        {ccBusy ? <><span className="spinner"></span> {ccProgress || 'جارٍ…'}</> : 'معاينة سريعة PNG'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {ccResults.length > 0 && (
+                  <div className="cc-results">
+                    <div className="cc-results-head">النتائج — {ccResults.length}</div>
+                    <div className="cc-results-grid">
+                      {ccResults.map((rec) => (
+                        <div className="cc-result" key={rec.id}>
+                          <img src={proxied(rec.url)} alt="result" />
+                          <button type="button" className="cc-btn" onClick={() => ccDownload(rec)}>نزّليها PNG</button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1672,7 +1867,10 @@ function clusterColors(points, k) {
 
 const CC_ANALYSIS_MAX = 260;   // دقة كشف المناطق
 const CC_VIEW_MAX = 1000;      // دقة المعاينة الحية
-const CC_OUT_MAX = 2200;       // دقة الصورة النهائية
+const CC_OUT_MAX = 2200;       // دقة الصورة المرفوعة
+const CC_SEND_MAX = 1600;      // دقة الصورة ودليل الألوان المرسلَين للنموذج
+const CC_MAX_RESULTS = 4;      // أقصى عدد نتائج بالضغطة الواحدة
+const CC_CREDITS_PER_IMAGE = 2; // كم نقطة تخصم كل صورة من رصيد الاشتراك
 const CC_MAX_ZONES = 6;
 
 // ---------------------------------------------------------------------------
@@ -1867,6 +2065,10 @@ function ccSkinTone(d, w, h, headBox, subject) {
 // ما في انتشار لوني تلقائي خارج الصناديق عن قصد: قماش بلون قريب من البشرة
 // (نود، بيج، كاميل، موڤ، تول تراب) يبقى قماشاً. ابتلاع الفستان كلّه لأنّ
 // لونه قريب من البشرة أسوأ بكتير من رقم زائد على ذراع.
+// حدود قبول البكسل كبشرة لما ما بيمشي بمعادلة البشرة العامّة
+const CC_SKIN_HUE = 30;      // أقصى فرق درجة عن درجة وجه العارضة
+const CC_SKIN_CHROMA = 12;   // أقصى زيادة تشبّع عن وجهها
+
 function ccMarkSkin(skin, d, w, h, boxes, tone, subject) {
   if (!boxes || !boxes.length) return;
   const n = w * h;
@@ -1901,12 +2103,23 @@ function ccMarkSkin(skin, d, w, h, boxes, tone, subject) {
         let isSkin = ccIsSkin(r, g, b);
         if (ref) {
           const L = rgbToLab([r, g, b]);
-          if (Math.sqrt(L[1] * L[1] + L[2] * L[2]) > maxC) continue;
+          const C = Math.sqrt(L[1] * L[1] + L[2] * L[2]);
+          if (C > maxC) continue;
           const dl = L[0] - ref[0];
           const da = L[1] - ref[1];
           const db = L[2] - ref[2];
           const dist = Math.sqrt(dl * dl * 0.25 + da * da + db * db);
-          isSkin = isSkin ? dist <= gate * 1.6 : dist <= gate;
+          if (isSkin) {
+            isSkin = dist <= gate * 1.6;
+          } else {
+            // البكسل ما مشي بمعادلة البشرة. منقبله بس إذا كان فعلاً بدرجة
+            // جلد وهادي التشبّع — صدر بالظلّ بيمشي، وقماش صريح لأ.
+            // بلا هالشرطين كان قماش أخضر زيتي وقماش برتقالي فاقع بينحسبوا
+            // جلد لمجرّد وقوعهن جوّا صندوق البشرة، فما بياخدوا رقم ولا
+            // بيتلوّنوا: جناح كتف أخضر ضلّ أخضر، وكورساج برتقالي ضلّ برتقالي.
+            const hueOk = ccHueGap(ccHue(L[1], L[2]), ccHue(ref[1], ref[2])) <= CC_SKIN_HUE;
+            isSkin = hueOk && C <= refC + CC_SKIN_CHROMA && dist <= gate;
+          }
         }
         if (!isSkin) continue;
         skin[i] = 1;
@@ -1970,10 +2183,13 @@ function ccBackgroundMask(lab, w, h, subject) {
 // لأن كشف الخلفية بيبلّش من البكسلات اللي برّا القناع، فلو تآكل القناع
 // بيصير الشريط المتآكل بذرة وبينتشر لجوّا القماش ويبلع منطقة كاملة —
 // صار فعلاً بفحص «ثلاثة ألوان» واختفت منطقة الذهبي.
+// فوق هالشفافية بيعتبر البكسل قماشاً كاملاً وبياخد تلوين كامل
+const CC_EDGE_FULL = 0.5;
+
 function ccPaintMask(subject, w, h) {
   if (!subject) return null;
   const n = w * h;
-  const r = Math.max(2, Math.min(6, Math.round(Math.min(w, h) * 0.005)));
+  const r = Math.max(1, Math.min(3, Math.round(Math.min(w, h) * 0.0025)));
   const solid = new Uint8Array(n);
   for (let i = 0; i < n; i++) solid[i] = subject[i] > 0.5 ? 1 : 0;
   // تآكل مفصول: مرور أفقي ثم رأسي. خارج الصورة ما بينحسب خلفية، فقطعة
@@ -2000,12 +2216,58 @@ function ccPaintMask(subject, w, h) {
       keep[y * w + x] = on;
     }
   }
+  // كتلة معزولة بعيدة عن القطعة = تسرّب من العزل (شبّاك، أثاث، ظلّ).
+  // بلا هالتنظيف كانت بتنطبع مربّعاً ملوّناً طايراً بالخلفية — بالنتيجة
+  // المحليّة وبدليل الألوان اللي بينبعت، فبينرسم بالنتيجة النهائية كمان.
+  ccKeepLargest(keep, w, h);
+
   let was = 0, now = 0;
   for (let i = 0; i < n; i++) { if (solid[i]) was++; if (keep[i]) now++; }
   // قطعة رفيعة (رسمة خطّية مثلاً) ممكن يمحيها التآكل كلّه — عندها منتركها
   if (!was || now / was < 0.5) return subject;
+
+  // القصّ الحادّ كان بيخلّي شريط ع كل حافّة بلون القماش القديم — باين بكل
+  // نتيجة كخطّ حوالين الفستان. بدله تدرّج ناعم: جوّا القطعة تلوين كامل،
+  // وع الحافّة بينزل لصفر تدريجياً. الهالة برّا القناع بتضلّ محميّة لأن
+  // شفافية العزل نفسها بتقارب الصفر هناك.
+  // وشفافية العزل نفسها بتنشبّع: بكسل نصّه قماش بياخد تلوين كامل بدل نصّ
+  // تلوين. بلا هيك بيضلّ خطّ باللون القديم ع كل حافّة — برتقالي حوالي
+  // فستان صار أزرق. أسوأ ما بيصير إنه اللون بيزحف بكسل أو اتنين عالخلفية،
+  // وهاد أقلّ بكتير من خطّ قديم حوالي القطعة كلها.
+  const ramp = ccBoxBlurU8(keep, w, h, r * 2);
   const out = new Float32Array(n);
-  for (let i = 0; i < n; i++) out[i] = keep[i] ? subject[i] : 0;
+  for (let i = 0; i < n; i++) {
+    const a = subject[i] >= CC_EDGE_FULL ? 1 : subject[i] / CC_EDGE_FULL;
+    out[i] = a * ramp[i];
+  }
+  return out;
+}
+
+// معدّل منزلق على قناع ثنائي — يرجّع تدرّجاً من 0 لـ1 بعرض نصف القطر
+function ccBoxBlurU8(src, w, h, r) {
+  const n = w * h;
+  const tmp = new Float32Array(n);
+  const out = new Float32Array(n);
+  const d = r * 2 + 1;
+  const cx = (x) => (x < 0 ? 0 : x > w - 1 ? w - 1 : x);
+  const cy = (y) => (y < 0 ? 0 : y > h - 1 ? h - 1 : y);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let sum = 0;
+    for (let x = -r; x <= r; x++) sum += src[row + cx(x)];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = sum / d;
+      sum += src[row + cx(x + r + 1)] - src[row + cx(x - r)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = -r; y <= r; y++) sum += tmp[cy(y) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = sum / d;
+      sum += tmp[cy(y + r + 1) * w + x] - tmp[cy(y - r) * w + x];
+    }
+  }
   return out;
 }
 
@@ -2017,7 +2279,20 @@ function ccPaintMask(subject, w, h) {
 // مستوى الإضاءة: كل بنفسجي القطعة — الفاتح والغامق والظل — منطقة واحدة
 // برقم واحد، فيتغيّر القماش كاملاً بضغطة. والرماديات (أبيض/أسود/بيج بلا
 // لون) تُجمَّع حسب الإضاءة لأن لا درجة لونية لها.
-const CC_CHROMA_REF = 14;      // حدّ اللون الواضح: تحته تصير الدرجة غير موثوقة
+const CC_CHROMA_REF = 14;      // حدّ اللون الواضح عند إضاءة عادية
+const CC_CHROMA_MIN = 4;       // أدنى حدّ، للقماش الغامق
+const CC_CHROMA_L = 45;        // تحت هالإضاءة الحدّ بينزل مع اللون
+
+// القماش الغامق ما بيقدر يوصل تشبّعاً عالياً مهما كان لونه صريح: البنفسجي
+// الغامق بفستان حقيقي تشبّعه 9.5 وإضاءته 11. حدّ ثابت 14 كان بيرميه
+// كأنه رمادي بلا لون، فلوحه كان بيضيع ويندمج مع اللوح المجاور — ولما
+// المصمّمة تغيّر لون الأخضر كان البنفسجي يتغيّر معه. الحدّ صار ينزل
+// مع الإضاءة، فاللون الغامق بياخد منطقته.
+function ccChromaGate(L) {
+  const g = CC_CHROMA_REF * (L < CC_CHROMA_L ? L / CC_CHROMA_L : 1);
+  return g < CC_CHROMA_MIN ? CC_CHROMA_MIN : g;
+}
+const CC_CHROMA_MAX = 128;     // سقف التشبّع بعد التلوين — خارجه بلا معنى بالشاشة
 const CC_HUE_MERGE = 34;       // درجتان أقرب من هذا الفرق = قماش واحد
 const CC_NEUTRAL_DL = 30;      // فرق الإضاءة بين رماديين مستقلّين
 const CC_L_SPLIT = 30;         // فرق الإضاءة بين قماشين من نفس الدرجة
@@ -2036,7 +2311,7 @@ const ccHueGap = (p, q) => {
 // فيُعاقَب على الانضمام لعائلة لونية ويُفضَّل الرمادي — والعكس بالعكس.
 function ccZoneCost(L, C, hue, def) {
   if (def.neutral) return Math.abs(L - def.L) * 0.9 + C * 4;
-  let d = ccHueGap(hue, def.hue) + Math.max(0, CC_CHROMA_REF - C) * 1.6;
+  let d = ccHueGap(hue, def.hue) + Math.max(0, ccChromaGate(L) - C) * 1.6;
   // قماشان بنفس الدرجة يختلفان بالفاتح والغامق (برغندي وnود مثلاً)
   if (def.L != null) d += Math.abs(L - def.L) * 0.55;
   return d;
@@ -2066,7 +2341,7 @@ function ccBuildDefs(lab, inside, n) {
     const a = lab[i * 3 + 1];
     const b = lab[i * 3 + 2];
     const C = Math.sqrt(a * a + b * b);
-    if (C >= CC_CHROMA_REF) {
+    if (C >= ccChromaGate(L)) {
       const bin = Math.min(BINS - 1, Math.floor((ccHue(a, b) / 360) * BINS));
       // الوزن بالمساحة أساساً مع ميل بسيط للّون الأوضح: قماش واسع باهت
       // (نود، بيج، رمادي مائل) يبقى له وجود أمام قماش صغير فاقع
@@ -2143,7 +2418,7 @@ function ccBuildDefs(lab, inside, n) {
       const a = lab[i * 3 + 1];
       const b = lab[i * 3 + 2];
       const C = Math.sqrt(a * a + b * b);
-      if (C < CC_CHROMA_REF) continue;
+      if (C < ccChromaGate(lab[i * 3])) continue;
       const hue = ccHue(a, b);
       let bi = 0, bd = Infinity;
       hueDefs.forEach((d, k) => { const g = ccHueGap(hue, d.hue); if (g < bd) { bd = g; bi = k; } });
@@ -2357,6 +2632,11 @@ function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
     if (bgPx[i]) e.bg++;
   }
   const isBackgroundZone = (i) => {
+    // مع وجود عزل حقيقي، العزل هو اللي شال الخلفية، وكل بكسل هون أصلاً
+    // جوّاه. انتشار الخلفية باللون ما بينفع كحَكَم ع صورة فوتوغرافية —
+    // مقيس سابقاً إنه بيغطّي 99.6% منها — وكان بيبلع لوحاً غامقاً كامل
+    // (البنفسجي بفستان أخضر/بنفسجي) ويحذف منطقته، فيتغيّر مع اللوح التاني
+    if (subject) return false;
     const e = bgShare[i];
     if (!e.all) return false;
     // منطقة كلّها خلفية متصلة بحواف الصورة = تسرّب من العزل، مهما كان لونها
@@ -2513,6 +2793,75 @@ function ccDespeckle(assign, w, h, k) {
 }
 
 // تنعيم حواف القناع بمرور أفقي ورأسي بسيط
+// ---------------------------------------------------------------------------
+// القماش المخرّز والمطرّز
+// ---------------------------------------------------------------------------
+// المشكلة الموثّقة: الخرزة فيها نقطة ضوء وحافّة غامقة وظلّ، فإسناد المناطق
+// بكسل بكسل بيتنقّط — بكسل قماش وبكسل «مو قماش» — والتلوين بيطلع مبقّع.
+//
+// الحلّ حسابي بحت وثابت: قرار الأغلبية على مقياس أكبر من الخرزة. إذا أغلب
+// جيران البكسل من نفس المنطقة، البكسل بينحسب منها. بلا نموذج وبلا عشوائية:
+// نفس الصورة بتعطي نفس النتيجة كل مرة.
+const CC_TEX_DIV = 200;   // نصف قطر الخرزة = أصغر ضلع ÷ هذا
+const CC_GUIDE_DIV = 90;  // الدليل بدّه نصف قطر أوسع: بيحدّد منطقة لا بكسلات
+
+// أكبر/أصغر قيمة في نافذة منزلقة، بطابور مرتّب — كلفتها ثابتة مهما كبر النصف.
+function ccMorph1D(src, out, w, h, r, horizontal, useMax) {
+  const len = horizontal ? w : h;
+  const outer = horizontal ? h : w;
+  const step = horizontal ? 1 : w;
+  const dq = new Int32Array(len);
+  for (let o = 0; o < outer; o++) {
+    const base = horizontal ? o * w : o;
+    let head = 0;
+    let tail = 0;
+    for (let i = 0; i < len; i++) {
+      const v = src[base + i * step];
+      while (tail > head) {
+        const bv = src[base + dq[tail - 1] * step];
+        if (useMax ? bv <= v : bv >= v) tail--;
+        else break;
+      }
+      dq[tail++] = i;
+      const oi = i - r;
+      if (oi >= 0) {
+        while (dq[head] < oi - r) head++;
+        out[base + oi * step] = src[base + dq[head] * step];
+      }
+    }
+    for (let oi = Math.max(0, len - r); oi < len; oi++) {
+      while (dq[head] < oi - r) head++;
+      out[base + oi * step] = src[base + dq[head] * step];
+    }
+  }
+}
+
+function ccMorph(src, w, h, r, useMax) {
+  const a = new Float32Array(w * h);
+  const b = new Float32Array(w * h);
+  ccMorph1D(src, a, w, h, r, true, useMax);
+  ccMorph1D(a, b, w, h, r, false, useMax);
+  return b;
+}
+
+// الإغلاق: تمديد ثم تقليص بنفس النصف. بيسدّ فراغات الخرز اللي أصغر من
+// النافذة، وبيرجّع الحدّ الخارجي محلّه — فما بيفرد المنطقة على القطعة كلها.
+// إضافة فقط بحكم تعريفه، فما بينشال ولا بكسل كان مختار. ومحصور بقناع
+// التلوين والبشرة، فما بيتعدّى القطعة ولا بيطول جلد العارضة.
+function ccSmoothMask(m, w, h, limit, skin, div) {
+  const r = Math.max(2, Math.round(Math.min(w, h) / (div || CC_TEX_DIV)));
+  const closed = ccMorph(ccMorph(m, w, h, r, true), w, h, r, false);
+  const out = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    let v = closed[i];
+    if (limit) v *= limit[i];
+    if (v < m[i]) v = m[i];
+    if (skin && skin[i]) v = 0;
+    out[i] = v;
+  }
+  return out;
+}
+
 function ccZoneMask(map, k) {
   const { assign, skin, bg, headBox, hairIsGarment, box, subject, w, h } = map;
   const paint = map.paint || subject;
@@ -2573,13 +2922,17 @@ function ccZoneMask(map, k) {
     y1: by1 + (by2 - by1) * 0.25,
     y2: by2 - (by2 - by1) * 0.03,
   });
+  // القماش المخرّز: قرار أغلبية قبل التنعيم النهائي. مطفي افتراضياً،
+  // فالقماش السادة بيمشي بنفس المسار المفحوص من قبل بلا أي تغيير.
+  const sm = map.textured ? ccSmoothMask(m, w, h, paint, skin) : m;
+
   const t = new Float32Array(n);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
-      const l = x > 0 ? m[i - 1] : m[i];
-      const r = x < w - 1 ? m[i + 1] : m[i];
-      t[i] = (l + m[i] * 2 + r) / 4;
+      const l = x > 0 ? sm[i - 1] : sm[i];
+      const r = x < w - 1 ? sm[i + 1] : sm[i];
+      t[i] = (l + sm[i] * 2 + r) / 4;
     }
   }
   for (let y = 0; y < h; y++) {
@@ -2938,6 +3291,45 @@ function ccChangeMasks(map, zones, cache, viewMap) {
   return out;
 }
 
+// دليل الألوان المرسَل للنموذج: نفس الصورة، والمناطق المطلوب تغييرها مدهونة
+// بلون مسطّح صريح. مسطّح عن قصد — النموذج يقرأ منه المكان واللون فقط،
+// والملمس والظلّ والخرز يأخذها من الصورة الأصلية.
+const CC_GUIDE_CUT = 0.5;      // وزن القناع الذي يُعدّ داخل المنطقة
+
+function ccGuide(canvas, fills) {
+  const out = tpCanvas(canvas.width, canvas.height);
+  const ctx = out.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(canvas, 0, 0);
+  const img = ctx.getImageData(0, 0, out.width, out.height);
+  const d = img.data;
+  const n = out.width * out.height;
+  let painted = 0;
+
+  fills.forEach((f) => {
+    if (!f || !f.mask || !tpHexOk(f.hex)) return;
+    const [r, g, b] = ccHexRgb(f.hex);
+    for (let i = 0; i < n; i++) {
+      if (f.mask[i] < CC_GUIDE_CUT) continue;
+      d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255;
+      painted++;
+    }
+  });
+
+  if (!painted) return null;
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+function ccBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('blob'))),
+      type || 'image/png',
+      quality,
+    );
+  });
+}
+
 // التلوين نفسه: تُحفظ الإضاءة وتفاوت التشبّع، ويُستبدل اللون
 function ccRecolor(canvas, map, centers, changes) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -2953,6 +3345,14 @@ function ccRecolor(canvas, map, centers, changes) {
     if (!src) return;
     const t = rgbToLab(ccHexRgb(ch.hex));
     const srcC = Math.max(Math.sqrt(src[1] * src[1] + src[2] * src[2]), 0.001);
+    const tgtC = Math.sqrt(t[1] * t[1] + t[2] * t[2]);
+    // القماش المتدرّج: الدرجة بتلفّ بفرق ثابت بدل ما تنستبدل بدرجة وحدة.
+    // هيك تدرّج الفوشي للكحلي بيضلّ تدرّج، بس بلون تاني — لو استبدلناها
+    // بدرجة وحدة كان التدرّج مات وصار الفستان لون مسطّح واحد.
+    const dHue = (ccHue(t[1], t[2]) - ccHue(src[1], src[2])) * (Math.PI / 180);
+    const cScale = Math.min(CC_CHROMA_MAX / srcC, tgtC / srcC);
+    const tCos = tgtC > 0.001 ? t[1] / tgtC : 1;
+    const tSin = tgtC > 0.001 ? t[2] / tgtC : 0;
     touched = true;
     // تباين المنطقة نفسها: منطقة واسعة فيها ظلّ وضوء تباينها عالي، ومنطقة
     // ضيّقة تباينها واطي. بلا تعويض، المنطقة الضيّقة بتطلع لون مسطّح متل
@@ -2983,12 +3383,18 @@ function ccRecolor(canvas, map, centers, changes) {
       const a = map.lab[i * 3 + 1];
       const b = map.lab[i * 3 + 2];
       const chroma = Math.sqrt(a * a + b * b);
-      const ratio = Math.max(0.55, Math.min(1.35, chroma / srcC));
-      const mix = 0.8 * ratio + 0.2;
       const nl = Math.max(2, Math.min(98, t[0] + (L - meanL) * gain));
+      // التشبّع بينضرب بنسبة، فالظلّ بيضلّ ظلّ والفاقع بيضلّ فاقع
+      const nc = Math.min(CC_CHROMA_MAX, chroma * cScale);
+      // بكسل تشبّعه واطي درجته مو موثوقة، فبدل ما نلفّها ونطلّع لون عشوائي
+      // منسحبها ع درجة الهدف. كل ما زاد التشبّع، زاد الاعتماد ع اللفّ.
+      const trust = Math.min(1, chroma / ccChromaGate(L));
+      const hr = Math.atan2(b, a) + dHue;
+      const na = nc * (Math.cos(hr) * trust + tCos * (1 - trust));
+      const nb = nc * (Math.sin(hr) * trust + tSin * (1 - trust));
       out[i * 3] = out[i * 3] * (1 - w) + nl * w;
-      out[i * 3 + 1] = out[i * 3 + 1] * (1 - w) + t[1] * mix * w;
-      out[i * 3 + 2] = out[i * 3 + 2] * (1 - w) + t[2] * mix * w;
+      out[i * 3 + 1] = out[i * 3 + 1] * (1 - w) + na * w;
+      out[i * 3 + 2] = out[i * 3 + 2] * (1 - w) + nb * w;
     }
   });
 
@@ -5212,6 +5618,24 @@ function StyleBlock() {
       .cc-summary-head { font-size: 0.76rem; font-weight: 700; margin-bottom: 0.4rem; }
       .cc-summary-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.74rem; margin-bottom: 0.25rem; }
       .cc-arrow { color: var(--ink-soft); }
+      .cc-count { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+        border: 1px solid #ece9e4; border-radius: 8px; padding: 0.5rem 0.6rem; background: #fff;
+        font-size: 0.75rem; color: var(--ink-soft); }
+      .cc-count-btns { display: flex; gap: 0.3rem; }
+      .cc-count-btns .cc-btn { min-width: 2rem; direction: ltr; }
+      .cc-count-btns .cc-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+      .cc-work .cta.ghost { background: #fff; color: var(--ink); border: 1px solid #d8d2c8; font-size: 0.92rem; padding: 0.85rem; }
+      .cc-work .cta.ghost:disabled { opacity: 0.45; cursor: not-allowed; }
+      .cc-split { display: flex; align-items: center; gap: 0.6rem; font-size: 0.72rem; color: var(--ink-soft);
+        margin-top: 0.3rem; }
+      .cc-split::before, .cc-split::after { content: ''; flex: 1; height: 1px; background: #e3dfd8; }
+      .cc-results { margin-top: 1.2rem; }
+      .cc-results-head { font-size: 0.82rem; font-weight: 700; color: var(--ink); margin-bottom: 0.6rem; }
+      .cc-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.9rem; }
+      .cc-result { background: #efedea; border-radius: 10px; padding: 0.6rem;
+        display: flex; flex-direction: column; gap: 0.5rem; }
+      .cc-result img { display: block; width: 100%; height: auto; border-radius: 6px; background: #fff; }
+      .cc-result .cc-btn { width: 100%; padding: 0.45rem; }
       .download-btn.sm { padding: 0.4rem 0.7rem; font-size: 0.74rem; }
       @media (max-width: 980px) { .cc-work { grid-template-columns: 1fr; } }
 
