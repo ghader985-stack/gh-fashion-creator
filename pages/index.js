@@ -417,79 +417,88 @@ export default function Home() {
         setCcWarn('تعذّر عزل القطعة عن الخلفية — المناطق رح تشمل الخلفية كمان، اتركيها «متل ما هي»');
       }
 
-      setCcStage('جارٍ كشف مناطق الألوان…');
+      setCcStage('جارٍ كشف ألواح القماش…');
       const lab = ccLabBuffer(view);
       const sp = ccSuperpixels(lab, view.width, view.height, CC_SP_COUNT, CC_SP_COMPACT);
       const adj = ccAdjacency(sp, view.width, view.height, ccEdgeMap(lab, view.width, view.height));
       const keep = ccInside(sp, subject, view.width * view.height);
-      const built = ccBuildZones(sp, adj, keep);
-      if (!built.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
+
+      // ألواح دقيقة: كل واحد متماسك ومن قماش واحد. التجميع بعدين، بالموديل.
+      const panels = ccBuildZones(sp, adj, keep, CC_PANEL_COUNT, 6, 26);
+      if (!panels.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
 
       const data = {
-        full,
-        view,
-        w: view.width,
-        h: view.height,
-        lab,
-        sp,
-        adj,
-        keep,
-        zoneOf: built.zoneOf,
+        full, view, w: view.width, h: view.height,
+        lab, sp, adj, keep,
+        zoneOf: panels.zoneOf,
         scale: ccScale(adj, keep),
         subject,
       };
-      setCcData(data);
 
-      let zones = built.zones.map((z, i) => {
+      // نقطة الرقم لكل لوح، لترقيمه على الصورة المرسَلة
+      const panelPts = panels.zones.map((z) => {
         const sel = new Uint8Array(sp.k);
         z.parts.forEach((c) => { sel[c] = 1; });
-        const info = ccSelInfo(sp, sel, view.width, view.height);
+        const inf = ccSelInfo(sp, sel, view.width, view.height);
+        return inf ? inf.point : { x: 0.5, y: 0.5 };
+      });
+
+      // الاستدعاء الوحيد: أي الألواح من نفس القماش
+      setCcStage('جارٍ قراءة أقمشة التصميم…');
+      let info = [];
+      try {
+        const numbered = ccNumbered(view, panels.zones.map((z, i) => ({ n: i + 1, x: panelPts[i].x, y: panelPts[i].y })));
+        const nb = await ccBlob(numbered, 'image/jpeg', 0.9);
+        const fdz = new FormData();
+        fdz.append('image', nb, 'panels.jpg');
+        fdz.append('zones', JSON.stringify(panels.zones.map((z, i) => ({
+          number: i + 1, hex: z.hex, share: Math.max(1, Math.round(z.share * 100)),
+        }))));
+        const rz = await fetch('/api/colorzones', { method: 'POST', body: fdz });
+        const dz = await rz.json();
+        if (rz.ok) {
+          if (dz.head && dz.head.x2 > dz.head.x1 && dz.head.y2 > dz.head.y1) data.headBox = dz.head;
+          if (Array.isArray(dz.zones)) {
+            const byNum = {};
+            dz.zones.forEach((q) => { byNum[q.number] = q; });
+            info = panels.zones.map((z, i) => byNum[i + 1] || {});
+          }
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] colorzones', e && e.message);
+      }
+      if (!info.length) {
+        // بلا قرار الموديل، الألواح بتنعرض متل ما هي بدل ما نخمّن تجميعها
+        info = panels.zones.map(() => ({}));
+        setCcWarn('تعذّرت قراءة أقمشة التصميم — الألواح معروضة مفصولة، اجمعيها بالضغط إذا لزم');
+      }
+
+      const built = ccGroupPanels(sp, panels.zones, info);
+      data.zoneOf = built.zoneOf;
+      setCcData(data);
+
+      setCcZones(built.zones.map((z, i) => {
+        const sel = new Uint8Array(sp.k);
+        z.parts.forEach((c) => { sel[c] = 1; });
+        const inf = ccSelInfo(sp, sel, view.width, view.height);
         const pt = nearestPantone(z.hex);
         return {
           n: i + 1,
           autoIndex: i,
           manual: false,
-          x: info ? info.point.x : 0.5,
-          y: info ? info.point.y : 0.5,
+          x: inf ? inf.point.x : 0.5,
+          y: inf ? inf.point.y : 0.5,
           hex: z.hex,
           share: Math.max(1, Math.round(z.share * 100)),
           pantone: pt ? pt.code : '',
           name: pt ? pt.name : z.hex,
-          where: '',
-          material: '',
-          part: 'other',
+          where: z.where || '',
+          material: z.material || '',
+          part: z.part || 'other',
           mode: 'keep',
           target: z.hex,
         };
-      });
-      setCcZones(zones);
-
-      // تسمية المناطق: استدعاء صغير واحد. إذا فشل، القسم بيكمل بأسماء
-      // البانتون — التسمية للعرض وللبرومبت، مو شرط لاشتغال القسم.
-      setCcStage('جارٍ تسمية المناطق…');
-      try {
-        const numbered = ccNumbered(view, zones);
-        const nb = await ccBlob(numbered, 'image/jpeg', 0.9);
-        const fdz = new FormData();
-        fdz.append('image', nb, 'zones.jpg');
-        fdz.append('zones', JSON.stringify(zones.map((z) => ({ number: z.n, hex: z.hex, share: z.share }))));
-        const rz = await fetch('/api/colorzones', { method: 'POST', body: fdz });
-        const dz = await rz.json();
-        if (rz.ok && dz.head && dz.head.x2 > dz.head.x1 && dz.head.y2 > dz.head.y1) {
-          data.headBox = dz.head;
-        }
-        if (rz.ok && Array.isArray(dz.zones)) {
-          const byNum = {};
-          dz.zones.forEach((q) => { byNum[q.number] = q; });
-          zones = zones.map((z) => {
-            const q = byNum[z.n];
-            return q ? { ...z, where: q.where || '', material: q.material || '', part: q.part || 'other' } : z;
-          });
-          setCcZones(zones);
-        }
-      } catch (e) {
-        if (typeof console !== 'undefined') console.warn('[gh] colorzones', e && e.message);
-      }
+      }));
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] colorchanger', e && e.message);
       setCcError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
@@ -563,6 +572,21 @@ export default function Home() {
   };
 
   const ccChangedZones = ccZones.filter((z) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex);
+
+  // منطقتان بلونين متقاربين بتطلعا لون واحد ع القماش. أحسن تعرفها قبل ما
+  // تدفعي نقاط على نتيجة ما رح تبيّن الفرق.
+  const ccClashes = (() => {
+    const out = [];
+    for (let i = 0; i < ccChangedZones.length; i++) {
+      for (let j = i + 1; j < ccChangedZones.length; j++) {
+        const a = rgbToLab(ccHexRgb(ccChangedZones[i].target));
+        const b = rgbToLab(ccHexRgb(ccChangedZones[j].target));
+        const d = Math.sqrt(Math.pow(a[0] - b[0], 2) + Math.pow(a[1] - b[1], 2) + Math.pow(a[2] - b[2], 2));
+        if (d < 22) out.push({ a: ccChangedZones[i].n, b: ccChangedZones[j].n, same: d < 3 });
+      }
+    }
+    return out;
+  })();
 
   const ccSpend = (k) => {
     if (!k || user?.plan === 'admin') return;
@@ -1215,6 +1239,7 @@ export default function Home() {
                                 {z.pantone && <span className="cc-zone-pt" dir="ltr">PANTONE {z.pantone}</span>}
                               </div>
                               <div className="cc-zone-where">
+                                {z.where ? <span dir="auto">{z.where} · </span> : null}
                                 نسبة المساحة {z.share}%{z.manual ? ' · تحديد يدوي' : ''}
                               </div>
                             </div>
@@ -1257,6 +1282,15 @@ export default function Home() {
                               </div>
                             );
                           })}
+                          {ccClashes.length > 0 && (
+                            <div className="cc-clash">
+                              {ccClashes.map((c, i) => (
+                                <div key={'c' + i}>
+                                  المنطقتان {c.a} و{c.b} {c.same ? 'واخدين نفس اللون بالضبط' : 'لونيهن متقاربين'} — رح يطلعوا لون واحد بالنتيجة
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1760,8 +1794,18 @@ const CC_CREDITS_PER_IMAGE = 2;
 const CC_SP_COUNT = 700;        // عدد القطع الصغيرة
 const CC_SP_COMPACT = 12;       // تماسكها الشكلي
 const CC_MAX_ZONES = 6;
+const CC_PANEL_COUNT = 24;      // كم لوح بينبعت للموديل ليجمّعهن
 const CC_MIN_ZONE = 0.03;       // منطقة أصغر من هيك بتنضمّ لأقرب وحدة
 const CC_PANEL_MERGE = 12;      // تحت هالفرق (صبغة + حدّة الدرزة) قطعتان = لوح واحد
+// أقصى اتّساع صبغة مسموح جوّا لوح واحد. بلا هالسقف، الدمج بيمشي **على طول
+// التدرّج**: كل خطوة صغيرة، والمتوسّط بيزحف معها، فالشريط الكحلي والقماش
+// الفوشي والحزام البنفسجي بصدر الفستان بينتهوا لوح واحد — مقيس ومشوف.
+// السقف نسبي بمساحة اللوح: كشكشة كبيرة من قماش متدرّج إلها الحق تمتدّ
+// بالصبغة، ولوحان صغيران متجاوران (شريط الرقبة والقماش اللي جنبه) لأ.
+// سقف ثابت ما بينفع: قِست 14 → الصدر صح والتنورة بتتكسّر، و26 → التنورة
+// صح والصدر بيندمج بلوح واحد.
+const CC_SPREAD_BASE = 10;
+const CC_SPREAD_GROW = 45;
 const CC_SAME_FABRIC = 6;       // نفس القماش لو ظاهر بمكان تاني منفصل
 const CC_SAME_LIGHT = 10;       // وبنفس مستوى الإضاءة — بلاها بيبلع الشعر
 
@@ -2141,10 +2185,12 @@ function ccInside(sp, subject, n) {
 // بتصير سلسلة — أخضر ← أخضر أغمق ← ... ← بنفسجي — وبيندمجوا كلهن بلوح واحد
 // لأن كل خطوة لحالها صغيرة. مقيس ع فستان الأخضر/البنفسجي: 89% من القطعة
 // طلعت منطقة وحدة بلون طيني.
-function ccBuildZones(sp, adj, keep) {
+function ccBuildZones(sp, adj, keep, maxOut, spBase, spGrow) {
   const k = sp.k;
   const parent = new Int32Array(k);
   const px = new Float64Array(k), mA = new Float64Array(k), mB = new Float64Array(k), mL = new Float64Array(k);
+  // حدود صبغة اللوح، لقياس اتّساعه
+  const aLo = new Float64Array(k), aHi = new Float64Array(k), bLo = new Float64Array(k), bHi = new Float64Array(k);
   const alive = new Uint8Array(k);
   const nb = [];
   for (let c = 0; c < k; c++) {
@@ -2153,6 +2199,7 @@ function ccBuildZones(sp, adj, keep) {
     if (!keep[c]) continue;
     alive[c] = 1;
     px[c] = sp.count[c]; mA[c] = sp.A[c]; mB[c] = sp.B[c]; mL[c] = sp.L[c];
+    aLo[c] = aHi[c] = sp.A[c]; bLo[c] = bHi[c] = sp.B[c];
   }
   for (let a = 0; a < k; a++) {
     if (!keep[a]) continue;
@@ -2162,7 +2209,20 @@ function ccBuildZones(sp, adj, keep) {
 
   // الدمج بيقارن مع **متوسّط اللوح** مو مع الجار المباشر. لو قارنّا بالجار
   // بتصير سلسلة — أخضر ← أخضر أغمق ← ... ← بنفسجي — وبيندمجوا كلهن بلوح واحد.
+  // اتّساع اللوح لو اندمج التنين
+  let totalPx = 0;
+  for (let c = 0; c < k; c++) if (keep[c]) totalPx += sp.count[c];
+  const spreadOk = (a, b) => {
+    const da = Math.max(aHi[a], aHi[b]) - Math.min(aLo[a], aLo[b]);
+    const db = Math.max(bHi[a], bHi[b]) - Math.min(bLo[a], bLo[b]);
+    const spread = Math.sqrt(da * da + db * db);
+    const share = (px[a] + px[b]) / Math.max(totalPx, 1);
+    return spread <= (spBase == null ? CC_SPREAD_BASE : spBase) + (spGrow == null ? CC_SPREAD_GROW : spGrow) * Math.sqrt(share);
+  };
+
   const mergeTo = (ba, bb) => {
+    aLo[ba] = Math.min(aLo[ba], aLo[bb]); aHi[ba] = Math.max(aHi[ba], aHi[bb]);
+    bLo[ba] = Math.min(bLo[ba], bLo[bb]); bHi[ba] = Math.max(bHi[ba], bHi[bb]);
     const tot = px[ba] + px[bb];
     mA[ba] = (mA[ba] * px[ba] + mA[bb] * px[bb]) / tot;
     mB[ba] = (mB[ba] * px[ba] + mB[bb] * px[bb]) / tot;
@@ -2184,7 +2244,9 @@ function ccBuildZones(sp, adj, keep) {
       for (const t of nb[a]) {
         if (t <= a || !alive[t]) continue;
         const d = ccDye2(mA[a], mB[a], mA[t], mB[t]);
-        if (d < bd) { bd = d; ba = a; bb = t; }
+        if (d >= bd) continue;
+        if (!spreadOk(a, t)) continue;   // بيوسّع اللوح أكتر مما تسمح مساحته
+        bd = d; ba = a; bb = t;
       }
     }
     if (ba < 0 || bd > CC_PANEL_MERGE) break;
@@ -2229,7 +2291,7 @@ function ccBuildZones(sp, adj, keep) {
   for (;;) {
     let live = [];
     for (let c = 0; c < k; c++) if (alive[c]) live.push(c);
-    if (live.length <= CC_MAX_ZONES) break;
+    if (live.length <= (maxOut || CC_MAX_ZONES)) break;
     live.sort((x, y) => px[x] - px[y]);
     const small = live.find((c) => nb[c].size > 0);
     if (small == null) break;
@@ -2252,7 +2314,7 @@ function ccBuildZones(sp, adj, keep) {
     if (!g) { g = { px: px[r], L: mL[r], A: mA[r], B: mB[r], parts: [] }; groups.set(r, g); }
     g.parts.push(c);
   }
-  const kept = [...groups.values()].sort((x, y) => y.px - x.px).slice(0, CC_MAX_ZONES);
+  const kept = [...groups.values()].sort((x, y) => y.px - x.px).slice(0, maxOut || CC_MAX_ZONES);
   let tot2 = 0;
   for (const z of kept) tot2 += z.px;
 
@@ -2277,6 +2339,59 @@ function ccBuildZones(sp, adj, keep) {
     zones: kept.map((z) => {
       const s2 = shownLab(z);
       return { share: z.px / Math.max(tot2, 1), lab: [z.L, z.A, z.B], hex: toHex(ccLab2Rgb(s2[0], s2[1], s2[2])), parts: z.parts };
+    }),
+  };
+}
+
+// ضمّ الألواح اللي الموديل قال إنها من نفس القماش.
+// هون بتنتقل «شو لوح واحد؟» من حساب لوني لقرار بصري — وهاد بالضبط اللي
+// بيعمله المرجع. أي عتبة لونية إمّا بتدمج الشريط الكحلي مع الفوشي بصدر
+// واحد، أو بتكسّر الكشكشة المتدرّجة لشرائط؛ مقيس ومشوف.
+function ccGroupPanels(sp, panels, info) {
+  const byGroup = new Map();
+  const pxOf = (parts) => {
+    let n = 0;
+    for (const c of parts) n += sp.count[c];
+    return n;
+  };
+  panels.forEach((p, i) => {
+    const q = info[i] || {};
+    const g = q.group > 0 ? 'g' + q.group : 'p' + i;   // بلا قرار، اللوح بيضلّ لحاله
+    let z = byGroup.get(g);
+    if (!z) { z = { px: 0, parts: [], where: q.where || '', material: q.material || '', part: q.part || 'other' }; byGroup.set(g, z); }
+    z.px += pxOf(p.parts);
+    z.parts = z.parts.concat(p.parts);
+    if (!z.where && q.where) z.where = q.where;
+    if (!z.material && q.material) z.material = q.material;
+    if (z.part === 'other' && q.part) z.part = q.part;
+  });
+  const list = [...byGroup.values()].sort((a, b) => b.px - a.px).slice(0, CC_MAX_ZONES);
+  let total = 0;
+  for (const z of list) total += z.px;
+  const zoneOf = new Int32Array(sp.k).fill(-1);
+  list.forEach((z, i) => z.parts.forEach((c) => { zoneOf[c] = i; }));
+  const shownLab = (z) => {
+    const ranked = z.parts.slice().sort((x, y) => (sp.A[y] * sp.A[y] + sp.B[y] * sp.B[y]) - (sp.A[x] * sp.A[x] + sp.B[x] * sp.B[x]));
+    const take = Math.max(1, Math.round(ranked.length * 0.5));
+    let q = 0, L = 0, A = 0, B = 0;
+    for (let j = 0; j < take; j++) {
+      const c = ranked[j];
+      q += sp.count[c]; L += sp.L[c] * sp.count[c]; A += sp.A[c] * sp.count[c]; B += sp.B[c] * sp.count[c];
+    }
+    return q ? [L / q, A / q, B / q] : [50, 0, 0];
+  };
+  return {
+    zoneOf,
+    zones: list.map((z) => {
+      const l = shownLab(z);
+      return {
+        share: z.px / Math.max(total, 1),
+        hex: toHex(ccLab2Rgb(l[0], l[1], l[2])),
+        parts: z.parts,
+        where: z.where,
+        material: z.material,
+        part: z.part,
+      };
     }),
   };
 }
@@ -4670,6 +4785,8 @@ function StyleBlock() {
       .cc-zone-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.8rem; }
       .cc-zone-hex, .cc-zone-pt { font-size: 0.68rem; color: var(--ink-soft); background: #f4f2ef; border-radius: 4px; padding: 0.1rem 0.35rem; }
       .cc-zone-where { font-size: 0.7rem; color: var(--ink-soft); margin-top: 0.2rem; }
+      .cc-clash { margin-top: 0.6rem; padding: 0.5rem 0.6rem; border-radius: 6px;
+        background: #fdf6ec; border: 1px solid #e8d9bf; color: #8a6d3b; font-size: 0.72rem; line-height: 1.6; }
       .cc-zone-actions { display: flex; flex-direction: row; gap: 0; flex: none; align-items: center;
         border: 1px solid #e3dfd8; border-radius: 7px; overflow: hidden; background: #fff; }
       .cc-zone-actions .cc-btn { border: none; border-radius: 0; white-space: nowrap; }
