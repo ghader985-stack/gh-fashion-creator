@@ -1,29 +1,35 @@
-// pages/api/colorzones.js
-// تسمية مناطق الألوان في قسم «تغيير الألوان».
+// api/colorzones.js
+// كشف مناطق الألوان في قسم «تغيير الألوان».
 //
-// المتصفح يقسّم القطعة إلى ألواح صغيرة متماسكة ويرقّمها على الصورة.
-// هذا المسار يفعل شيئاً واحداً وهو الأهم: يقرأ الصورة المرقّمة ويقول
-// **أي الألواح من القماش نفسه**، ويسمّي كل قماش ومكانه وخامته، ويحدّد ما
-// إذا كان قماشاً أم بشرة أم شعراً أم خلفية.
+// استدعاء واحد لموديل رؤية على الصورة كما هي. يرجّع، لكل منطقة لونية:
+// اسم اللون، لونه التقريبي، نوعها (قماش/إكسسوار/بشرة/شعر/خلفية)، وين
+// بتقع على القطعة بالعربي وبالإنكليزي، خامتها، نقاط جوّاها، وصندوقها.
 //
-// التجميع هنا وليس في المتصفح عن قصد: حدّ اللوح خياطة، والخياطة قرار
-// بصري لا معادلة لونية. أي عتبة لونية إمّا تدمج الشريط الكحلي مع القماش
-// الفوشي في صدر واحد، أو تكسّر الكشكشة المتدرّجة إلى شرائط.
+// ليش بلا أقنعة ولا تقسيم بالمتصفح: التقسيم بالبكسل لا يعرف أين الدرزة،
+// والمنتج النهائي يرسمه نموذج صور لا الكانفاس. فالمطلوب من هذا المسار
+// وصف دقيق للمناطق يُبنى عليه برومبت الرسم، لا قناع.
 //
-// استدعاء واحد صغير بنموذج سريع. إذا فشل، القسم يكمل بأسماء البانتون.
+// النقاط تُستعمل في المتصفح لقراءة اللون الحقيقي من البكسلات — اللون
+// المعروض والبانتون يُحسبان من الصورة نفسها لا من كلام الموديل.
 
 import formidable from 'formidable';
 import fs from 'fs';
 
 export const config = {
   api: { bodyParser: false },
-  maxDuration: 60,
+  maxDuration: 120,
 };
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-sonnet-5';
 const MAX_TOKENS = 4000;
-const CALL_TIMEOUT_MS = 45000;
-const PART_ENUM = ['garment', 'trim', 'skin', 'hair', 'background', 'other'];
+const CALL_TIMEOUT_MS = 90000;
+const MAX_ZONES = 9;
+
+const KINDS = ['garment', 'trim', 'skin', 'hair', 'background', 'other'];
+const KIND_RANK = { garment: 0, trim: 1, other: 2, skin: 3, hair: 4, background: 5 };
+
+const pickFile = (f) => (Array.isArray(f) ? f[0] : f) || null;
+const str = (v) => (typeof v === 'string' ? v.trim() : '');
 
 function detectImageType(buffer) {
   if (!buffer || buffer.length < 4) return 'image/jpeg';
@@ -33,73 +39,83 @@ function detectImageType(buffer) {
   return 'image/jpeg';
 }
 
-const getField = (f) => String((Array.isArray(f) ? f[0] : f) || '').trim();
-const pickFile = (f) => (Array.isArray(f) ? f[0] : f) || null;
-const str = (v) => (typeof v === 'string' ? v.trim() : '');
-
-const BOX = {
-  type: 'object',
-  properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } },
-  required: ['x1', 'y1', 'x2', 'y2'],
-  additionalProperties: false,
-};
-
-const SCHEMA = {
-  type: 'object',
-  properties: {
-    product: BOX,
-    head: BOX,
-    skin: { type: 'array', items: BOX },
-    zones: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          number: { type: 'number' },
-          group: { type: 'number' },
-          name: { type: 'string' },
-          where: { type: 'string' },
-          material: { type: 'string' },
-          part: { type: 'string', enum: PART_ENUM },
+// ---------------------------------------------------------------------------
+// أداة واحدة مُلزِمة: الرد يرجع JSON صالحاً دائماً، بلا تحليل نصّ ولا أقواس
+const TOOL = {
+  name: 'report_color_zones',
+  description: 'Report the colour zones found in the product photograph.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      description: {
+        type: 'string',
+        description: 'One sentence in English naming the garment and its colours.',
+      },
+      description_ar: {
+        type: 'string',
+        description: 'The same sentence in Arabic.',
+      },
+      zones: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            name_ar: { type: 'string' },
+            hex: { type: 'string' },
+            kind: { type: 'string', enum: KINDS },
+            parts: { type: 'string' },
+            parts_ar: { type: 'string' },
+            material: { type: 'string' },
+            points: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: { x: { type: 'number' }, y: { type: 'number' } },
+                required: ['x', 'y'],
+              },
+            },
+            box: {
+              type: 'object',
+              properties: {
+                x1: { type: 'number' }, y1: { type: 'number' },
+                x2: { type: 'number' }, y2: { type: 'number' },
+              },
+              required: ['x1', 'y1', 'x2', 'y2'],
+            },
+          },
+          required: ['name', 'name_ar', 'hex', 'kind', 'parts', 'parts_ar', 'material', 'points', 'box'],
         },
-        required: ['number', 'group', 'name', 'where', 'material', 'part'],
-        additionalProperties: false,
       },
     },
+    required: ['description', 'description_ar', 'zones'],
   },
-  required: ['product', 'head', 'skin', 'zones'],
-  additionalProperties: false,
 };
 
-function buildPrompt(zones) {
-  const list = zones.map((z) => '  ' + z.number + ' — ' + z.hex + ' (' + z.share + '% of the image)').join('\n');
-  return `The image shows one product. Numbered markers have been placed on it: each number marks one small patch of the image that has already been found to be uniform.
+const PROMPT = `The image is one product photograph, usually a garment worn by a model.
 
-Numbers and the colour sampled at each:
-${list}
+Find the distinct COLOUR ZONES in it. A colour zone is one area of one colour that a fashion designer would recolour as a single unit: one cloth in one dye. Two areas are the same zone when they are the same cloth in the same colour, even when they sit apart in the picture and even when one is in bright light and the other deep in a fold. They are different zones when a seam, an edge or a change of material separates them, or when the colour is plainly different.
 
-Your task is to say which of these patches are THE SAME PIECE OF FABRIC.
+Rules:
+- Give between 1 and 6 zones for the garment itself. A gown usually has 2 to 4.
+- A cloth that is dip-dyed, ombre or printed and shades from one colour into another is more than one zone: split it where a designer would name a different colour.
+- Also report, each as its own zone, the other things in the frame that carry their own colour: the model's skin, the model's hair, the background. At most 3 of these, and only when they are clearly visible.
+- Order the zones by how much of the PRODUCT each one covers, largest first, and put every garment and trim zone before skin, hair and background.
 
-Two patches belong to the same fabric when a tailor would cut them from the same bolt of cloth — the same material in the same dye. They belong to the same fabric even when they look different in the photo because one is in a highlight and the other deep in a fold, or because the cloth is dip-dyed and shades across its length. They belong to DIFFERENT fabrics when a seam, an edge or a change of material separates them, even when their colours are close.
+For every zone give:
+- name: the colour in English, 1 to 3 words, the way a fashion colour card names it: "Magenta Pink", "Deep Purple", "Sage Green".
+- name_ar: the same colour name in Arabic.
+- hex: the colour as it appears in a normally lit part of that zone, as #RRGGBB. Not the colour in the highlight and not the colour in the shadow.
+- kind: one of garment, trim, skin, hair, background, other. Use trim for zippers, buttons, beads, crystals, piping, embroidery and metal hardware.
+- parts: in English, where this zone sits on the product, naming the real garment parts, 3 to 10 words: "right bust panel, centre front ruffles, right skirt panel". For skin, hair or background, say plainly what it is.
+- parts_ar: the same text in Arabic.
+- material: the material in 1 to 3 English words: "silk chiffon", "duchess satin", "beaded mesh". Empty string when the zone is not a material.
+- points: 1 to 4 points that land INSIDE this zone, on its widest and most clearly visible parts, away from edges, seams, deep shadow and bright glare. x and y in percent of the image width and height, 0 to 100. These points are read straight off the pixels to get the true colour of the zone, so a point that lands a few percent off and hits the neighbouring cloth gives a wrong colour. Place them with care.
+- box: the rectangle that contains the whole zone, x1 y1 x2 y2 in percent of width and height.
 
-For every number return:
-- group: an integer. Patches of the same fabric get the SAME group number. Different fabrics get different group numbers. Number the groups 1, 2, 3 … in order of how much of the product each one covers, largest first. Skin, hair and background each get their own group, separate from every fabric.
-- part: garment for fabric of the piece, trim for zippers, buttons, beads, piping, embroidery and hardware, skin for the model's skin, hair for hair or a headscarf worn only as styling, background for the backdrop, wall, floor or props, other for anything else.
-- where: where that fabric sits on the product, 2 to 6 words, naming the real parts ("bodice, waistband and upper ruffles", "left skirt cascade", "halter strap"). Every patch in the same group must be given the SAME where text. If it is not part of the product, say what it is ("studio background", "model's skin", "model's hair").
-- material: the material in 1 to 4 words ("silk chiffon", "beaded mesh", "duchess satin", "metal hardware"). Same text for every patch in a group. Empty string if it is not a material.
-- name: leave it an empty string. The colour name is computed from the pixels.
+Answer with the tool only.`;
 
-Be decisive. A gown usually has between 2 and 6 fabrics. Do not give every patch its own group, and do not put the whole product in one group.
-
-Also return skin: boxes around the person's BARE SKIN only — face and neck, shoulders and chest, each arm, each hand, each leg, each foot — in percent of the image, up to 6. Empty array if there is no person or no bare skin is visible.
-
-Also return head: the box around the model's head AND neck — hair, hairstyle, headscarf, face, jaw and neck down to the collarbone — in percent of the image, generous enough to cover every strand. If there is no person, return 0,0,0,0.
-
-Also return product: the box around the product itself, in percent of the image: x1 and x2 from the left edge, y1 and y2 from the top edge, 0 to 100. Include train, sleeves and anything that extends outward, but nothing of the background. If the garment fills the frame, return 0, 0, 100, 100.
-
-Return one entry per number, in the same order. Answer in English only.`;
-}
-
+// ---------------------------------------------------------------------------
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -111,10 +127,9 @@ export default async function handler(req, res) {
   }
 
   let files;
-  let fields;
   try {
     const form = formidable({ maxFileSize: 8 * 1024 * 1024, maxTotalFileSize: 10 * 1024 * 1024 });
-    [fields, files] = await form.parse(req);
+    [, files] = await form.parse(req);
   } catch (e) {
     if (typeof console !== 'undefined') console.warn('[gh] colorzones form', e && e.message);
     return res.status(400).json({ error: 'تعذّر استلام الصورة' });
@@ -123,44 +138,31 @@ export default async function handler(req, res) {
   const image = pickFile(files.image);
   if (!image) return res.status(400).json({ error: 'الصورة مطلوبة' });
 
-  let zones;
-  try {
-    zones = JSON.parse(getField(fields.zones) || '[]');
-  } catch (e) {
-    zones = [];
-  }
-  zones = (Array.isArray(zones) ? zones : []).slice(0, 28).map((z, i) => ({
-    number: Number(z && z.number) || i + 1,
-    hex: str(z && z.hex) || '#000000',
-    share: Math.round(Number(z && z.share) || 0),
-  }));
-  // المناطق اختيارية: يُستدعى هذا المسار أيضاً لجلب حدود القطعة والرأس فقط
-
   const buf = fs.readFileSync(image.filepath);
-  const content = [
-    { type: 'image', source: { type: 'base64', media_type: detectImageType(buf), data: buf.toString('base64') } },
-    { type: 'text', text: buildPrompt(zones) },
-  ];
+  const body = {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    tools: [TOOL],
+    tool_choice: { type: 'tool', name: TOOL.name },
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: detectImageType(buf), data: buf.toString('base64') } },
+        { type: 'text', text: PROMPT },
+      ],
+    }],
+  };
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), CALL_TIMEOUT_MS);
-  let data = null;
-  let useSchema = true;
+  let parsed = null;
+  let lastStatus = 0;
 
   try {
-    for (let attempt = 0; attempt < 2 && !data; attempt++) {
-      const body = { model: MODEL, max_tokens: MAX_TOKENS, messages: [{ role: 'user', content }] };
-      if (useSchema) body.output_config = { format: { type: 'json_schema', schema: SCHEMA } };
-      else {
-        body.messages = [{
-          role: 'user',
-          content: content.concat([{
-            type: 'text',
-            text: 'Return ONLY one JSON object, no markdown: {"product":{"x1":0,"y1":0,"x2":100,"y2":100},"head":{"x1":0,"y1":0,"x2":0,"y2":0},"skin":[{"x1":0,"y1":0,"x2":0,"y2":0}],"zones":[{"number":1,"group":1,"name":"","where":"","material":"","part":"garment"}]}',
-          }]),
-        }];
-      }
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // محاولتان: عطل عابر من الخدمة (429/5xx) يُعاد، وغلط الطلب لا يُعاد
+    for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 1200));
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -170,61 +172,79 @@ export default async function handler(req, res) {
         signal: ctrl.signal,
         body: JSON.stringify(body),
       });
-      if (response.status === 400 && useSchema) {
-        if (typeof console !== 'undefined') console.warn('[gh] colorzones 400, retrying without schema');
-        useSchema = false;
-        continue;
+
+      if (!r.ok) {
+        lastStatus = r.status;
+        let detail = '';
+        try { detail = (await r.text()).slice(0, 300); } catch (e) { detail = ''; }
+        if (typeof console !== 'undefined') console.warn('[gh] colorzones status', r.status, detail);
+        if (r.status === 429 || r.status >= 500) continue;
+        break;
       }
-      if (!response.ok) {
-        if (typeof console !== 'undefined') console.warn('[gh] colorzones status', response.status);
-        return res.status(502).json({ error: 'تعذّرت تسمية المناطق' });
-      }
-      data = await response.json();
+
+      const data = await r.json();
+      const use = (data.content || []).find((b) => b && b.type === 'tool_use' && b.input);
+      if (use) parsed = use.input;
+      else if (typeof console !== 'undefined') console.warn('[gh] colorzones no tool_use', data && data.stop_reason);
     }
   } catch (e) {
     clearTimeout(timer);
     if (typeof console !== 'undefined') console.warn('[gh] colorzones call', e && e.message);
-    return res.status(504).json({ error: 'تعذّر الاتصال بخدمة التسمية' });
+    return res.status(504).json({ error: 'تعذّر الاتصال بخدمة تحليل الألوان' });
   }
   clearTimeout(timer);
-  if (!data) return res.status(502).json({ error: 'تعذّرت تسمية المناطق' });
 
-  const text = (data.content || []).filter((b) => b && b.type === 'text').map((b) => b.text).join('');
-  let parsed;
-  try {
-    const t = text.replace(/```(?:json)?/gi, '').trim();
-    parsed = JSON.parse(useSchema ? text : t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));
-  } catch (e) {
-    if (typeof console !== 'undefined') console.warn('[gh] colorzones parse', e && e.message);
-    return res.status(502).json({ error: 'تعذّرت قراءة أسماء المناطق' });
+  if (!parsed) {
+    return res.status(502).json({ error: 'تعذّر تحليل مناطق الألوان (' + (lastStatus || 502) + ')' });
   }
 
-  const num = (v, d) => (Number.isFinite(+v) ? Math.max(0, Math.min(100, +v)) : d);
-  const asBox = (b, d1, d2) => {
-    const o = b || {};
-    return {
-      x1: Math.min(num(o.x1, d1), num(o.x2, d2)),
-      y1: Math.min(num(o.y1, d1), num(o.y2, d2)),
-      x2: Math.max(num(o.x1, d1), num(o.x2, d2)),
-      y2: Math.max(num(o.y1, d1), num(o.y2, d2)),
-    };
+  // -------------------------------------------------------------------------
+  // تنظيف: كل رقم محصور، وكل نصّ مقصوص، وأي منطقة ناقصة تُسقَط
+  const pct = (v, d) => (Number.isFinite(+v) ? Math.max(0, Math.min(100, +v)) : d);
+  const hex = (v) => {
+    const m = /^#?([0-9a-fA-F]{6})$/.exec(str(v));
+    return m ? '#' + m[1].toUpperCase() : '';
   };
-  const product = asBox(parsed && parsed.product, 0, 100);
-  const head = asBox(parsed && parsed.head, 0, 0);
-  const skin = (Array.isArray(parsed && parsed.skin) ? parsed.skin : [])
-    .map((b) => asBox(b, 0, 0))
-    .filter((b) => b.x2 > b.x1 && b.y2 > b.y1)
-    .slice(0, 8);
 
-  const out = (Array.isArray(parsed && parsed.zones) ? parsed.zones : []).map((z, i) => ({
-    number: Number(z && z.number) || i + 1,
-    // رقم القماش: هو ناتج هذا الاستدعاء الأهم. 0 يعني لم يُحدَّد.
-    group: Number.isFinite(+(z && z.group)) ? Math.max(0, Math.round(+z.group)) : 0,
-    name: str(z && z.name),
-    where: str(z && z.where),
-    material: str(z && z.material),
-    part: PART_ENUM.includes(str(z && z.part).toLowerCase()) ? str(z.part).toLowerCase() : 'other',
-  }));
+  const zones = (Array.isArray(parsed.zones) ? parsed.zones : [])
+    .map((z) => {
+      const o = z || {};
+      const points = (Array.isArray(o.points) ? o.points : [])
+        .map((p) => ({ x: pct(p && p.x, -1), y: pct(p && p.y, -1) }))
+        .filter((p) => p.x >= 0 && p.y >= 0)
+        .slice(0, 4);
+      const b = o.box || {};
+      const box = {
+        x1: Math.min(pct(b.x1, 0), pct(b.x2, 100)),
+        y1: Math.min(pct(b.y1, 0), pct(b.y2, 100)),
+        x2: Math.max(pct(b.x1, 0), pct(b.x2, 100)),
+        y2: Math.max(pct(b.y1, 0), pct(b.y2, 100)),
+      };
+      const kind = KINDS.includes(str(o.kind).toLowerCase()) ? str(o.kind).toLowerCase() : 'other';
+      return {
+        name: str(o.name).slice(0, 40),
+        nameAr: str(o.name_ar).slice(0, 40),
+        hex: hex(o.hex),
+        kind,
+        parts: str(o.parts).slice(0, 160),
+        partsAr: str(o.parts_ar).slice(0, 160),
+        material: str(o.material).slice(0, 60),
+        points,
+        box,
+      };
+    })
+    // منطقة بلا نقطة لا يمكن قراءة لونها من البكسلات، ومنطقة بلا لون لا تُعرض
+    .filter((z) => z.points.length > 0 && z.hex)
+    .sort((a, b2) => (KIND_RANK[a.kind] || 2) - (KIND_RANK[b2.kind] || 2))
+    .slice(0, MAX_ZONES);
 
-  return res.status(200).json({ product, head, skin, zones: out });
+  if (!zones.length) {
+    return res.status(502).json({ error: 'ما انكشفت مناطق لونية بهالصورة — جرّبي صورة أوضح' });
+  }
+
+  return res.status(200).json({
+    description: str(parsed.description).slice(0, 240),
+    descriptionAr: str(parsed.description_ar).slice(0, 240),
+    zones,
+  });
 }
