@@ -45,28 +45,29 @@ const toDataUri = (filepath) => {
   return 'data:' + detectImageType(buf) + ';base64,' + buf.toString('base64');
 };
 
-// وصف كل تغيير بلونه القديم والجديد. الدليل هو الذي يحدّد المكان بدقّة،
-// فالنصّ هنا للتأكيد على اللون المطلوب لا على الموقع.
+// وصف كل تغيير بلونه القديم والجديد. الدليل هو اللي بيحدّد المكان واللون،
+// والنصّ هون للتأكيد على البانتون المطلوب.
 function buildPrompt(changes) {
   const list = changes.map((c, i) => {
     const from = [c.fromName, c.fromHex].filter(Boolean).join(' ');
     const to = [c.toName, c.toCode ? 'PANTONE ' + c.toCode : '', c.toHex].filter(Boolean).join(' ');
-    const what = c.where ? c.where + (c.material ? ' (' + c.material + ')' : '') : 'the area painted with this colour in image 2';
-    return '  ' + (i + 1) + '. ' + what + ': ' + (from || 'its current colour') + ' becomes ' + to + '.';
+    const what = c.where ? c.where + (c.material ? ' (' + c.material + ')' : '') : 'the area already recoloured in image 2';
+    return '  ' + (i + 1) + '. ' + what + ': ' + (from || 'its previous colour') + ' is now ' + to + '.';
   }).join('\n');
 
-  return `Image 1 is the original photograph. Image 2 is a colour guide: the same photograph with some areas painted over in flat solid colour.
+  return `Image 1 is the original photograph. Image 2 is the same photograph after a rough recolour: some areas have already been dyed to their new colours, keeping their folds, shading and gradients, but the recolour is computed rather than photographed, so its edges and surfaces look synthetic.
 
-Reproduce image 1 exactly — the same garment, the same person and pose, the same camera angle and crop, the same lighting, the same background, the same fabric, weave, embroidery, beading, sequins, lace, stitching, seams, folds, drape and shadows.
+Your job is to return image 2 as a real photograph.
 
-Change one single thing: every area that image 2 paints in flat colour must come out in that colour.
+Keep from image 2: every colour, exactly. The hue of each recoloured area, and the way that colour varies across the fabric — its gradient, its lighter and darker passages — are the target and must not be shifted, flattened or averaged.
+
+Take from image 1: the photographic quality. The weave and sheen of the fabric, the crispness of every edge and seam, the depth of the folds, the beads, sequins, crystals, lace and embroidery stitches, the grain and focus of the photograph.
 
 Rules:
-- Image 2 only tells you WHERE the change goes and WHICH colour to use. Never copy its flatness.
-- The recoloured fabric keeps all of its own texture, weave, sheen, highlights, shadows, folds and every bead, sequin, crystal, embroidery stitch and thread, rendered in the new colour the way a real dye behaves on that material. Metallic and beaded areas stay metallic and beaded.
-- Everything image 2 leaves untouched stays identical to image 1 — skin, face, hair, hands, background, and every part of the garment that is not painted over. Do not lighten, sharpen, restyle or retouch them.
-- Do not move, resize, redesign, add or remove any detail. Do not change the pose, the crop or the background.
-- Keep the edges between a recoloured area and its neighbours exactly where they are in image 1.
+- Every area image 2 leaves unchanged must come back pixel-identical to image 1 — skin, face, hair, hands, background, and every part of the garment that was not recoloured. Do not lighten, sharpen, restyle or retouch them.
+- Do not move, resize, redesign, add or remove any detail. Do not change the pose, the crop, the lighting or the background.
+- Boundaries between a recoloured area and its neighbours stay exactly where image 1 puts them.
+- Recoloured beading, embroidery and metallic thread stay beaded, embroidered and metallic, rendered in the new colour the way a real dye behaves on that material.
 
 Target colours:
 ${list}
