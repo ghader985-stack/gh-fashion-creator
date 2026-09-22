@@ -84,6 +84,7 @@ export default function Home() {
   const [ccStage, setCcStage] = useState('');
   const [ccBusy, setCcBusy] = useState(false);
   const [ccError, setCcError] = useState('');
+  const [ccNote, setCcNote] = useState('');
   const [ccResults, setCcResults] = useState([]);
   const [ccProgress, setCcProgress] = useState('');
 
@@ -388,6 +389,7 @@ export default function Home() {
     if (!file) return;
     if (!gate()) return;
     setCcError('');
+    setCcNote('');
     setCcZones([]);
     setCcData(null);
     setCcOpenZone(-1);
@@ -403,13 +405,28 @@ export default function Home() {
       const probe = ccScaled(full, CC_ANALYSIS_MAX);
 
       setCcStage('جارٍ كشف مناطق الألوان…');
-      const fd = new FormData();
-      fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
-      const r = await fetch('/api/colorzones', { method: 'POST', body: fd });
       let d = null;
-      try { d = await r.json(); } catch (e) { d = null; }
-      if (!r.ok || !d || !Array.isArray(d.zones) || !d.zones.length) {
-        throw tpUserError((d && d.error) || 'تعذّر تحليل مناطق الألوان — جرّبي مرة ثانية');
+      let why = '';
+      try {
+        const fd = new FormData();
+        fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
+        const r = await fetch('/api/colorzones', { method: 'POST', body: fd });
+        let body = null;
+        try { body = await r.json(); } catch (e) { body = null; }
+        if (r.ok && body && Array.isArray(body.zones) && body.zones.length) d = body;
+        else why = (body && body.error) || ('تعذّر التحليل (' + r.status + ')');
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] colorzones', e && e.message);
+        why = 'انقطع الاتصال بخدمة التحليل';
+      }
+
+      // شبكة احتياطية: القسم ما بيوقف. المناطق بتنستخرج من بكسلات الصورة،
+      // بلا أسماء أجزاء، والتغيير بيضلّ شغّال لأن النموذج بيعرف اللون القديم.
+      if (!d) {
+        const local = ccLocalZones(view, 5);
+        if (!local.length) throw tpUserError(why || 'تعذّر تحليل مناطق الألوان — جرّبي مرة ثانية');
+        d = { description: '', descriptionAr: '', zones: local };
+        setCcNote('تعذّر تحليل أجزاء القطعة (' + why + ') — المناطق مستخرجة من ألوان الصورة، والتغيير شغّال');
       }
 
       const zones = d.zones.map((z, i) => {
@@ -420,7 +437,7 @@ export default function Home() {
           kind: z.kind || 'other',
           hex,
           pantone: pt ? pt.code : '',
-          name: z.nameAr || z.name || (pt ? ccPtName(pt.name) : hex),
+          name: z.name || (pt ? ccPtName(pt.name) : hex),
           nameEn: z.name || '',
           parts: z.parts || '',
           partsAr: z.partsAr || z.parts || '',
@@ -451,6 +468,7 @@ export default function Home() {
   };
 
   const ccClear = () => {
+    setCcNote('');
     setCcPreview('');
     setCcData(null);
     setCcZones([]);
@@ -1065,6 +1083,7 @@ export default function Home() {
                     </div>
                   </div>
                   {ccError && <div className="err">{ccError}</div>}
+                  {ccNote && !ccError && <div className="cc-note">{ccNote}</div>}
                 </section>
 
                 {ccLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{ccStage || 'جارٍ التحضير…'}</p></div>}
@@ -1104,7 +1123,7 @@ export default function Home() {
                                   {z.kind !== 'garment' && <span className="cc-kind">{CC_KIND_AR[z.kind] || z.kind}</span>}
                                 </div>
                                 <div className="cc-zone-where" dir="auto">
-                                  {z.partsAr}{z.material ? ' · ' + z.material : ''}
+                                  {z.partsAr || 'منطقة لونية على التصميم'}{z.material ? ' · ' + z.material : ''}
                                 </div>
                               </div>
                               <div className="cc-zone-actions">
@@ -1132,7 +1151,7 @@ export default function Home() {
 
                             {ccOpenZone === i && z.mode === 'change' && (
                               <>
-                                <div className="cc-pick-label" dir="auto">اختاري لون جديد لـ {z.partsAr}</div>
+                                <div className="cc-pick-label" dir="auto">اختاري لون جديد لـ {z.partsAr || z.name}</div>
                                 <CcPicker value={z.target} onPick={(hex) => ccSetZone(i, { target: hex, mode: 'change' })} />
                               </>
                             )}
@@ -1659,7 +1678,7 @@ function clusterColors(points, k) {
 
 const CC_SRC_MAX = 2400;         // دقّة الصورة الأصلية في الذاكرة
 const CC_VIEW_MAX = 1000;        // دقّة المعاينة وقراءة الألوان
-const CC_ANALYSIS_MAX = 1400;    // دقّة الصورة المرسَلة للتحليل
+const CC_ANALYSIS_MAX = 1100;    // دقّة الصورة المرسَلة للتحليل
 const CC_SEND_MAX = 1800;        // دقّة الصورة المرسَلة لنموذج الرسم
 const CC_CREDITS_PER_IMAGE = 2;
 const CC_SAMPLE_R = 0.012;       // نصف قطر قراءة اللون، نسبة من أصغر ضلع
@@ -1794,6 +1813,75 @@ function ccBlob(canvas, type, quality) {
 // ---------------------------------------------------------------------------
 // القطع الصغيرة (SLIC)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// شبكة احتياطية: مناطق من بكسلات الصورة وحدها
+// ---------------------------------------------------------------------------
+// تُستعمل فقط إن تعذّر التحليل. بلا أسماء أجزاء ولا خامات، لكن كل منطقة
+// لها لونها ونقطتها وصندوقها، فتغيير الألوان يبقى شغّالاً: برومبت الرسم
+// يعرّف المنطقة بلونها القديم، وهو وحده كافٍ.
+function ccLocalZones(canvas, k) {
+  if (!canvas || !canvas.width || !canvas.height) return [];
+  const w = canvas.width;
+  const h = canvas.height;
+  let ctx;
+  try { ctx = canvas.getContext('2d', { willReadFrequently: true }); } catch (e) { ctx = canvas.getContext('2d'); }
+  if (!ctx) return [];
+  let d;
+  try { d = ctx.getImageData(0, 0, w, h).data; } catch (e) { return []; }
+
+  const step = Math.max(1, Math.round(Math.sqrt((w * h) / 12000)));
+  const px = [];
+  const xs = [];
+  const ys = [];
+  for (let y = 0; y < h; y += step) {
+    for (let x = 0; x < w; x += step) {
+      const i = (y * w + x) * 4;
+      if (d[i + 3] < 200) continue;
+      px.push([d[i], d[i + 1], d[i + 2]]);
+      xs.push((x / w) * 100);
+      ys.push((y / h) * 100);
+    }
+  }
+  if (px.length < 20) return [];
+
+  const cl = clusterColors(px, Math.max(2, Math.min(6, k || 5)));
+  if (!cl.length) return [];
+
+  return cl.map((c) => {
+    let bd = Infinity;
+    let bx = 50;
+    let by = 50;
+    let x1 = 100;
+    let y1 = 100;
+    let x2 = 0;
+    let y2 = 0;
+    for (let i = 0; i < px.length; i++) {
+      let own = true;
+      let dd = cDist(px[i], c.rgb);
+      for (const o of cl) {
+        if (o === c) continue;
+        if (cDist(px[i], o.rgb) < dd) { own = false; break; }
+      }
+      if (!own) continue;
+      if (xs[i] < x1) x1 = xs[i];
+      if (xs[i] > x2) x2 = xs[i];
+      if (ys[i] < y1) y1 = ys[i];
+      if (ys[i] > y2) y2 = ys[i];
+      if (dd < bd) { bd = dd; bx = xs[i]; by = ys[i]; }
+    }
+    return {
+      name: '',
+      hex: toHex(c.rgb),
+      kind: 'garment',
+      parts: '',
+      partsAr: '',
+      material: '',
+      points: [{ x: bx, y: by }],
+      box: x2 > x1 ? { x1, y1, x2, y2 } : null,
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // قراءة لون المنطقة من بكسلات الصورة
 // ---------------------------------------------------------------------------
@@ -4027,6 +4115,8 @@ function StyleBlock() {
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .cc-arrow { color: var(--ink-soft); }
       .cc-pick-label { font-size: 0.72rem; color: var(--ink-soft); margin-top: 0.55rem; line-height: 1.55; }
+      .cc-note { margin-top: 0.8rem; padding: 0.5rem 0.7rem; border-radius: 6px;
+        background: #fdf6ec; border: 1px solid #e8d9bf; color: #8a6d3b; font-size: 0.74rem; line-height: 1.7; }
       .cc-clash { padding: 0.5rem 0.6rem; border-radius: 6px;
         background: #fdf6ec; border: 1px solid #e8d9bf; color: #8a6d3b; font-size: 0.72rem; line-height: 1.6; }
       .cc-picker { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
