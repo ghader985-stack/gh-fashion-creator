@@ -1,10 +1,14 @@
 // pages/api/colorzones.js
 // تسمية مناطق الألوان في قسم «تغيير الألوان».
 //
-// المتصفح هو الذي يكتشف المناطق ويغيّر الألوان — بلا أي توليد صور وبلا تكلفة.
-// هذا المسار يفعل شيئاً واحداً: يقرأ الصورة المرقّمة ويعطي لكل رقم اسمه
-// ومكانه ونوع خامته، ويحدّد ما إذا كان قماشاً أم بشرة أم شعراً أم خلفية،
-// حتى لا تُلوَّن البشرة والخلفية بالخطأ.
+// المتصفح يقسّم القطعة إلى ألواح صغيرة متماسكة ويرقّمها على الصورة.
+// هذا المسار يفعل شيئاً واحداً وهو الأهم: يقرأ الصورة المرقّمة ويقول
+// **أي الألواح من القماش نفسه**، ويسمّي كل قماش ومكانه وخامته، ويحدّد ما
+// إذا كان قماشاً أم بشرة أم شعراً أم خلفية.
+//
+// التجميع هنا وليس في المتصفح عن قصد: حدّ اللوح خياطة، والخياطة قرار
+// بصري لا معادلة لونية. أي عتبة لونية إمّا تدمج الشريط الكحلي مع القماش
+// الفوشي في صدر واحد، أو تكسّر الكشكشة المتدرّجة إلى شرائط.
 //
 // استدعاء واحد صغير بنموذج سريع. إذا فشل، القسم يكمل بأسماء البانتون.
 
@@ -17,7 +21,7 @@ export const config = {
 };
 
 const MODEL = 'claude-haiku-4-5-20251001';
-const MAX_TOKENS = 2000;
+const MAX_TOKENS = 4000;
 const CALL_TIMEOUT_MS = 45000;
 const PART_ENUM = ['garment', 'trim', 'skin', 'hair', 'background', 'other'];
 
@@ -52,12 +56,13 @@ const SCHEMA = {
         type: 'object',
         properties: {
           number: { type: 'number' },
+          group: { type: 'number' },
           name: { type: 'string' },
           where: { type: 'string' },
           material: { type: 'string' },
           part: { type: 'string', enum: PART_ENUM },
         },
-        required: ['number', 'name', 'where', 'material', 'part'],
+        required: ['number', 'group', 'name', 'where', 'material', 'part'],
         additionalProperties: false,
       },
     },
@@ -68,23 +73,29 @@ const SCHEMA = {
 
 function buildPrompt(zones) {
   const list = zones.map((z) => '  ' + z.number + ' — ' + z.hex + ' (' + z.share + '% of the image)').join('\n');
-  return `The image shows one product${zones.length ? ' with numbered markers, each marking one detected colour area' : ''}.
-${zones.length ? '\nNumbers and their sampled colours:\n' + list + '\n' : ''}
+  return `The image shows one product. Numbered markers have been placed on it: each number marks one small patch of the image that has already been found to be uniform.
+
+Numbers and the colour sampled at each:
+${list}
+
+Your task is to say which of these patches are THE SAME PIECE OF FABRIC.
+
+Two patches belong to the same fabric when a tailor would cut them from the same bolt of cloth — the same material in the same dye. They belong to the same fabric even when they look different in the photo because one is in a highlight and the other deep in a fold, or because the cloth is dip-dyed and shades across its length. They belong to DIFFERENT fabrics when a seam, an edge or a change of material separates them, even when their colours are close.
+
 For every number return:
-- name: leave it an empty string. The colour name is computed from the pixels themselves.
-- where: where that colour sits on the product, 2 to 6 words, listing the real parts ("outer wrap panel, waistband, belt loops", "inner skirt layer and ruffle", "floral embroidery on front panel"). If it is not part of the product, say what it is ("studio background", "model's skin", "model's hair").
-- material: the material of that area in 1 to 4 words ("denim fabric", "beaded mesh", "silk tulle", "metal hardware", "embroidery thread"). Empty string if it is not a material.
-- part: garment for fabric areas of the piece, trim for zippers, buttons, beads, piping, embroidery and hardware, skin for the model's skin, hair for hair or a headscarf worn only as styling, background for the backdrop or floor, other for anything else.
+- group: an integer. Patches of the same fabric get the SAME group number. Different fabrics get different group numbers. Number the groups 1, 2, 3 … in order of how much of the product each one covers, largest first. Skin, hair and background each get their own group, separate from every fabric.
+- part: garment for fabric of the piece, trim for zippers, buttons, beads, piping, embroidery and hardware, skin for the model's skin, hair for hair or a headscarf worn only as styling, background for the backdrop, wall, floor or props, other for anything else.
+- where: where that fabric sits on the product, 2 to 6 words, naming the real parts ("bodice, waistband and upper ruffles", "left skirt cascade", "halter strap"). Every patch in the same group must be given the SAME where text. If it is not part of the product, say what it is ("studio background", "model's skin", "model's hair").
+- material: the material in 1 to 4 words ("silk chiffon", "beaded mesh", "duchess satin", "metal hardware"). Same text for every patch in a group. Empty string if it is not a material.
+- name: leave it an empty string. The colour name is computed from the pixels.
 
-Also return skin: boxes around the person's BARE SKIN only — face and neck, shoulders and chest, each arm, each hand, each leg, each foot — in percent of the image, as many as needed up to 6. Empty array if there is no person or no bare skin is visible. Each box must reach all the way DOWN or OUT to where the garment actually starts, leaving no bare skin uncovered between the box and the fabric: on a strapless or off-shoulder piece the chest box runs from the collarbone down to the neckline of the garment and out to both shoulders. Uncovered skin gets recoloured with the garment, so a box that stops short is worse than one that slightly overlaps the fabric edge. Never put a box over fabric away from that edge, even fabric in a skin-like colour (nude, beige, camel, blush), and never over skin that is covered by sheer or illusion fabric — that area is fabric, not skin.
+Be decisive. A gown usually has between 2 and 6 fabrics. Do not give every patch its own group, and do not put the whole product in one group.
 
-Also return head: the box around the model's head AND neck — hair, hairstyle, headscarf, face, jaw
-and neck down to the collarbone — in percent of the image, generous enough to cover every strand. If there is no person, return 0,0,0,0.
+Also return skin: boxes around the person's BARE SKIN only — face and neck, shoulders and chest, each arm, each hand, each leg, each foot — in percent of the image, up to 6. Empty array if there is no person or no bare skin is visible.
 
-Also return product: the box around the product itself (the garment or item), in percent of the image:
-x1 and x2 from the left edge, y1 and y2 from the top edge, 0 to 100. Include every part of the garment
-including train, sleeves and any part that extends outward — but nothing of the background, furniture or
-flowers. If the garment fills the frame, return 0, 0, 100, 100.
+Also return head: the box around the model's head AND neck — hair, hairstyle, headscarf, face, jaw and neck down to the collarbone — in percent of the image, generous enough to cover every strand. If there is no person, return 0,0,0,0.
+
+Also return product: the box around the product itself, in percent of the image: x1 and x2 from the left edge, y1 and y2 from the top edge, 0 to 100. Include train, sleeves and anything that extends outward, but nothing of the background. If the garment fills the frame, return 0, 0, 100, 100.
 
 Return one entry per number, in the same order. Answer in English only.`;
 }
@@ -118,7 +129,7 @@ export default async function handler(req, res) {
   } catch (e) {
     zones = [];
   }
-  zones = (Array.isArray(zones) ? zones : []).slice(0, 12).map((z, i) => ({
+  zones = (Array.isArray(zones) ? zones : []).slice(0, 28).map((z, i) => ({
     number: Number(z && z.number) || i + 1,
     hex: str(z && z.hex) || '#000000',
     share: Math.round(Number(z && z.share) || 0),
@@ -145,7 +156,7 @@ export default async function handler(req, res) {
           role: 'user',
           content: content.concat([{
             type: 'text',
-            text: 'Return ONLY one JSON object, no markdown: {"product":{"x1":0,"y1":0,"x2":100,"y2":100},"head":{"x1":0,"y1":0,"x2":0,"y2":0},"skin":[{"x1":0,"y1":0,"x2":0,"y2":0}],"zones":[{"number":1,"name":"","where":"","material":"","part":"garment"}]}',
+            text: 'Return ONLY one JSON object, no markdown: {"product":{"x1":0,"y1":0,"x2":100,"y2":100},"head":{"x1":0,"y1":0,"x2":0,"y2":0},"skin":[{"x1":0,"y1":0,"x2":0,"y2":0}],"zones":[{"number":1,"group":1,"name":"","where":"","material":"","part":"garment"}]}',
           }]),
         }];
       }
@@ -207,6 +218,8 @@ export default async function handler(req, res) {
 
   const out = (Array.isArray(parsed && parsed.zones) ? parsed.zones : []).map((z, i) => ({
     number: Number(z && z.number) || i + 1,
+    // رقم القماش: هو ناتج هذا الاستدعاء الأهم. 0 يعني لم يُحدَّد.
+    group: Number.isFinite(+(z && z.group)) ? Math.max(0, Math.round(+z.group)) : 0,
     name: str(z && z.name),
     where: str(z && z.where),
     material: str(z && z.material),
