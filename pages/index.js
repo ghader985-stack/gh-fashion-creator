@@ -84,9 +84,7 @@ export default function Home() {
   const [ccBusy, setCcBusy] = useState(false);
   const [ccError, setCcError] = useState('');
   const [ccWarn, setCcWarn] = useState('');
-  const [ccHairOn, setCcHairOn] = useState(false);
   const [ccPicking, setCcPicking] = useState(false);
-  const [ccTexOn, setCcTexOn] = useState(false);
   const [ccCount, setCcCount] = useState(1);
   const [ccResults, setCcResults] = useState([]);
   const [ccProgress, setCcProgress] = useState('');
@@ -384,8 +382,8 @@ export default function Home() {
   };
 
   // ===== تغيير الألوان =====
-  // كشف المناطق والتلوين يتمّان داخل المتصفح بلا أي تكلفة. الاستدعاء الوحيد
-  // هو تسمية المناطق، وإن فشل يكمل القسم بأسماء البانتون.
+  // الكشف والتحديد والمعاينة كلهن بالمتصفح وببلاش. المدفوع شي واحد:
+  // «ارسمي النتيجة» — النموذج بيعيد رسم الصورة بالألوان الجديدة.
   const handleCcImage = async (file) => {
     if (!file) return;
     if (!gate()) return;
@@ -396,93 +394,103 @@ export default function Home() {
     setCcOpenZone(-1);
     setCcResults([]);
     setCcProgress('');
-    setCcTexOn(false);
+    setCcPicking(false);
     setCcPreview(URL.createObjectURL(file));
     setCcLoading(true);
     try {
       setCcStage('جارٍ قراءة الصورة…');
-      const full = await tpFileToCanvas(file, CC_OUT_MAX);
+      const full = await tpFileToCanvas(file, CC_SRC_MAX);
       const view = ccScaled(full, CC_VIEW_MAX);
 
       setCcStage('جارٍ عزل القطعة عن الخلفية…');
       let subject = null;
-      let cutoutUrl = null;
       try {
-        const cut = await new Promise((resolve, reject) => {
-          view.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), 'image/jpeg', 0.9);
-        });
+        const cut = await ccBlob(view, 'image/jpeg', 0.9);
         const fdc = new FormData();
         fdc.append('image', cut, 'cutout.jpg');
         const rc = await fetch('/api/cutout', { method: 'POST', body: fdc });
         const dc = await rc.json();
-        if (rc.ok && dc.url) {
-          cutoutUrl = dc.url;
-          subject = await ccSubjectMask(dc.url, view.width, view.height);
-        }
+        if (rc.ok && dc.url) subject = await ccSubjectMask(dc.url, view.width, view.height);
       } catch (e) {
         if (typeof console !== 'undefined') console.warn('[gh] cutout', e && e.message);
       }
-      const warns = [];
       if (!subject) {
-        warns.push('تعذّر عزل القطعة عن الخلفية — التلوين رح يشتغل باللون فقط، فممكن يطول أجزاء من الخلفية');
+        setCcWarn('تعذّر عزل القطعة عن الخلفية — المناطق رح تشمل الخلفية كمان، اتركيها «متل ما هي»');
       }
-
-      setCcStage('جارٍ تحديد القطعة والرأس…');
-      let headBox = null;
-      let skinBoxes = [];
-      let readOk = false;
-      // هذا الكشف هو المصدر الوحيد لموقع البشرة والرأس، فبنحاول مرّتين
-      for (let attempt = 0; attempt < 2 && !readOk; attempt++) {
-        try {
-          const vb = await new Promise((resolve, reject) => {
-            view.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), 'image/jpeg', 0.9);
-          });
-          const fdb = new FormData();
-          fdb.append('image', vb, 'view.jpg');
-          fdb.append('zones', '[]');
-          const rb = await fetch('/api/colorzones', { method: 'POST', body: fdb });
-          const db = await rb.json();
-          if (!rb.ok) continue;
-          readOk = true;
-          if (db.head && db.head.x2 > db.head.x1 && db.head.y2 > db.head.y1) headBox = db.head;
-          if (Array.isArray(db.skin)) skinBoxes = db.skin;
-        } catch (e) {
-          if (typeof console !== 'undefined') console.warn('[gh] head box', e && e.message);
-        }
-      }
-      if (!readOk) {
-        warns.push('تعذّرت قراءة الصورة لتحديد الوجه والبشرة — إذا في عارضة بالصورة ممكن ياخد جلدها رقم');
-      }
-      setCcWarn(warns.join(' · '));
 
       setCcStage('جارٍ كشف مناطق الألوان…');
-      const det = ccDetectZones(view, subject, view.width, view.height, headBox, skinBoxes);
-      if (!det.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
-      const map = ccMasks(view, det.defs, skinBoxes, headBox, subject);
-      if (subject) map.subject = subject;
-      if (headBox) map.headBox = headBox;
-      const maskCache = det.zones.map((z, i) => ccZoneMask(map, i));
-      setCcData({ full, view, map, centers: det.centers, defs: det.defs, cutoutUrl, headBox, skinBoxes, maskCache });
+      const lab = ccLabBuffer(view);
+      const sp = ccSuperpixels(lab, view.width, view.height, CC_SP_COUNT, CC_SP_COMPACT);
+      const adj = ccAdjacency(sp, view.width, view.height);
+      const keep = ccInside(sp, subject, view.width * view.height);
+      const built = ccBuildZones(sp, adj, keep);
+      if (!built.zones.length) throw tpUserError('تعذّر كشف ألوان في هالصورة — جرّبي صورة أوضح');
 
-      let zones = det.zones.map((z, i) => ({
-        n: i + 1,
-        autoIndex: i,
-        manual: false,
-        x: z.x,
-        y: z.y,
-        points: z.points || [{ x: z.x, y: z.y }],
-        hex: z.hex,
-        share: Math.max(1, Math.round(z.share * 100)),
-        pantone: z.pantone,
-        name: z.pantoneName || z.hex,
-        where: '',
-        material: '',
-        part: 'other',
-        mode: 'keep',
-        target: z.hex,
-      }));
+      const data = {
+        full,
+        view,
+        w: view.width,
+        h: view.height,
+        lab,
+        sp,
+        adj,
+        keep,
+        zoneOf: built.zoneOf,
+        scale: ccScale(adj, keep),
+        subject,
+      };
+      setCcData(data);
+
+      let zones = built.zones.map((z, i) => {
+        const sel = new Uint8Array(sp.k);
+        z.parts.forEach((c) => { sel[c] = 1; });
+        const info = ccSelInfo(sp, sel, view.width, view.height);
+        const pt = nearestPantone(z.hex);
+        return {
+          n: i + 1,
+          autoIndex: i,
+          manual: false,
+          x: info ? info.point.x : 0.5,
+          y: info ? info.point.y : 0.5,
+          hex: z.hex,
+          share: Math.max(1, Math.round(z.share * 100)),
+          pantone: pt ? pt.code : '',
+          name: pt ? pt.name : z.hex,
+          where: '',
+          material: '',
+          part: 'other',
+          mode: 'keep',
+          target: z.hex,
+        };
+      });
       setCcZones(zones);
 
+      // تسمية المناطق: استدعاء صغير واحد. إذا فشل، القسم بيكمل بأسماء
+      // البانتون — التسمية للعرض وللبرومبت، مو شرط لاشتغال القسم.
+      setCcStage('جارٍ تسمية المناطق…');
+      try {
+        const numbered = ccNumbered(view, zones);
+        const nb = await ccBlob(numbered, 'image/jpeg', 0.9);
+        const fdz = new FormData();
+        fdz.append('image', nb, 'zones.jpg');
+        fdz.append('zones', JSON.stringify(zones.map((z) => ({ number: z.n, hex: z.hex, share: z.share }))));
+        const rz = await fetch('/api/colorzones', { method: 'POST', body: fdz });
+        const dz = await rz.json();
+        if (rz.ok && dz.head && dz.head.x2 > dz.head.x1 && dz.head.y2 > dz.head.y1) {
+          data.headBox = dz.head;
+        }
+        if (rz.ok && Array.isArray(dz.zones)) {
+          const byNum = {};
+          dz.zones.forEach((q) => { byNum[q.number] = q; });
+          zones = zones.map((z) => {
+            const q = byNum[z.n];
+            return q ? { ...z, where: q.where || '', material: q.material || '', part: q.part || 'other' } : z;
+          });
+          setCcZones(zones);
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined') console.warn('[gh] colorzones', e && e.message);
+      }
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] colorchanger', e && e.message);
       setCcError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
@@ -492,39 +500,25 @@ export default function Home() {
     setCcStage('');
   };
 
-  // تبديل «غطاء الرأس جزء من التصميم» يعيد بناء الأقنعة فوراً
-  const ccToggleHair = (on) => {
-    setCcHairOn(on);
-    setCcData((d) => {
-      if (!d) return d;
-      d.map.hairIsGarment = on;
-      return { ...d, maskCache: d.centers.map((c, i) => ccZoneMask(d.map, i)) };
-    });
-  };
-
-  // «قماش مخرّز أو مطرّز»: بيعيد بناء الأقنعة فوراً بقرار الأغلبية
-  const ccToggleTex = (on) => {
-    setCcTexOn(on);
-    setCcData((d) => {
-      if (!d) return d;
-      d.map.textured = on;
-      return { ...d, maskCache: d.centers.map((c, i) => ccZoneMask(d.map, i)) };
-    });
-  };
-
   const ccSetZone = (i, patch) => {
     setCcZones((list) => list.map((z, j) => (j === i ? { ...z, ...patch } : z)));
   };
 
-  // المصممة ضغطت ع تفصيلة بالصورة: بتصير منطقة جديدة برقمها الخاص
+  // المصممة ضغطت ع تفصيلة: بتصير منطقة جديدة برقمها الخاص
   const ccAddManual = (u, v) => {
     if (!ccData) return;
-    // بنبلّش ضيّق: توسيع التحديد بالشريط أسهل وأوضح من انفجاره ع القطعة كلها
-    const tol = 20;
-    const region = ccPickRegion(ccData.map, u, v, tol);
-    const info = ccRegionInfo(ccData.map, region);
-    if (!info || info.count < 40) {
-      setCcError('ما قدرت أمسك تفصيلة هون — جرّبي جوّا القطعة، وإذا الضغطة ع بشرة أو ع الرأس ما بتنمسك');
+    const { sp, adj, keep, scale, w, h } = ccData;
+    const sx = Math.max(0, Math.min(w - 1, Math.round(u * w)));
+    const sy = Math.max(0, Math.min(h - 1, Math.round(v * h)));
+    const seed = sp.label[sy * w + sx];
+    if (seed < 0 || !keep[seed]) {
+      setCcError('الضغطة برّا القطعة — اضغطي جوّا التصميم');
+      return;
+    }
+    const tol = 45;
+    const info = ccSelInfo(sp, ccPick(sp, adj, keep, seed, ccBudget(tol, scale), ccData.headBox, w, h), w, h);
+    if (!info || info.px < 60) {
+      setCcError('ما قدرت أمسك تفصيلة هون — جرّبي نقطة تانية');
       return;
     }
     setCcError('');
@@ -534,10 +528,8 @@ export default function Home() {
       manual: true,
       seed: { x: u, y: v },
       tol,
-      center: info.center,
       x: info.point.x,
       y: info.point.y,
-      points: [info.point],
       hex: info.hex,
       share: Math.max(1, Math.round(info.share * 100)),
       pantone: pt ? pt.code : '',
@@ -552,22 +544,17 @@ export default function Home() {
     setCcPicking(false);
   };
 
-  // شريط سعة التحديد: بيوسّع أو بيضيّق المنطقة اليدوية فوراً
+  // شريط سعة التحديد
   const ccSetManualTol = (i, tol) => {
     if (!ccData) return;
+    const { sp, adj, keep, scale, w, h } = ccData;
     setCcZones((list) => list.map((z, j) => {
       if (j !== i || !z.manual) return z;
-      const info = ccRegionInfo(ccData.map, ccPickRegion(ccData.map, z.seed.x, z.seed.y, tol));
-      if (!info || info.count < 20) return { ...z, tol };
-      return {
-        ...z,
-        tol,
-        center: info.center,
-        x: info.point.x,
-        y: info.point.y,
-        points: [info.point],
-        share: Math.max(1, Math.round(info.share * 100)),
-      };
+      const sx = Math.max(0, Math.min(w - 1, Math.round(z.seed.x * w)));
+      const sy = Math.max(0, Math.min(h - 1, Math.round(z.seed.y * h)));
+      const info = ccSelInfo(sp, ccPick(sp, adj, keep, sp.label[sy * w + sx], ccBudget(tol, scale), ccData.headBox, w, h), w, h);
+      if (!info) return { ...z, tol };
+      return { ...z, tol, x: info.point.x, y: info.point.y, share: Math.max(1, Math.round(info.share * 100)) };
     }));
   };
 
@@ -578,9 +565,6 @@ export default function Home() {
 
   const ccChangedZones = ccZones.filter((z) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex);
 
-  // رصيد الاشتراك: كل صورة تُرسَم تكلّف، فالخصم بعدد الصور التي خرجت فعلاً
-  // لا بعدد الضغطات. التحديث دالّي لأن الاستدعاءات متوازية والقيمة المقروءة
-  // من الحالة تكون قديمة عند رجوع آخر واحدة.
   const ccSpend = (k) => {
     if (!k || user?.plan === 'admin') return;
     setUsageCount((c) => {
@@ -590,7 +574,6 @@ export default function Home() {
     });
   };
 
-  // كم صورة يسمح بها الرصيد المتبقّي الآن
   const ccAffordable = () => {
     if (!user) return 0;
     if (user.plan === 'admin') return CC_MAX_RESULTS;
@@ -598,47 +581,9 @@ export default function Home() {
     return Math.max(0, Math.floor((limit - usageCount) / CC_CREDITS_PER_IMAGE));
   };
 
-  // المسار المجاني: التلوين كله داخل المتصفح، بلا نموذج وبلا نقاط وبلا انتظار.
-  // يمشي على القماش السادة والمطبوع؛ الخرز والتطريز هما اللي بدهم النموذج.
-  const ccLocal = () => {
-    if (!ccData || !ccChangedZones.length) {
-      setCcError('اختاري لون جديد لمنطقة وحدة عالأقل');
-      return;
-    }
-    setCcError('');
-    setCcBusy(true);
-    setCcProgress('جارٍ التلوين…');
-    try {
-      const fullSubject = ccData.map.subject
-        ? ccResampleMask(ccData.map.subject, ccData.map.w, ccData.map.h, ccData.full.width, ccData.full.height)
-        : null;
-      const fullMap = ccMasks(ccData.full, ccData.defs, ccData.skinBoxes, ccData.headBox, fullSubject);
-      fullMap.box = ccData.box || null;
-      fullMap.hairIsGarment = ccHairOn;
-      fullMap.textured = ccTexOn;
-      fullMap.headBox = ccData.headBox || null;
-      if (fullSubject) fullMap.subject = fullSubject;
-
-      const fullMasks = ccChangeMasks(fullMap, ccZones, null, ccData.map);
-      const changes = ccZones
-        .map((z, i) => ({ i, z }))
-        .filter(({ z }) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex)
-        .map(({ i, z }) => ({ zone: fullMasks[i].zone, hex: z.target, mask: fullMasks[i].mask, center: fullMasks[i].center }));
-
-      const out = ccRecolor(ccData.full, fullMap, ccData.centers, changes);
-      if (!out) throw tpUserError('تعذّر التلوين — جرّبي صورة ثانية');
-      ccDownload({ createdAt: Date.now(), url: out.toDataURL('image/png') });
-    } catch (e) {
-      if (typeof console !== 'undefined') console.warn('[gh] cc local', e && e.message);
-      setCcError((e && e.userMessage) || 'تعذّر التلوين، جرّبي مرة ثانية');
-    }
-    setCcBusy(false);
-    setCcProgress('');
-  };
-
-  // المسار المدفوع: النموذج يعيد رسم الصورة بالألوان الجديدة.
-  // المتصفح يجهّز دليل ألوان مسطّح من نفس الأقنعة، والنموذج يصبغ عليه
-  // فيبقى الخرز والتطريز والظلّ والملمس كما هو.
+  // المسار الأساسي: النموذج بيعيد رسم الصورة. المتصفح بيجهّز دليل ألوان
+  // مصمت من نفس الأقنعة، فالنموذج بيعرف المنطقة كاملة ولونها الجديد،
+  // وبيرجّع القماش بكل خرزه وتطريزه وظلّه باللون الجديد.
   const ccGenerate = async () => {
     if (!ccData || !ccChangedZones.length) {
       setCcError('اختاري لون جديد لمنطقة وحدة عالأقل');
@@ -646,11 +591,10 @@ export default function Home() {
     }
     if (!gate()) return;
 
-    // الرصيد يُفحص قبل أي طلب: ما بنبلّش رسمة ما فيه رصيد يغطّيها
     const want = Math.max(1, Math.min(CC_MAX_RESULTS, Number(ccCount) || 1));
     const can = ccAffordable();
     if (can < 1) {
-      setCcError('رصيد باقتك ما بيكفي لصورة وحدة — جدّدي الاشتراك');
+      setCcError('رصيدك ما بيكفي لصورة وحدة — جدّدي الاشتراك');
       setShowPricing(true);
       return;
     }
@@ -663,35 +607,13 @@ export default function Home() {
     setCcProgress('جارٍ تجهيز دليل الألوان…');
 
     try {
-      // الدليل يُبنى بدقّة الإرسال لا بدقّة الملف: الأقنعة اليدوية محسوبة
-      // على مقاس المعاينة ثمّ تُكبّر، فاللي بتشوفيه هو اللي بينرسم
       const send = ccScaled(ccData.full, CC_SEND_MAX);
-      // قناع العزل يُكبَّر من قناع المعاينة بدل إعادة جلبه: رابط العزل من
-      // Replicate بينتهي بعد ساعة، وما في داعي نعتمد عليه بعد ما انقرأ مرّة
-      const sendSubject = ccData.map.subject
-        ? ccResampleMask(ccData.map.subject, ccData.map.w, ccData.map.h, send.width, send.height)
-        : null;
-      const sendMap = ccMasks(send, ccData.defs, ccData.skinBoxes, ccData.headBox, sendSubject);
-      sendMap.box = ccData.box || null;
-      sendMap.hairIsGarment = ccHairOn;
-      sendMap.textured = ccTexOn;
-      sendMap.headBox = ccData.headBox || null;
-      if (sendSubject) sendMap.subject = sendSubject;
-
-      const sendMasks = ccChangeMasks(sendMap, ccZones, null, ccData.map);
+      const masks = ccZoneMasks(ccData, ccZones, send.width, send.height);
       const picked = ccZones
-        .map((z, i) => ({ i, z }))
+        .map((z, i) => ({ z, mask: masks[i] }))
         .filter(({ z }) => z.mode === 'change' && tpHexOk(z.target) && z.target !== z.hex);
-      // الدليل بيقول للنموذج «هاي المنطقة»، فلازم يكون مصمتاً. الشرائط
-      // الرفيعة والخرز بيخلّوا القناع منقّط بكسل بكسل، والمنطقة بتطلع نصّها
-      // مدهون — فالنموذج بيفهم إنه نصّها بس بدّه يتغيّر. قرار الأغلبية
-      // بيسدّ هالفراغات، ومحصور بقناع التلوين والبشرة فما بيتعدّى القطعة.
-      const fills = picked.map(({ i, z }) => ({
-        hex: z.target,
-        mask: ccSmoothMask(sendMasks[i].mask, send.width, send.height,
-          sendMap.paint || sendSubject, sendMap.skin, CC_GUIDE_DIV),
-      }));
-      const guide = ccGuide(send, fills);
+
+      const guide = ccGuide(send, picked.map(({ z, mask }) => ({ hex: z.target, mask })));
       if (!guide) throw tpUserError('تعذّر تجهيز دليل الألوان — جرّبي صورة ثانية');
 
       const summary = picked.map(({ z }) => {
@@ -707,7 +629,6 @@ export default function Home() {
         };
       });
 
-      // الأصل JPEG عالي الجودة (حجم معقول)، والدليل PNG (ألوان مسطّحة بلا فقدان)
       const [imgBlob, guideBlob] = await Promise.all([
         ccBlob(send, 'image/jpeg', 0.92),
         ccBlob(guide, 'image/png'),
@@ -716,8 +637,6 @@ export default function Home() {
       let failed = 0;
       setCcProgress('جارٍ الرسم… 0 من ' + n);
 
-      // استدعاء مستقلّ لكل نتيجة: فشل وحدة ما بيوقّف الباقيات، ولا واحدة
-      // منهن بترمي خطأ للبرّا حتى تضلّ النتائج الناجحة ظاهرة
       const runOne = async (k) => {
         try {
           const fd = new FormData();
@@ -733,12 +652,7 @@ export default function Home() {
             failed += 1;
             return { error: (d && d.error) || ('تعذّر الرسم (' + r.status + ')') };
           }
-          return {
-            id: 'cc' + Date.now() + '-' + k,
-            createdAt: Date.now(),
-            url: d.url,
-            summary,
-          };
+          return { id: 'cc' + Date.now() + '-' + k, createdAt: Date.now(), url: d.url, summary };
         } catch (e) {
           if (typeof console !== 'undefined') console.warn('[gh] cc recolor', e && e.message);
           done += 1;
@@ -751,7 +665,6 @@ export default function Home() {
       const settled = await Promise.all(Array.from({ length: n }, (v, k) => runOne(k)));
       const ok = settled.filter((s) => s && s.url);
       setCcResults(ok);
-      // الخصم بعدد الصور الناجحة وحدها: الفاشلة ما بتتحاسب عالمصمّمة
       ccSpend(ok.length * CC_CREDITS_PER_IMAGE);
 
       if (!ok.length) {
@@ -770,7 +683,6 @@ export default function Home() {
     setCcProgress('');
   };
 
-  // التنزيل يمرّ عبر وسيط الصور: رابط النموذج من نطاق آخر
   const ccDownload = (rec) => {
     const name = 'color-' + new Date(rec.createdAt).toISOString().slice(0, 19).replace(/[:T]/g, '-');
     downloadFlat(rec.url, name);
@@ -1294,14 +1206,6 @@ export default function Home() {
                         onClick={() => { setCcPicking(!ccPicking); setCcError(''); }}>
                         {ccPicking ? 'إلغاء التحديد بالضغط' : 'حدّدي تفصيلة بالضغط ع الصورة'}
                       </button>
-                      <label className="cc-hair">
-                        <input type="checkbox" checked={ccHairOn} onChange={(e) => ccToggleHair(e.target.checked)} />
-                        <span>غطاء الرأس جزء من التصميم (حجاب أو طرحة)</span>
-                      </label>
-                      <label className="cc-hair">
-                        <input type="checkbox" checked={ccTexOn} onChange={(e) => ccToggleTex(e.target.checked)} />
-                        <span>قماش مخرّز أو مطرّز</span>
-                      </label>
                       {ccZones.map((z, i) => (
                         <div className={'cc-zone' + (z.mode === 'change' ? ' on' : '')} key={'z' + i}>
                           <div className="cc-zone-head">
@@ -1373,14 +1277,9 @@ export default function Home() {
 
                       <button className="cta" onClick={ccGenerate}
                         disabled={ccBusy || !ccChangedZones.length || ccAffordable() < 1}>
-                        {ccBusy ? <><span className="spinner"></span> {ccProgress || 'جارٍ الرسم…'}</> : 'ارسمي النتيجة'}
+                        {ccBusy ? <><span className="spinner"></span> {ccProgress || 'جارٍ الرسم…'}</> : 'ارسمي النتيجة النهائية'}
                       </button>
 
-                      <div className="cc-split">بلا نقاط</div>
-
-                      <button className="cta ghost" onClick={ccLocal} disabled={ccBusy || !ccChangedZones.length}>
-                        {ccBusy ? <><span className="spinner"></span> {ccProgress || 'جارٍ…'}</> : 'معاينة سريعة PNG'}
-                      </button>
                     </div>
                   </div>
                 )}
@@ -1854,24 +1753,33 @@ function clusterColors(points, k) {
 }
 
 // ============================================================================
-// ===== تغيير الألوان — محرّك إعادة التلوين =====
+// ===== تغيير الألوان — المحرّك =====
 // ============================================================================
-// لا توليد صور ولا استدعاء مدفوع للتلوين: الصورة تبقى صورة المصممة نفسها،
-// ونحن نبدّل درجة اللون داخل المنطقة المحددة فقط. الإضاءة والملمس والخرز
-// والظلال تبقى كما هي، واللون الناتج هو اللون المختار بالضبط.
+// الصورة بتنقسم لقطع صغيرة بتحترم حدود القماش، والقطع بتندمج لألواح،
+// والألواح المتشابهة بالصبغة بتاخد نفس الرقم. الضغطة ع تفصيلة بتنتشر على
+// شبكة القطع.
 //
-// الخطوات: تجميع ألوان الصورة إلى مناطق (k-means في فضاء Lab) · ترقيم المناطق
-// على الصورة · تسمية كل منطقة باستدعاء واحد صغير · ثم التلوين الفوري في
-// المتصفح مع معاينة مباشرة، وحفظ النتائج في حساب المتصفح.
+// كل المسافات محسوبة على **الصبغة وحدها** (a,b) والإضاءة ما بتدخل: نفس
+// القماش تحت ضوء وبقعر طيّة هو نفس اللون، فظلّ الطيّة ما بيقطع اللوح،
+// وحدّ قماشتين مختلفتين بيوقّف الانتشار.
+//
+// كله بالمتصفح وبلا كلفة. الاستدعاء المدفوع الوحيد هو رسم النتيجة النهائية.
 // ============================================================================
 
-const CC_ANALYSIS_MAX = 260;   // دقة كشف المناطق
-const CC_VIEW_MAX = 1000;      // دقة المعاينة الحية
-const CC_OUT_MAX = 2200;       // دقة الصورة المرفوعة
-const CC_SEND_MAX = 1600;      // دقة الصورة ودليل الألوان المرسلَين للنموذج
-const CC_MAX_RESULTS = 4;      // أقصى عدد نتائج بالضغطة الواحدة
-const CC_CREDITS_PER_IMAGE = 2; // كم نقطة تخصم كل صورة من رصيد الاشتراك
-const CC_MAX_ZONES = 6;
+const CC_SRC_MAX = 2200;        // دقّة الصورة الأصلية بالذاكرة
+const CC_VIEW_MAX = 1000;       // دقّة العمل والمعاينة
+const CC_SEND_MAX = 1600;       // دقّة الصورة والدليل المرسَلَين للنموذج
+const CC_MAX_RESULTS = 4;
+const CC_CREDITS_PER_IMAGE = 2;
+
+const CC_SP_COUNT = 700;        // عدد القطع الصغيرة
+const CC_SP_COMPACT = 12;       // تماسكها الشكلي
+const CC_MAX_ZONES = 8;
+const CC_MIN_ZONE = 0.015;      // منطقة أصغر من هيك بتنضمّ لأقرب وحدة
+const CC_PANEL_MERGE = 9;       // تحت هالفرق قطعتان متجاورتان = لوح واحد
+const CC_ZONE_MERGE = 13;       // وتحته لوحان = نفس القماش
+const CC_SAME_FABRIC = 6;       // نفس القماش لو ظاهر بمكان تاني منفصل
+const CC_SAME_LIGHT = 10;       // وبنفس مستوى الإضاءة — بلاها بيبلع الشعر
 
 // ---------------------------------------------------------------------------
 // تحويلات الألوان
@@ -1881,18 +1789,16 @@ function ccLab2Rgb(L, a, b) {
   const fx = fy + a / 500;
   const fz = fy - b / 200;
   const f = (t) => (t > 0.206896552 ? t * t * t : (t - 16 / 116) / 7.787);
-  const X = 95.047 * f(fx);
-  const Y = 100.0 * f(fy);
-  const Z = 108.883 * f(fz);
-  const x = X / 100, y = Y / 100, z = Z / 100;
-  let r = x * 3.2406 + y * -1.5372 + z * -0.4986;
-  let g = x * -0.9689 + y * 1.8758 + z * 0.0415;
-  let bb = x * 0.0557 + y * -0.204 + z * 1.057;
+  const x = 95.047 * f(fx) / 100, y = 100.0 * f(fy) / 100, z = 108.883 * f(fz) / 100;
   const gam = (c) => {
     const v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
     return Math.max(0, Math.min(255, Math.round(v * 255)));
   };
-  return [gam(r), gam(g), gam(bb)];
+  return [
+    gam(x * 3.2406 + y * -1.5372 + z * -0.4986),
+    gam(x * -0.9689 + y * 1.8758 + z * 0.0415),
+    gam(x * 0.0557 + y * -0.204 + z * 1.057),
+  ];
 }
 
 const ccHexRgb = (hex) => {
@@ -1929,7 +1835,6 @@ function ccHsvRgb(h, s, v) {
   return p.map((q) => Math.round((q + m) * 255));
 }
 
-// بحث البانتون بالكود أو الاسم أو الهيكس
 function ccPantoneSearch(q) {
   const s = String(q || '').trim().toLowerCase();
   if (s.length < 2) return [];
@@ -1962,13 +1867,19 @@ function ccNearestThree(hex) {
     .map((x) => x.p);
 }
 
+// المسافة اللي عليها بينبنى كل شي: الصبغة وحدها، بلا إضاءة
+const ccDye2 = (a1, b1, a2, b2) => {
+  const da = a1 - a2, db = b1 - b2;
+  return Math.sqrt(da * da + db * db);
+};
+
 // ---------------------------------------------------------------------------
-// كشف المناطق
+// أدوات الصورة
 // ---------------------------------------------------------------------------
 function ccScaled(src, maxSide) {
   const k = Math.min(1, maxSide / Math.max(src.width, src.height));
   if (k >= 1) return src;
-  const c = tpCanvas(src.width * k, src.height * k);
+  const c = tpCanvas(Math.round(src.width * k), Math.round(src.height * k));
   const ctx = c.getContext('2d');
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(src, 0, 0, c.width, c.height);
@@ -1987,8 +1898,7 @@ function ccLabBuffer(canvas) {
   return lab;
 }
 
-
-// قناع القطعة: يُقرأ من شفافية صورة العزل، ويُمدّد على مقاس أي كانفاس
+// قناع القطعة من شفافية صورة العزل
 async function ccSubjectMask(url, w, h) {
   const img = await tpLoadImage(proxied(url));
   const c = tpCanvas(w, h);
@@ -2003,746 +1913,12 @@ async function ccSubjectMask(url, w, h) {
     m[i] = d[i * 4 + 3] / 255;
     solid[i] = m[i] > 0.5 ? 1 : 0;
   }
-  // أي كتلة منفصلة عن القطعة تسرّبت من العزل (جدار أو أثاث) تُشال من القناع،
-  // فلا يصل التلوين إلى شيء خارج القطعة مهما كان لونه
+  // أي كتلة منفصلة عن القطعة تسرّبت من العزل تُشال
   ccKeepLargest(solid, w, h);
   for (let i = 0; i < n; i++) if (!solid[i]) m[i] = 0;
   return m;
 }
 
-// كشف بكسلات البشرة: معادلة YCbCr المعروفة. تشمل أيضاً ألوان أقمشة قريبة
-// من البشرة (نود، بيج، كاميل، زيتي)، لذلك لا تُستعمل وحدها أبداً — بل داخل
-// صناديق البشرة التي يحدّدها التحليل فقط، فلا يُحذف قماش بلون قريب منها.
-function ccIsSkin(r, g, b) {
-  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-  return cb > 77 && cb < 130 && cr > 133 && cr < 176 && r > 60 && r > b;
-}
-
-// لون بشرة العارضة يُقاس من وجهها في هذه الصورة بالذات، فلا نعتمد على
-// معادلة عامة تبتلع النود والبيج والكاميل والزيتي وتحسبها بشرة
-function ccSkinTone(d, w, h, headBox, subject) {
-  if (!headBox) return null;
-  const x1 = Math.max(0, Math.floor((headBox.x1 / 100) * w));
-  const x2 = Math.min(w, Math.ceil((headBox.x2 / 100) * w));
-  const y1 = Math.max(0, Math.floor((headBox.y1 / 100) * h));
-  const y2 = Math.min(h, Math.ceil((headBox.y2 / 100) * h));
-  const found = [];
-  for (let y = y1; y < y2; y++) {
-    for (let x = x1; x < x2; x++) {
-      const i = y * w + x;
-      // الخلفية حول الرأس ليست بشرة: العيّنة من داخل القطعة المعزولة فقط
-      if (subject && subject[i] < 0.6) continue;
-      if (!ccIsSkin(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) continue;
-      found.push(rgbToLab([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]));
-    }
-  }
-  if (found.length < 40) return null;
-  // الوجه المضيء هو المرجع: حافة الشعر والظلّ يسحبان العيّنة نحو الغامق
-  found.sort((a, b) => a[0] - b[0]);
-  const lo = Math.floor(found.length * 0.5);
-  const hi = found.length;
-  const sum = [0, 0, 0];
-  for (let i = lo; i < hi; i++) { sum[0] += found[i][0]; sum[1] += found[i][1]; sum[2] += found[i][2]; }
-  const k = Math.max(1, hi - lo);
-  const mean = [sum[0] / k, sum[1] / k, sum[2] / k];
-  // تفاوت درجة البشرة نفسها (مكياج، ظلّ، إضاءة) يحدّد سعة المطابقة،
-  // فلا نشدّ على بشرة متفاوتة ولا نتوسّع على بشرة موحّدة
-  let varSum = 0;
-  for (let i = lo; i < hi; i++) {
-    const da = found[i][1] - mean[1];
-    const db = found[i][2] - mean[2];
-    varSum += da * da + db * db;
-  }
-  const sigma = Math.sqrt(varSum / k);
-  return { lab: mean, tol: Math.min(17, Math.max(10, sigma * 2.2)) };
-}
-
-// البشرة تُحدَّد من التحليل وحده: صناديق البشرة التي رجّعها كشف الصورة،
-// وداخل كل صندوق نشترط لون بشرة فعلي قريب من درجة وجه العارضة، حتى لا
-// يُحذف قماش وقع داخل صندوق واسع.
-//
-// ما في انتشار لوني تلقائي خارج الصناديق عن قصد: قماش بلون قريب من البشرة
-// (نود، بيج، كاميل، موڤ، تول تراب) يبقى قماشاً. ابتلاع الفستان كلّه لأنّ
-// لونه قريب من البشرة أسوأ بكتير من رقم زائد على ذراع.
-// حدود قبول البكسل كبشرة لما ما بيمشي بمعادلة البشرة العامّة
-const CC_SKIN_HUE = 30;      // أقصى فرق درجة عن درجة وجه العارضة
-const CC_SKIN_CHROMA = 12;   // أقصى زيادة تشبّع عن وجهها
-
-function ccMarkSkin(skin, d, w, h, boxes, tone, subject) {
-  if (!boxes || !boxes.length) return;
-  const n = w * h;
-  const marked = [];
-  const ref = tone ? tone.lab : null;
-  // الصندوق يضبط المكان، فبنتساهل باللون: الذراع والساق إضاءتهن تختلف عن
-  // الوجه، والمطلوب بس رفض قماش واضح الاختلاف وقع جوّا الصندوق
-  const gate = tone ? tone.tol * 1.8 : 0;
-  // البشرة درجتها هادية. قماش أفقع بكتير من وجه العارضة مو بشرة مهما كان
-  // الصندوق واسع — هيك بودي ستربلس برتقالي فاقع جوّا صندوق «صدر وكتفين»
-  // بيضلّ قماش وبياخد رقمه
-  const refC = tone ? Math.sqrt(tone.lab[1] * tone.lab[1] + tone.lab[2] * tone.lab[2]) : 0;
-  const maxC = tone ? refC + 25 : Infinity;
-  boxes.forEach((bx) => {
-    const x1 = Math.max(0, Math.floor((bx.x1 / 100) * w));
-    const x2 = Math.min(w, Math.ceil((bx.x2 / 100) * w));
-    const y1 = Math.max(0, Math.floor((bx.y1 / 100) * h));
-    const y2 = Math.min(h, Math.ceil((bx.y2 / 100) * h));
-    for (let y = y1; y < y2; y++) {
-      for (let x = x1; x < x2; x++) {
-        const i = y * w + x;
-        if (skin[i]) continue;
-        if (subject && subject[i] < 0.6) continue;
-        const r = d[i * 4];
-        const g = d[i * 4 + 1];
-        const b = d[i * 4 + 2];
-        // داخل الصندوق بيكفي يمشي أحد الاختبارين: معادلة البشرة العامّة،
-        // أو القرب من درجة وجه العارضة. صدر واقع بالظلّ بيسقط من المعادلة
-        // بس بيضلّ قريب من درجة وجهها — وبلا هالاتحاد كان بياخد رقم
-        // ويتلوّن، وطلع مستطيل أزرق ع صدر العارضة بفحص فستان النار.
-        // وفوقهم حاجز التشبّع: قماش أفقع من وجهها بكتير بيضلّ قماش.
-        let isSkin = ccIsSkin(r, g, b);
-        if (ref) {
-          const L = rgbToLab([r, g, b]);
-          const C = Math.sqrt(L[1] * L[1] + L[2] * L[2]);
-          if (C > maxC) continue;
-          const dl = L[0] - ref[0];
-          const da = L[1] - ref[1];
-          const db = L[2] - ref[2];
-          const dist = Math.sqrt(dl * dl * 0.25 + da * da + db * db);
-          if (isSkin) {
-            isSkin = dist <= gate * 1.6;
-          } else {
-            // البكسل ما مشي بمعادلة البشرة. منقبله بس إذا كان فعلاً بدرجة
-            // جلد وهادي التشبّع — صدر بالظلّ بيمشي، وقماش صريح لأ.
-            // بلا هالشرطين كان قماش أخضر زيتي وقماش برتقالي فاقع بينحسبوا
-            // جلد لمجرّد وقوعهن جوّا صندوق البشرة، فما بياخدوا رقم ولا
-            // بيتلوّنوا: جناح كتف أخضر ضلّ أخضر، وكورساج برتقالي ضلّ برتقالي.
-            const hueOk = ccHueGap(ccHue(L[1], L[2]), ccHue(ref[1], ref[2])) <= CC_SKIN_HUE;
-            isSkin = hueOk && C <= refC + CC_SKIN_CHROMA && dist <= gate;
-          }
-        }
-        if (!isSkin) continue;
-        skin[i] = 1;
-        marked.push(i);
-      }
-    }
-  });
-  // ضمانة أخيرة: قطعة ملبوسة ما بتكون بمعظمها بشرة. لو طلعت هيك فالصناديق
-  // غلط أو واقعة على القماش، فبنلغيها كلها — الفستان أهمّ من صندوق
-  let inside = 0;
-  let onSkin = 0;
-  for (let i = 0; i < n; i++) {
-    if (subject && subject[i] < 0.4) continue;
-    inside++;
-    if (skin[i]) onSkin++;
-  }
-  if (inside > 0 && onSkin / inside > 0.5) {
-    for (let j = 0; j < marked.length; j++) skin[marked[j]] = 0;
-  }
-}
-
-// الخلفية: انتشار من حواف الصورة إلى الداخل ما دام اللون متقارباً.
-// الجدار والأرضية والسماء تُعزل هكذا، فلا تتلوّن مع القطعة لو تشابه اللون.
-function ccBackgroundMask(lab, w, h, subject) {
-  const n = w * h;
-  const bg = new Uint8Array(n);
-  const queue = new Int32Array(n);
-  let head = 0, tail = 0;
-  // القطعة قد تلامس حافة الصورة، فلا يُبدأ الانتشار من بكسلاتها هي —
-  // وإلا حُسب طرف التنورة خلفيةً واختفى القماش
-  const seed = (i) => { if (subject && subject[i] > 0.4) return; push(i); };
-  const push = (i) => { if (!bg[i]) { bg[i] = 1; queue[tail++] = i; } };
-  for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
-  for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
-  const near = (a, b) => {
-    const dl = lab[a * 3] - lab[b * 3];
-    const da = lab[a * 3 + 1] - lab[b * 3 + 1];
-    const db = lab[a * 3 + 2] - lab[b * 3 + 2];
-    return dl * dl + da * da + db * db < 90;
-  };
-  while (head < tail) {
-    const i = queue[head++];
-    const x = i % w, y = (i - x) / w;
-    if (x > 0 && !bg[i - 1] && near(i, i - 1)) push(i - 1);
-    if (x < w - 1 && !bg[i + 1] && near(i, i + 1)) push(i + 1);
-    if (y > 0 && !bg[i - w] && near(i, i - w)) push(i - w);
-    if (y < h - 1 && !bg[i + w] && near(i, i + w)) push(i + w);
-  }
-  return bg;
-}
-
-// قناع التلوين: قناع العزل بعد تآكل شريط رفيع من حافته.
-//
-// قناع bria أحياناً بيطلع أوسع من القطعة بشريط رفيع حواليها، وهالشريط
-// بيتلوّن مع الفستان فتطلع الخلفية ملوّنة. التآكل بيشيله.
-//
-// جرّبت أقصّه باللون (كل بكسل جوّا القناع قريب من الخلفية اللي جنبه)
-// وقِست النتيجة: أكل من 30% لـ54% من الفستان على أقنعة سليمة، فرميتها.
-//
-// ومهمّ: التآكل بيأثّر على **التلوين وحده**، ما بينزل على قناع العزل نفسه.
-// لأن كشف الخلفية بيبلّش من البكسلات اللي برّا القناع، فلو تآكل القناع
-// بيصير الشريط المتآكل بذرة وبينتشر لجوّا القماش ويبلع منطقة كاملة —
-// صار فعلاً بفحص «ثلاثة ألوان» واختفت منطقة الذهبي.
-// فوق هالشفافية بيعتبر البكسل قماشاً كاملاً وبياخد تلوين كامل
-const CC_EDGE_FULL = 0.5;
-
-function ccPaintMask(subject, w, h) {
-  if (!subject) return null;
-  const n = w * h;
-  const r = Math.max(1, Math.min(3, Math.round(Math.min(w, h) * 0.0025)));
-  const solid = new Uint8Array(n);
-  for (let i = 0; i < n; i++) solid[i] = subject[i] > 0.5 ? 1 : 0;
-  // تآكل مفصول: مرور أفقي ثم رأسي. خارج الصورة ما بينحسب خلفية، فقطعة
-  // مقصوصة عند حافة الصورة ما بتنقصّ
-  const tmp = new Uint8Array(n);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let on = 1;
-      for (let k = -r; k <= r && on; k++) {
-        const xx = x + k;
-        if (xx >= 0 && xx < w && !solid[y * w + xx]) on = 0;
-      }
-      tmp[y * w + x] = on;
-    }
-  }
-  const keep = new Uint8Array(n);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let on = 1;
-      for (let k = -r; k <= r && on; k++) {
-        const yy = y + k;
-        if (yy >= 0 && yy < h && !tmp[yy * w + x]) on = 0;
-      }
-      keep[y * w + x] = on;
-    }
-  }
-  // كتلة معزولة بعيدة عن القطعة = تسرّب من العزل (شبّاك، أثاث، ظلّ).
-  // بلا هالتنظيف كانت بتنطبع مربّعاً ملوّناً طايراً بالخلفية — بالنتيجة
-  // المحليّة وبدليل الألوان اللي بينبعت، فبينرسم بالنتيجة النهائية كمان.
-  ccKeepLargest(keep, w, h);
-
-  let was = 0, now = 0;
-  for (let i = 0; i < n; i++) { if (solid[i]) was++; if (keep[i]) now++; }
-  // قطعة رفيعة (رسمة خطّية مثلاً) ممكن يمحيها التآكل كلّه — عندها منتركها
-  if (!was || now / was < 0.5) return subject;
-
-  // القصّ الحادّ كان بيخلّي شريط ع كل حافّة بلون القماش القديم — باين بكل
-  // نتيجة كخطّ حوالين الفستان. بدله تدرّج ناعم: جوّا القطعة تلوين كامل،
-  // وع الحافّة بينزل لصفر تدريجياً. الهالة برّا القناع بتضلّ محميّة لأن
-  // شفافية العزل نفسها بتقارب الصفر هناك.
-  // وشفافية العزل نفسها بتنشبّع: بكسل نصّه قماش بياخد تلوين كامل بدل نصّ
-  // تلوين. بلا هيك بيضلّ خطّ باللون القديم ع كل حافّة — برتقالي حوالي
-  // فستان صار أزرق. أسوأ ما بيصير إنه اللون بيزحف بكسل أو اتنين عالخلفية،
-  // وهاد أقلّ بكتير من خطّ قديم حوالي القطعة كلها.
-  const ramp = ccBoxBlurU8(keep, w, h, r * 2);
-  const out = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const a = subject[i] >= CC_EDGE_FULL ? 1 : subject[i] / CC_EDGE_FULL;
-    out[i] = a * ramp[i];
-  }
-  return out;
-}
-
-// معدّل منزلق على قناع ثنائي — يرجّع تدرّجاً من 0 لـ1 بعرض نصف القطر
-function ccBoxBlurU8(src, w, h, r) {
-  const n = w * h;
-  const tmp = new Float32Array(n);
-  const out = new Float32Array(n);
-  const d = r * 2 + 1;
-  const cx = (x) => (x < 0 ? 0 : x > w - 1 ? w - 1 : x);
-  const cy = (y) => (y < 0 ? 0 : y > h - 1 ? h - 1 : y);
-  for (let y = 0; y < h; y++) {
-    const row = y * w;
-    let sum = 0;
-    for (let x = -r; x <= r; x++) sum += src[row + cx(x)];
-    for (let x = 0; x < w; x++) {
-      tmp[row + x] = sum / d;
-      sum += src[row + cx(x + r + 1)] - src[row + cx(x - r)];
-    }
-  }
-  for (let x = 0; x < w; x++) {
-    let sum = 0;
-    for (let y = -r; y <= r; y++) sum += tmp[cy(y) * w + x];
-    for (let y = 0; y < h; y++) {
-      out[y * w + x] = sum / d;
-      sum += tmp[cy(y + r + 1) * w + x] - tmp[cy(y - r) * w + x];
-    }
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// تعريف المناطق: عائلة لونية لكل قماش
-// ---------------------------------------------------------------------------
-// القماش الواحد له درجة لونية واحدة، وله في الصورة ضوء وظلّ وحواف داكنة.
-// لذلك تُبنى المناطق على عائلة اللون (الدرجة على دائرة الألوان) لا على
-// مستوى الإضاءة: كل بنفسجي القطعة — الفاتح والغامق والظل — منطقة واحدة
-// برقم واحد، فيتغيّر القماش كاملاً بضغطة. والرماديات (أبيض/أسود/بيج بلا
-// لون) تُجمَّع حسب الإضاءة لأن لا درجة لونية لها.
-const CC_CHROMA_REF = 14;      // حدّ اللون الواضح عند إضاءة عادية
-const CC_CHROMA_MIN = 4;       // أدنى حدّ، للقماش الغامق
-const CC_CHROMA_L = 45;        // تحت هالإضاءة الحدّ بينزل مع اللون
-
-// القماش الغامق ما بيقدر يوصل تشبّعاً عالياً مهما كان لونه صريح: البنفسجي
-// الغامق بفستان حقيقي تشبّعه 9.5 وإضاءته 11. حدّ ثابت 14 كان بيرميه
-// كأنه رمادي بلا لون، فلوحه كان بيضيع ويندمج مع اللوح المجاور — ولما
-// المصمّمة تغيّر لون الأخضر كان البنفسجي يتغيّر معه. الحدّ صار ينزل
-// مع الإضاءة، فاللون الغامق بياخد منطقته.
-function ccChromaGate(L) {
-  const g = CC_CHROMA_REF * (L < CC_CHROMA_L ? L / CC_CHROMA_L : 1);
-  return g < CC_CHROMA_MIN ? CC_CHROMA_MIN : g;
-}
-const CC_CHROMA_MAX = 128;     // سقف التشبّع بعد التلوين — خارجه بلا معنى بالشاشة
-const CC_HUE_MERGE = 34;       // درجتان أقرب من هذا الفرق = قماش واحد
-const CC_NEUTRAL_DL = 30;      // فرق الإضاءة بين رماديين مستقلّين
-const CC_L_SPLIT = 30;         // فرق الإضاءة بين قماشين من نفس الدرجة
-const CC_MIN_SHARE = 0.03;     // منطقة أصغر من هذا تُدمج في أقرب منطقة
-
-const ccHue = (a, b) => {
-  let d = (Math.atan2(b, a) * 180) / Math.PI;
-  return d < 0 ? d + 360 : d;
-};
-const ccHueGap = (p, q) => {
-  const d = Math.abs(p - q) % 360;
-  return d > 180 ? 360 - d : d;
-};
-
-// مسافة البكسل عن تعريف منطقة. البكسل الباهت أو الداكن درجته غير موثوقة،
-// فيُعاقَب على الانضمام لعائلة لونية ويُفضَّل الرمادي — والعكس بالعكس.
-function ccZoneCost(L, C, hue, def) {
-  if (def.neutral) return Math.abs(L - def.L) * 0.9 + C * 4;
-  let d = ccHueGap(hue, def.hue) + Math.max(0, ccChromaGate(L) - C) * 1.6;
-  // قماشان بنفس الدرجة يختلفان بالفاتح والغامق (برغندي وnود مثلاً)
-  if (def.L != null) d += Math.abs(L - def.L) * 0.55;
-  return d;
-}
-
-function ccPickZone(L, C, hue, defs) {
-  let bi = 0;
-  let bd = Infinity;
-  for (let i = 0; i < defs.length; i++) {
-    const d = ccZoneCost(L, C, hue, defs[i]);
-    if (d < bd) { bd = d; bi = i; }
-  }
-  return bi;
-}
-
-// بناء التعريفات من بكسلات القطعة وحدها
-function ccBuildDefs(lab, inside, n) {
-  const BINS = 72;
-  const hist = new Float64Array(BINS);
-  let neutral = 0;
-  let total = 0;
-  const lHist = new Float64Array(32);
-  for (let i = 0; i < n; i++) {
-    if (!inside[i]) continue;
-    total++;
-    const L = lab[i * 3];
-    const a = lab[i * 3 + 1];
-    const b = lab[i * 3 + 2];
-    const C = Math.sqrt(a * a + b * b);
-    if (C >= ccChromaGate(L)) {
-      const bin = Math.min(BINS - 1, Math.floor((ccHue(a, b) / 360) * BINS));
-      // الوزن بالمساحة أساساً مع ميل بسيط للّون الأوضح: قماش واسع باهت
-      // (نود، بيج، رمادي مائل) يبقى له وجود أمام قماش صغير فاقع
-      hist[bin] += 1 + C / 40;
-    } else {
-      neutral++;
-      lHist[Math.min(31, Math.max(0, Math.floor((L / 100) * 32)))]++;
-    }
-  }
-  if (!total) return [{ neutral: true, L: 50 }];
-
-  // تنعيم دائري ثم التقاط القمم
-  const sm = new Float64Array(BINS);
-  for (let i = 0; i < BINS; i++) {
-    sm[i] = hist[(i + BINS - 2) % BINS] * 0.5 + hist[(i + BINS - 1) % BINS]
-      + hist[i] * 1.5 + hist[(i + 1) % BINS] + hist[(i + 2) % BINS] * 0.5;
-  }
-  let peak = 0;
-  for (let i = 0; i < BINS; i++) if (sm[i] > peak) peak = sm[i];
-  const defs = [];
-  if (peak > 0) {
-    const picked = [];
-    for (let i = 0; i < BINS; i++) {
-      if (sm[i] < peak * 0.08) continue;
-      if (sm[i] < sm[(i + BINS - 1) % BINS] || sm[i] < sm[(i + 1) % BINS]) continue;
-      picked.push({ bin: i, v: sm[i] });
-    }
-    picked.sort((x, y) => y.v - x.v);
-    // ملاحظة: ما منرفض قمّة لأنّ الوادي اللي قبلها مو عميق. بفستان متدرّج
-    // (ماجنتا ← كحلي) التدرّج بيملا الوادي بين اللونين، فاختبار المُدرَّج
-    // بيرمي اللون التاني ويطلع الفستان بلون واحد. الفرق بين قماش حقيقي
-    // وشريط اندماج بينظهر بالمكان لا بالمُدرَّج، ومنقيسه بـ ccSolidRatio
-    // بعد الإسناد: القماش بيصمد بعد تآكل حوافه، والشريط الرفيع بيختفي.
-    picked.forEach((p) => {
-      const hue = (p.bin + 0.5) * (360 / BINS);
-      if (defs.some((d) => ccHueGap(d.hue, hue) < CC_HUE_MERGE)) return;
-      defs.push({ neutral: false, hue });
-    });
-  }
-
-  // الرماديات: تُصبح مناطق فقط إن كانت جزءاً حقيقياً من التصميم
-  if (neutral / total > 0.12 || !defs.length) {
-    const groups = [];
-    for (let i = 0; i < 32; i++) {
-      if (!lHist[i]) continue;
-      const L = (i + 0.5) * (100 / 32);
-      const near = groups.find((g) => Math.abs(g.L - L) < CC_NEUTRAL_DL);
-      if (near) {
-        near.L = (near.L * near.w + L * lHist[i]) / (near.w + lHist[i]);
-        near.w += lHist[i];
-      } else {
-        groups.push({ L, w: lHist[i] });
-      }
-    }
-    groups.sort((a, b) => b.w - a.w);
-    groups.slice(0, defs.length ? 2 : 3).forEach((g) => {
-      const share = g.w / total;
-      if (!defs.length) { defs.push({ neutral: true, L: g.L }); return; }
-      // الداكن جداً غالباً ظلّ القماش الملوّن لا قماش أسود: لا يصير منطقة
-      // إلا إذا كانت مساحته كبيرة، وعندها هو فعلاً أسود التصميم
-      if (g.L < 32 && share < 0.2) return;
-      if (share < 0.05) return;
-      defs.push({ neutral: true, L: g.L });
-    });
-  }
-  // قماشان من نفس الدرجة اللونية لكن أحدهما فاتح والآخر غامق (برغندي ونود)
-  // يُفصلان بالإضاءة — بشرط قمّتين واضحتين بينهما وادٍ عميق، حتى لا ينقسم
-  // القماش الواحد بسبب تدرّج الظلّ
-  const hueDefs = defs.filter((d) => !d.neutral);
-  if (hueDefs.length) {
-    const bandL = hueDefs.map(() => new Float64Array(32));
-    for (let i = 0; i < n; i++) {
-      if (!inside[i]) continue;
-      const a = lab[i * 3 + 1];
-      const b = lab[i * 3 + 2];
-      const C = Math.sqrt(a * a + b * b);
-      if (C < ccChromaGate(lab[i * 3])) continue;
-      const hue = ccHue(a, b);
-      let bi = 0, bd = Infinity;
-      hueDefs.forEach((d, k) => { const g = ccHueGap(hue, d.hue); if (g < bd) { bd = g; bi = k; } });
-      bandL[bi][Math.min(31, Math.max(0, Math.floor((lab[i * 3] / 100) * 32)))]++;
-    }
-    hueDefs.forEach((d, k) => {
-      const raw = bandL[k];
-      const sm2 = new Float64Array(32);
-      for (let i = 0; i < 32; i++) {
-        sm2[i] = (raw[Math.max(0, i - 1)] + raw[i] * 2 + raw[Math.min(31, i + 1)]) / 4;
-      }
-      let top = 0;
-      let tot = 0;
-      for (let i = 0; i < 32; i++) { tot += sm2[i]; if (sm2[i] > top) top = sm2[i]; }
-      if (!tot) return;
-      const peaks = [];
-      for (let i = 1; i < 31; i++) {
-        if (sm2[i] < top * 0.18) continue;
-        if (sm2[i] < sm2[i - 1] || sm2[i] < sm2[i + 1]) continue;
-        peaks.push(i);
-      }
-      if (peaks.length < 2) return;
-      const first = peaks[0];
-      const last = peaks[peaks.length - 1];
-      const L1 = (first + 0.5) * (100 / 32);
-      const L2 = (last + 0.5) * (100 / 32);
-      if (L2 - L1 < CC_L_SPLIT) return;
-      let valley = Infinity;
-      for (let i = first + 1; i < last; i++) if (sm2[i] < valley) valley = sm2[i];
-      if (valley > Math.min(sm2[first], sm2[last]) * 0.55) return;
-      d.L = L1;
-      defs.push({ neutral: false, hue: d.hue, L: L2 });
-    });
-  }
-
-  if (!defs.length) defs.push({ neutral: true, L: 50 });
-  return defs;
-}
-
-// نسبة الجزء المصمت من المنطقة: القماش الحقيقي يبقى بعد تآكل حوافه،
-// أمّا شريط الاندماج بين قماشين فهو خيط رفيع يختفي كلّه
-function ccSolidRatio(assign, inside, w, h, k, r) {
-  let total = 0;
-  let solid = 0;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      if (!inside[i] || assign[i] !== k) continue;
-      total++;
-      let ok = 1;
-      for (let dy = -r; dy <= r && ok; dy++) {
-        const ny = y + dy;
-        if (ny < 0 || ny >= h) { ok = 0; break; }
-        for (let dx = -r; dx <= r; dx++) {
-          const nx = x + dx;
-          if (nx < 0 || nx >= w || assign[ny * w + nx] !== k) { ok = 0; break; }
-        }
-      }
-      if (ok) solid++;
-    }
-  }
-  return total ? solid / total : 0;
-}
-
-// إسقاط المناطق الصغيرة: بكسلاتها تنضمّ لأقرب منطقة باقية
-function ccPruneDefs(lab, inside, n, defs) {
-  let cur = defs;
-  for (let pass = 0; pass < 3 && cur.length > 1; pass++) {
-    const counts = new Array(cur.length).fill(0);
-    let total = 0;
-    for (let i = 0; i < n; i++) {
-      if (!inside[i]) continue;
-      const a = lab[i * 3 + 1];
-      const b = lab[i * 3 + 2];
-      const C = Math.sqrt(a * a + b * b);
-      counts[ccPickZone(lab[i * 3], C, ccHue(a, b), cur)]++;
-      total++;
-    }
-    const keep = cur.filter((d, i) => counts[i] / Math.max(total, 1) >= CC_MIN_SHARE);
-    if (keep.length === cur.length || !keep.length) break;
-    cur = keep;
-  }
-  return cur.slice(0, CC_MAX_ZONES);
-}
-
-function ccDetectZones(src, subject, sw, sh, headBox, skinBoxes) {
-  const small = ccScaled(src, CC_ANALYSIS_MAX);
-  const w = small.width, h = small.height, n = w * h;
-  const lab = ccLabBuffer(small);
-  // القطعة وحدها تدخل التقسيم: الخلفية والبشرة والشعر لا تأخذ أرقاماً أصلاً
-  const inside = new Uint8Array(n);
-  const sdata = small.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
-  // قناع القطعة بمقاس صورة التحليل، ليُستعمل في قياس لون البشرة وتعليمها
-  let subjSmall = null;
-  if (subject && sw && sh) {
-    subjSmall = new Float32Array(n);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const sx = Math.min(sw - 1, Math.floor((x / w) * sw));
-        const sy = Math.min(sh - 1, Math.floor((y / h) * sh));
-        subjSmall[y * w + x] = subject[sy * sw + sx];
-      }
-    }
-  }
-  // الخلفية المتصلة بحواف الصورة تُستبعد كمان، حتى لو تسرّبت من العزل:
-  // ورق أبيض أو جدار سادة ما بياخد رقماً ولا يدخل في النِّسَب
-  const bgPx = ccBackgroundMask(lab, w, h, subjSmall);
-  const skinPx = new Uint8Array(n);
-  ccMarkSkin(skinPx, sdata, w, h, skinBoxes, ccSkinTone(sdata, w, h, headBox, subjSmall), subjSmall);
-  const hw = headBox ? ((headBox.x2 - headBox.x1) / 100) * w : 0;
-  const hh2 = headBox ? ((headBox.y2 - headBox.y1) / 100) * h : 0;
-  const hx1 = headBox ? (headBox.x1 / 100) * w - hw * 0.12 : -1;
-  const hx2 = headBox ? (headBox.x2 / 100) * w + hw * 0.12 : -1;
-  const hy1 = headBox ? (headBox.y1 / 100) * h - hh2 * 0.10 : -1;
-  const hy2 = headBox ? (headBox.y2 / 100) * h + hh2 * 0.12 : -1;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      let ok = 1;
-      if (subject && sw && sh) {
-        const sx = Math.min(sw - 1, Math.floor((x / w) * sw));
-        const sy = Math.min(sh - 1, Math.floor((y / h) * sh));
-        ok = subject[sy * sw + sx] > 0.6 ? 1 : 0;
-      }
-      // لا رقم على بشرة ولا على الرأس: هذول مو جزء من التصميم
-      if (ok && skinPx[i]) ok = 0;
-      if (ok && headBox && x >= hx1 && x <= hx2 && y >= hy1 && y <= hy2) ok = 0;
-      if (ok && bgPx[i] && !subject) ok = 0;
-      inside[i] = ok;
-    }
-  }
-  let count = 0;
-  for (let i = 0; i < n; i++) if (inside[i]) count++;
-  if (count < n * 0.02) inside.fill(1);
-
-  // القطعة جسم واحد: أي كتلة منفصلة عنها (زهور أو أثاث تسرّب من العزل)
-  // تُستبعد قبل أي حساب، فلا تأخذ رقماً ولا تدخل في النِّسَب
-  ccKeepLargest(inside, w, h);
-  const defs = ccPruneDefs(lab, inside, n, ccBuildDefs(lab, inside, n));
-
-  // إسناد كل بكسل من القطعة لمنطقته، ثم تصويت الجوار لإزالة التناثر
-  const assign = new Uint8Array(n);
-  const assignAll = (list) => {
-    for (let i = 0; i < n; i++) {
-      const aa = lab[i * 3 + 1];
-      const bb = lab[i * 3 + 2];
-      assign[i] = ccPickZone(lab[i * 3], Math.sqrt(aa * aa + bb * bb), ccHue(aa, bb), list);
-    }
-    ccDespeckle(assign, w, h, list.length);
-  };
-  assignAll(defs);
-
-  // ما ليس كتلة مصمتة ليس قماشاً: شريط الاندماج بين لونين يُحذف وتعود
-  // بكسلاته لأقرب قماش حقيقي
-  for (let pass = 0; pass < 3 && defs.length > 1; pass++) {
-    let worst = -1;
-    let worstR = 1;
-    for (let k = 0; k < defs.length; k++) {
-      const r = ccSolidRatio(assign, inside, w, h, k, 2);
-      if (r < worstR) { worstR = r; worst = k; }
-    }
-    if (worst < 0 || worstR >= 0.22) break;
-    defs.splice(worst, 1);
-    assignAll(defs);
-  }
-
-  let insideCount = 0;
-  for (let i = 0; i < n; i++) if (inside[i]) insideCount++;
-  const acc = defs.map(() => ({ count: 0, sum: [0, 0, 0], px: [] }));
-  for (let i = 0; i < n; i++) {
-    if (!inside[i]) continue;
-    const e = acc[assign[i]];
-    e.count++;
-    e.sum[0] += lab[i * 3]; e.sum[1] += lab[i * 3 + 1]; e.sum[2] += lab[i * 3 + 2];
-    e.px.push(i);
-  }
-
-  // لون المنطقة المعروض: متوسّط أوضح نصف بكسلاتها لوناً — هذا لون القماش
-  // كما تراه العين، بينما المتوسّط الكامل يسحبه الظلّ نحو الأسود
-  const zoneColor = (e, isNeutral) => {
-    if (!e.count) return [50, 0, 0];
-    const key = e.px.map((i) => {
-      const a2 = lab[i * 3 + 1];
-      const b2 = lab[i * 3 + 2];
-      return { i, v: isNeutral ? lab[i * 3] : Math.sqrt(a2 * a2 + b2 * b2) };
-    }).sort((x, y) => y.v - x.v);
-    const take = Math.max(1, Math.round(key.length * 0.5));
-    const sum = [0, 0, 0];
-    for (let j = 0; j < take; j++) {
-      const i = key[j].i;
-      sum[0] += lab[i * 3]; sum[1] += lab[i * 3 + 1]; sum[2] += lab[i * 3 + 2];
-    }
-    return [sum[0] / take, sum[1] / take, sum[2] / take];
-  };
-  // لون حافة الصورة = لون الخلفية. أي منطقة هي الخلفية نفسها لوناً وأغلب
-  // بكسلاتها خلفية، تُحذف: ورق أبيض أو جدار سادة تسرّب من العزل لا يصير قماشاً
-  let border = null;
-  {
-    const sum = [0, 0, 0];
-    let k = 0;
-    const add = (i) => { sum[0] += lab[i * 3]; sum[1] += lab[i * 3 + 1]; sum[2] += lab[i * 3 + 2]; k++; };
-    for (let x = 0; x < w; x++) { add(x); add((h - 1) * w + x); }
-    for (let y = 0; y < h; y++) { add(y * w); add(y * w + w - 1); }
-    if (k) border = [sum[0] / k, sum[1] / k, sum[2] / k];
-  }
-  const bgShare = defs.map(() => ({ bg: 0, all: 0 }));
-  for (let i = 0; i < n; i++) {
-    if (!inside[i]) continue;
-    const e = bgShare[assign[i]];
-    e.all++;
-    if (bgPx[i]) e.bg++;
-  }
-  const isBackgroundZone = (i) => {
-    // مع وجود عزل حقيقي، العزل هو اللي شال الخلفية، وكل بكسل هون أصلاً
-    // جوّاه. انتشار الخلفية باللون ما بينفع كحَكَم ع صورة فوتوغرافية —
-    // مقيس سابقاً إنه بيغطّي 99.6% منها — وكان بيبلع لوحاً غامقاً كامل
-    // (البنفسجي بفستان أخضر/بنفسجي) ويحذف منطقته، فيتغيّر مع اللوح التاني
-    if (subject) return false;
-    const e = bgShare[i];
-    if (!e.all) return false;
-    // منطقة كلّها خلفية متصلة بحواف الصورة = تسرّب من العزل، مهما كان لونها
-    if (e.bg / e.all > 0.7) return true;
-    if (e.bg / e.all < 0.5 || !border) return false;
-    const m = acc[i];
-    if (!m.count) return false;
-    const mean = [m.sum[0] / m.count, m.sum[1] / m.count, m.sum[2] / m.count];
-    const dl = mean[0] - border[0];
-    const da = mean[1] - border[1];
-    const db = mean[2] - border[2];
-    return Math.sqrt(dl * dl + da * da + db * db) < 12;
-  };
-  let order = defs.map((d, i) => i).filter((i) => acc[i].count > 0 && !isBackgroundZone(i))
-    .sort((x, y) => acc[y].count - acc[x].count);
-  if (!order.length) {
-    order = defs.map((d, i) => i).filter((i) => acc[i].count > 0)
-      .sort((x, y) => acc[y].count - acc[x].count);
-  }
-
-  const zones = order.map((i) => {
-    const e = acc[i];
-    const mean = [e.sum[0] / e.count, e.sum[1] / e.count, e.sum[2] / e.count];
-    const shown = zoneColor(e, defs[i].neutral);
-    const z = {
-      def: i,
-      share: e.count / Math.max(insideCount, 1),
-      lab: mean,
-      hex: toHex(ccLab2Rgb(shown[0], shown[1], shown[2])),
-    };
-    const pt = nearestPantone(z.hex);
-    z.pantone = pt ? pt.code : '';
-    z.pantoneName = pt ? pt.name : '';
-
-    // كل قطعة منفصلة من نفس اللون تأخذ الرقم نفسه: الصدر والأكمام والتنورة
-    const belongs = new Uint8Array(n);
-    let total = 0;
-    for (let j = 0; j < n; j++) {
-      if (inside[j] && assign[j] === i) { belongs[j] = 1; total++; }
-    }
-    const seen = new Uint8Array(n);
-    const stack = new Int32Array(n);
-    const parts = [];
-    for (let start = 0; start < n; start++) {
-      if (seen[start] || !belongs[start]) continue;
-      let top = 0, len = 0, sx = 0, sy = 0;
-      stack[top++] = start;
-      seen[start] = 1;
-      while (top > 0) {
-        const j = stack[--top];
-        const x = j % w;
-        const y = (j - x) / w;
-        len++; sx += x; sy += y;
-        if (x > 0 && !seen[j - 1] && belongs[j - 1]) { seen[j - 1] = 1; stack[top++] = j - 1; }
-        if (x < w - 1 && !seen[j + 1] && belongs[j + 1]) { seen[j + 1] = 1; stack[top++] = j + 1; }
-        if (y > 0 && !seen[j - w] && belongs[j - w]) { seen[j - w] = 1; stack[top++] = j - w; }
-        if (y < h - 1 && !seen[j + w] && belongs[j + w]) { seen[j + w] = 1; stack[top++] = j + w; }
-      }
-      parts.push({ len, cx: sx / len, cy: sy / len });
-    }
-    parts.sort((x, y) => y.len - x.len);
-    const pts = parts.filter((pp) => pp.len >= Math.max(total * 0.10, 30)).slice(0, 4).map((pp) => {
-      let bx = pp.cx, by = pp.cy, bd = Infinity;
-      for (let j = 0; j < n; j++) {
-        if (!belongs[j]) continue;
-        const x = j % w;
-        const y = (j - x) / w;
-        const dd = Math.pow(x - pp.cx, 2) + Math.pow(y - pp.cy, 2);
-        if (dd < bd) { bd = dd; bx = x; by = y; }
-      }
-      return { x: bx / w, y: by / h };
-    });
-    z.points = pts.length ? pts : [{ x: 0.5, y: 0.5 }];
-    z.x = z.points[0].x;
-    z.y = z.points[0].y;
-    return z;
-  });
-
-  return { defs: order.map((i) => defs[i]), centers: zones.map((z) => z.lab), zones };
-}
-
-function ccMasks(canvas, defs, skinBoxes, headBox, subject) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = img.data;
-  const n = canvas.width * canvas.height;
-  const lab = new Float32Array(n * 3);
-  const assign = new Uint8Array(n);
-  const skin = new Uint8Array(n);
-  for (let i = 0; i < n; i++) {
-    const L = rgbToLab([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]);
-    lab[i * 3] = L[0]; lab[i * 3 + 1] = L[1]; lab[i * 3 + 2] = L[2];
-    skin[i] = 0;
-    const C = Math.sqrt(L[1] * L[1] + L[2] * L[2]);
-    assign[i] = ccPickZone(L[0], C, ccHue(L[1], L[2]), defs);
-  }
-  ccDespeckle(assign, canvas.width, canvas.height, defs.length);
-  ccMarkSkin(skin, d, canvas.width, canvas.height, skinBoxes,
-    ccSkinTone(d, canvas.width, canvas.height, headBox, subject), subject);
-  const bg = ccBackgroundMask(lab, canvas.width, canvas.height, subject);
-  // قناع التلوين متآكل شوي عن قناع العزل، فالهالة ما بتتلوّن
-  const paint = ccPaintMask(subject, canvas.width, canvas.height);
-  return { lab, assign, skin, bg, paint, defs, w: canvas.width, h: canvas.height };
-}
-
-// يبقي الكتل الكبيرة المتصلة ويشيل ما انفصل عنها
 function ccKeepLargest(mask, w, h) {
   const n = w * h;
   const seen = new Uint8Array(n);
@@ -2757,8 +1933,7 @@ function ccKeepLargest(mask, w, h) {
     while (top > 0) {
       const i = stack[--top];
       comp[len++] = i;
-      const x = i % w;
-      const y = (i - x) / w;
+      const x = i % w, y = (i - x) / w;
       if (x > 0 && !seen[i - 1] && mask[i - 1]) { seen[i - 1] = 1; stack[top++] = i - 1; }
       if (x < w - 1 && !seen[i + 1] && mask[i + 1]) { seen[i + 1] = 1; stack[top++] = i + 1; }
       if (y > 0 && !seen[i - w] && mask[i - w]) { seen[i - w] = 1; stack[top++] = i - w; }
@@ -2775,476 +1950,6 @@ function ccKeepLargest(mask, w, h) {
   });
 }
 
-// تصويت الجوار: يشيل النقاط المتناثرة داخل المنطقة فلا يطلع اللون مبقّع
-function ccDespeckle(assign, w, h, k) {
-  const src = assign.slice();
-  const counts = new Uint16Array(k);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      counts.fill(0);
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) counts[src[(y + dy) * w + x + dx]]++;
-      }
-      let bi = src[y * w + x], bc = counts[bi];
-      for (let c = 0; c < k; c++) if (counts[c] > bc) { bc = counts[c]; bi = c; }
-      assign[y * w + x] = bi;
-    }
-  }
-}
-
-// تنعيم حواف القناع بمرور أفقي ورأسي بسيط
-// ---------------------------------------------------------------------------
-// القماش المخرّز والمطرّز
-// ---------------------------------------------------------------------------
-// المشكلة الموثّقة: الخرزة فيها نقطة ضوء وحافّة غامقة وظلّ، فإسناد المناطق
-// بكسل بكسل بيتنقّط — بكسل قماش وبكسل «مو قماش» — والتلوين بيطلع مبقّع.
-//
-// الحلّ حسابي بحت وثابت: قرار الأغلبية على مقياس أكبر من الخرزة. إذا أغلب
-// جيران البكسل من نفس المنطقة، البكسل بينحسب منها. بلا نموذج وبلا عشوائية:
-// نفس الصورة بتعطي نفس النتيجة كل مرة.
-const CC_TEX_DIV = 200;   // نصف قطر الخرزة = أصغر ضلع ÷ هذا
-const CC_GUIDE_DIV = 90;  // الدليل بدّه نصف قطر أوسع: بيحدّد منطقة لا بكسلات
-
-// أكبر/أصغر قيمة في نافذة منزلقة، بطابور مرتّب — كلفتها ثابتة مهما كبر النصف.
-function ccMorph1D(src, out, w, h, r, horizontal, useMax) {
-  const len = horizontal ? w : h;
-  const outer = horizontal ? h : w;
-  const step = horizontal ? 1 : w;
-  const dq = new Int32Array(len);
-  for (let o = 0; o < outer; o++) {
-    const base = horizontal ? o * w : o;
-    let head = 0;
-    let tail = 0;
-    for (let i = 0; i < len; i++) {
-      const v = src[base + i * step];
-      while (tail > head) {
-        const bv = src[base + dq[tail - 1] * step];
-        if (useMax ? bv <= v : bv >= v) tail--;
-        else break;
-      }
-      dq[tail++] = i;
-      const oi = i - r;
-      if (oi >= 0) {
-        while (dq[head] < oi - r) head++;
-        out[base + oi * step] = src[base + dq[head] * step];
-      }
-    }
-    for (let oi = Math.max(0, len - r); oi < len; oi++) {
-      while (dq[head] < oi - r) head++;
-      out[base + oi * step] = src[base + dq[head] * step];
-    }
-  }
-}
-
-function ccMorph(src, w, h, r, useMax) {
-  const a = new Float32Array(w * h);
-  const b = new Float32Array(w * h);
-  ccMorph1D(src, a, w, h, r, true, useMax);
-  ccMorph1D(a, b, w, h, r, false, useMax);
-  return b;
-}
-
-// الإغلاق: تمديد ثم تقليص بنفس النصف. بيسدّ فراغات الخرز اللي أصغر من
-// النافذة، وبيرجّع الحدّ الخارجي محلّه — فما بيفرد المنطقة على القطعة كلها.
-// إضافة فقط بحكم تعريفه، فما بينشال ولا بكسل كان مختار. ومحصور بقناع
-// التلوين والبشرة، فما بيتعدّى القطعة ولا بيطول جلد العارضة.
-function ccSmoothMask(m, w, h, limit, skin, div) {
-  const r = Math.max(2, Math.round(Math.min(w, h) / (div || CC_TEX_DIV)));
-  const closed = ccMorph(ccMorph(m, w, h, r, true), w, h, r, false);
-  const out = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    let v = closed[i];
-    if (limit) v *= limit[i];
-    if (v < m[i]) v = m[i];
-    if (skin && skin[i]) v = 0;
-    out[i] = v;
-  }
-  return out;
-}
-
-function ccZoneMask(map, k) {
-  const { assign, skin, bg, headBox, hairIsGarment, box, subject, w, h } = map;
-  const paint = map.paint || subject;
-  const n = w * h;
-  const m = new Float32Array(n);
-  // وإذا كانت المنطقة هي الخلفية نفسها تُلوَّن عادي، وإلا تُستثنى بكسلات الخلفية
-  let bgZone = false;
-  if (bg) {
-    let inZone = 0, inBg = 0;
-    for (let i = 0; i < n; i++) {
-      if (assign[i] !== k) continue;
-      inZone++;
-      if (bg[i]) inBg++;
-    }
-    bgZone = inZone > 0 && inBg / inZone > 0.6;
-  }
-  // خارج إطار القطعة لا يُلوَّن شيء: الجدران والأثاث والزهور تبقى كما هي
-  // هامش أمان حول الرأس: الذقن وأطراف الشعر غالباً خارج الصندوق بقليل.
-  // الهامش تحت الصندوق ضيّق عن قصد (12%): بفستان ستربلس القطعة الفوقانية
-  // بتبلّش مباشرة تحت الترقوة، وهامش واسع كان بياكلها فتطلع بلا رقم.
-  const hbw = headBox ? ((headBox.x2 - headBox.x1) / 100) * w : 0;
-  const hbh = headBox ? ((headBox.y2 - headBox.y1) / 100) * h : 0;
-  const hbx1 = headBox ? Math.floor((headBox.x1 / 100) * w - hbw * 0.12) : 0;
-  const hbx2 = headBox ? Math.ceil((headBox.x2 / 100) * w + hbw * 0.12) : 0;
-  const hby1 = headBox ? Math.floor((headBox.y1 / 100) * h - hbh * 0.10) : 0;
-  const hby2 = headBox ? Math.ceil((headBox.y2 / 100) * h + hbh * 0.12) : 0;
-  const bx1 = box ? Math.floor((box.x1 / 100) * w) : 0;
-  const bx2 = box ? Math.ceil((box.x2 / 100) * w) : w;
-  const by1 = box ? Math.floor((box.y1 / 100) * h) : 0;
-  const by2 = box ? Math.ceil((box.y2 / 100) * h) : h;
-  for (let i = 0; i < n; i++) {
-    // كل بكسل لمنطقة واحدة فقط: لا رقمان يتنازعان نفس المكان
-    const base = assign[i] === k ? 1 : 0;
-    if (base === 0) { m[i] = 0; continue; }
-    if (skin && skin[i]) { m[i] = 0; continue; }
-    // الشعر لا يتلوّن إلا إذا اختارت المصممة أن غطاء الرأس جزء من التصميم
-    if (headBox && !hairIsGarment) {
-      const hx = i % w;
-      const hy = (i - hx) / w;
-      if (hx >= hbx1 && hx <= hbx2 && hy >= hby1 && hy <= hby2) { m[i] = 0; continue; }
-    }
-    // القطعة معزولة: كل ما خارجها لا يُلمس، والحواف تأخذ شفافية العزل نفسها.
-    // قناع العزل هو المرجع هون، مو انتشار الخلفية: على صورة فوتوغرافية
-    // نَعِمة الانتشار بيعبر حدّ القماش وبيغطّي الصورة كلها، فما بينفع كحكم.
-    if (paint) { m[i] = paint[i] * base; continue; }
-    if (bg && bg[i] && !bgZone) { m[i] = 0; continue; }
-    if (box && !bgZone) {
-      const x = i % w;
-      const y = (i - x) / w;
-      if (x < bx1 || x >= bx2 || y < by1 || y >= by2) { m[i] = 0; continue; }
-    }
-    m[i] = base;
-  }
-  // بلا عزل: تُستبعد القطع المنفصلة البعيدة عن جسم القطعة
-  if (!subject && box && !bgZone) ccKeepCore(m, w, h, {
-    x1: bx1 + (bx2 - bx1) * 0.18,
-    x2: bx2 - (bx2 - bx1) * 0.18,
-    y1: by1 + (by2 - by1) * 0.25,
-    y2: by2 - (by2 - by1) * 0.03,
-  });
-  // القماش المخرّز: قرار أغلبية قبل التنعيم النهائي. مطفي افتراضياً،
-  // فالقماش السادة بيمشي بنفس المسار المفحوص من قبل بلا أي تغيير.
-  const sm = map.textured ? ccSmoothMask(m, w, h, paint, skin) : m;
-
-  const t = new Float32Array(n);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      const l = x > 0 ? sm[i - 1] : sm[i];
-      const r = x < w - 1 ? sm[i + 1] : sm[i];
-      t[i] = (l + sm[i] * 2 + r) / 4;
-    }
-  }
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      const u = y > 0 ? t[i - w] : t[i];
-      const dn = y < h - 1 ? t[i + w] : t[i];
-      m[i] = (u + t[i] * 2 + dn) / 4;
-    }
-  }
-  return m;
-}
-
-// يبقي من القناع القطع المتصلة التي تلمس قلب القطعة، ويمسح ما عداها
-function ccKeepCore(m, w, h, core) {
-  const n = w * h;
-  const seen = new Uint8Array(n);
-  const stack = new Int32Array(n);
-  const comp = new Int32Array(n);
-  for (let start = 0; start < n; start++) {
-    if (seen[start] || m[start] < 0.5) continue;
-    let top = 0, len = 0, hits = 0;
-    stack[top++] = start;
-    seen[start] = 1;
-    while (top > 0) {
-      const i = stack[--top];
-      comp[len++] = i;
-      const x = i % w;
-      const y = (i - x) / w;
-      if (x >= core.x1 && x <= core.x2 && y >= core.y1 && y <= core.y2) hits++;
-      if (x > 0 && !seen[i - 1] && m[i - 1] >= 0.5) { seen[i - 1] = 1; stack[top++] = i - 1; }
-      if (x < w - 1 && !seen[i + 1] && m[i + 1] >= 0.5) { seen[i + 1] = 1; stack[top++] = i + 1; }
-      if (y > 0 && !seen[i - w] && m[i - w] >= 0.5) { seen[i - w] = 1; stack[top++] = i - w; }
-      if (y < h - 1 && !seen[i + w] && m[i + w] >= 0.5) { seen[i + w] = 1; stack[top++] = i + w; }
-    }
-    if (hits / len < 0.03) {
-      for (let j = 0; j < len; j++) m[comp[j]] = 0;
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// التحديد اليدوي: المصممة تضغط على التفصيلة
-// ---------------------------------------------------------------------------
-// الكشف الآلي بيقسّم باللون، وفي تصاميم ما بينفع: فستان متدرّج من الأحمر
-// للبرتقالي للأصفر كلّه درجة وحدة ممتدّة، وألواحه منفصلة بالمكان لا باللون.
-// لهيك المصممة بتقدر تضغط ع أي تفصيلة فتصير منطقة برقمها الخاص، وبتوسّع
-// أو بتضيّق التحديد بشريط. نقطة الضغط محفوظة بنِسَب الصورة، فينعاد بناء
-// نفس المنطقة بدقّة الصورة الكاملة وقت التنزيل.
-function ccRegionAllowed(map, i) {
-  const { skin, headBox, hairIsGarment, w } = map;
-  const subject = map.paint || map.subject;
-  if (subject && subject[i] < 0.4) return false;
-  if (skin && skin[i]) return false;
-  if (headBox && !hairIsGarment) {
-    const hw = ((headBox.x2 - headBox.x1) / 100) * w;
-    const hh = ((headBox.y2 - headBox.y1) / 100) * map.h;
-    const x = i % w;
-    const y = (i - x) / w;
-    if (x >= (headBox.x1 / 100) * w - hw * 0.12 && x <= (headBox.x2 / 100) * w + hw * 0.12
-      && y >= (headBox.y1 / 100) * map.h - hh * 0.10 && y <= (headBox.y2 / 100) * map.h + hh * 0.12) return false;
-  }
-  return true;
-}
-
-// سعة التحديد بتضبط «أكبر قفزة لونية مسموح التحديد يعبرها».
-//
-// الطريقة الساذجة — قارن كل بكسل بنقطة الضغط — بتقفز: على فستان ماجنتا
-// قِست سعة 12 بتعطي 0.5% وسعة 16 بتعطي 4% وسعة 20 بتعطي 13%، يعني ما في
-// إعداد بيعطي الكشكشة لحالها. السبب إنّ الكوره والكشكشة نفس اللون، فأول
-// ما تتوسّع السعة بيفوت التحديد لعندها دفعة وحدة.
-//
-// الطريقة هون: لكل بكسل منحسب «أكبر قفزة بين بكسلين متجاورين» على أفضل
-// طريق من نقطة الضغط إله. ظلّ الكسرة بيتدرّج بفروقات صغيرة فبينعبر،
-// والخياطة أو حدّ الكوره قفزة مفاجئة فبتوقف التحديد — حتى لو القماش ورا
-// الخياطة بنفس اللون. والسعة بتكبر بالتدريج بدل ما تنفجر.
-function ccPickRegion(map, u, v, tol) {
-  const { lab, w, h } = map;
-  const n = w * h;
-  const sx = Math.max(0, Math.min(w - 1, Math.round(u * w)));
-  const sy = Math.max(0, Math.min(h - 1, Math.round(v * h)));
-  const region = new Uint8Array(n);
-  const seed = sy * w + sx;
-  if (!ccRegionAllowed(map, seed)) return region;
-
-  // مرجع اللون = متوسّط جوار صغير، فما يتأثّر التحديد ببكسل شاذّ
-  let rl = 0, ra = 0, rb = 0, cnt = 0;
-  const rad = Math.max(1, Math.round(Math.min(w, h) * 0.004));
-  for (let y = Math.max(0, sy - rad); y <= Math.min(h - 1, sy + rad); y++) {
-    for (let x = Math.max(0, sx - rad); x <= Math.min(w - 1, sx + rad); x++) {
-      const i = y * w + x;
-      rl += lab[i * 3]; ra += lab[i * 3 + 1]; rb += lab[i * 3 + 2]; cnt++;
-    }
-  }
-  if (!cnt) return region;
-  rl /= cnt; ra /= cnt; rb /= cnt;
-
-  // حدّ خارجي باللون: القماش الواحد ضوءه بيتغيّر كتير ودرجته ثابتة، فالوزن
-  // ع الدرجة. هاد بيمنع التحديد يشرد لقماش بلون تاني تماماً.
-  // السلايدر 5..100. التحويل تربيعي عن قصد: المدى المفيد (اللي بيفرق بين
-  // كشكشة وحدة وبين نص الفستان) ضيّق وقريب من الأسفل، فبناخد معظم طول
-  // الشريط لهديك المنطقة بدل ما تكون كلها قفزة بين درجتين.
-  const lim = Math.max(10, tol * 0.6) * 1.6;
-  const lim2 = lim * lim;
-  // البكسلات المسموحة تُحسب مرّة وحدة بمصفوفة، مو بكل خطوة — الحساب بكل
-  // خطوة كان بيخلّي التحديد يعلّق على صورة كبيرة
-  const ok = new Uint8Array(n);
-  {
-    let hx1 = -1, hx2 = -1, hy1 = -1, hy2 = -1;
-    const hb = map.headBox;
-    if (hb && !map.hairIsGarment) {
-      const hw = ((hb.x2 - hb.x1) / 100) * w;
-      const hh = ((hb.y2 - hb.y1) / 100) * h;
-      hx1 = (hb.x1 / 100) * w - hw * 0.12;
-      hx2 = (hb.x2 / 100) * w + hw * 0.12;
-      hy1 = (hb.y1 / 100) * h - hh * 0.10;
-      hy2 = (hb.y2 / 100) * h + hh * 0.12;
-    }
-    const sub = map.paint || map.subject;
-    const skinPx = map.skin;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        if (sub && sub[i] < 0.4) continue;
-        if (skinPx && skinPx[i]) continue;
-        if (hx1 >= 0 && x >= hx1 && x <= hx2 && y >= hy1 && y <= hy2) continue;
-        const dl = (lab[i * 3] - rl) * 0.25;
-        const da = lab[i * 3 + 1] - ra;
-        const db = lab[i * 3 + 2] - rb;
-        if (dl * dl + da * da + db * db < lim2) ok[i] = 1;
-      }
-    }
-  }
-  if (!ok[seed]) return region;
-
-  // السلايدر = أكبر قفزة لونية مسموح التحديد يعبرها، بتحويل تربيعي حتى
-  // يكون التحكّم ناعم عند الأسفل حيث الفرق بيبان.
-  //
-  // جرّبت أحدّه بالمسافة عن نقطة الضغط كمان — النتيجة كانت قوس مقصوص
-  // بنص القماش، أوضح وأقبح من إنه ياخد القماش كلّه. فشلته.
-  const budget = 1 + Math.pow(Math.max(0, Math.min(100, tol)) / 100, 2) * 18;
-  const BUCKETS = 512;
-  const QS = 8; // دقّة السطل: ربع وحدة ΔE
-  const bucketOf = (c) => Math.min(BUCKETS - 1, Math.max(0, Math.round(c * QS)));
-  const cost = new Float32Array(n).fill(Infinity);
-  // كل سطل لائحة مستقلّة: البكسل ممكن ينحطّ أكتر من مرّة بتكاليف مختلفة،
-  // ومصفوفة «التالي» الواحدة كانت تنكتب فوق نفسها وتعمل حلقة لا تنتهي
-  const buckets = [];
-  for (let b = 0; b < BUCKETS; b++) buckets.push([]);
-  const put = (i, c) => { buckets[bucketOf(c)].push(i); };
-  cost[seed] = 0;
-  put(seed, 0);
-  for (let b = 0; b < BUCKETS; b++) {
-    const list = buckets[b];
-    for (let p = 0; p < list.length; p++) {
-      const i = list[p];
-      if (bucketOf(cost[i]) !== b || region[i]) continue;   // مُدخَل قديم
-      region[i] = 1;
-      const x = i % w;
-      const y = (i - x) / w;
-      const ci = cost[i];
-      const li = lab[i * 3], ai = lab[i * 3 + 1], bi = lab[i * 3 + 2];
-      const relax = (j) => {
-        if (!ok[j] || ci >= cost[j]) return;
-        const dl = li - lab[j * 3];
-        const da = ai - lab[j * 3 + 1];
-        const db = bi - lab[j * 3 + 2];
-        const d2 = dl * dl + da * da + db * db;
-        const c = d2 > ci * ci ? Math.sqrt(d2) : ci;
-        if (c > budget || c >= cost[j]) return;
-        cost[j] = c;
-        put(j, c);
-      };
-      if (x > 0) relax(i - 1);
-      if (x < w - 1) relax(i + 1);
-      if (y > 0) relax(i - w);
-      if (y < h - 1) relax(i + w);
-    }
-  }
-  ccFillHoles(region, w, h);
-  return region;
-}
-
-// سدّ الثقوب داخل المنطقة المحدّدة.
-//
-// ظلّ الكسرة وبقعة الضوء بيطلعوا برّا سعة التحديد، فبتضلّ جزر من اللون
-// القديم جوّا المنطقة والنتيجة بتطلع مبقّعة متل جلد النمر. الجزر هاي
-// محاطة بالمنطقة من كل جهة، فمنسدّها.
-//
-// بس منسدّ الصغير منها فقط (حتى 10% من مساحة المنطقة): لو كان جوّا القماش
-// تطريز أو طبعة كبيرة بلون تاني، هيك بتضلّ على حالها وما بتتلوّن غلط.
-function ccFillHoles(region, w, h) {
-  const n = w * h;
-  let area = 0;
-  let x1 = w, x2 = -1, y1 = h, y2 = -1;
-  for (let i = 0; i < n; i++) {
-    if (!region[i]) continue;
-    area++;
-    const x = i % w;
-    const y = (i - x) / w;
-    if (x < x1) x1 = x; if (x > x2) x2 = x;
-    if (y < y1) y1 = y; if (y > y2) y2 = y;
-  }
-  if (area < 20 || x2 < x1 || y2 < y1) return;
-  const limit = Math.max(30, Math.round(area * 0.1));
-  const seen = new Uint8Array(n);
-  const stack = new Int32Array(n);
-  const comp = new Int32Array(n);
-  const inBox = (x, y) => x >= x1 && x <= x2 && y >= y1 && y <= y2;
-  for (let sy = y1; sy <= y2; sy++) {
-    for (let sx = x1; sx <= x2; sx++) {
-      const s0 = sy * w + sx;
-      if (region[s0] || seen[s0]) continue;
-      let top = 0;
-      let len = 0;
-      let touchesEdge = false;
-      seen[s0] = 1;
-      stack[top++] = s0;
-      while (top > 0) {
-        const i = stack[--top];
-        comp[len++] = i;
-        const x = i % w;
-        const y = (i - x) / w;
-        if (x === x1 || x === x2 || y === y1 || y === y2) touchesEdge = true;
-        const step = (nx, ny) => {
-          if (!inBox(nx, ny)) return;
-          const j = ny * w + nx;
-          if (seen[j] || region[j]) return;
-          seen[j] = 1;
-          stack[top++] = j;
-        };
-        step(x - 1, y); step(x + 1, y); step(x, y - 1); step(x, y + 1);
-      }
-      if (touchesEdge || len > limit) continue;
-      for (let k = 0; k < len; k++) region[comp[k]] = 1;
-    }
-  }
-}
-
-// قناع ناعم من منطقة يدوية. التنعيم أوسع من أقنعة المناطق الآلية: حدّ
-// المنطقة اليدوية بيقطع القماش بنص الكسرة أحياناً، وحرف حادّ هناك بيبيّن
-// اللون الجديد متل ملصق. عدّة مرورات بتخلّي الحدّ يذوب بالقماش.
-function ccRegionMask(region, w, h) {
-  const n = w * h;
-  let m = new Float32Array(n);
-  for (let i = 0; i < n; i++) m[i] = region[i] ? 1 : 0;
-  const passes = Math.max(2, Math.min(6, Math.round(Math.min(w, h) * 0.004)));
-  const t = new Float32Array(n);
-  for (let p = 0; p < passes; p++) {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        const l = x > 0 ? m[i - 1] : m[i];
-        const r = x < w - 1 ? m[i + 1] : m[i];
-        t[i] = (l + m[i] * 2 + r) / 4;
-      }
-    }
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        const u = y > 0 ? t[i - w] : t[i];
-        const dn = y < h - 1 ? t[i + w] : t[i];
-        m[i] = (u + t[i] * 2 + dn) / 4;
-      }
-    }
-  }
-  return m;
-}
-
-// وسط المنطقة ولونها ونقطة الرقم عليها
-function ccRegionInfo(map, region) {
-  const { lab, w, h } = map;
-  const n = w * h;
-  let cnt = 0, sl = 0, sa = 0, sb = 0, sx = 0, sy = 0;
-  let x1 = w, x2 = -1, y1 = h, y2 = -1;
-  for (let i = 0; i < n; i++) {
-    if (!region[i]) continue;
-    cnt++;
-    sl += lab[i * 3]; sa += lab[i * 3 + 1]; sb += lab[i * 3 + 2];
-    const x = i % w;
-    const y = (i - x) / w;
-    sx += x; sy += y;
-    if (x < x1) x1 = x; if (x > x2) x2 = x;
-    if (y < y1) y1 = y; if (y > y2) y2 = y;
-  }
-  if (!cnt) return null;
-  const center = [sl / cnt, sa / cnt, sb / cnt];
-  // نقطة الرقم: مركز الثقل إن كان داخل المنطقة، وإلا أقرب بكسل منها
-  let px = Math.round(sx / cnt);
-  let py = Math.round(sy / cnt);
-  if (!region[py * w + px]) {
-    let best = Infinity;
-    for (let i = 0; i < n; i++) {
-      if (!region[i]) continue;
-      const x = i % w;
-      const y = (i - x) / w;
-      const d = (x - sx / cnt) * (x - sx / cnt) + (y - sy / cnt) * (y - sy / cnt);
-      if (d < best) { best = d; px = x; py = y; }
-    }
-  }
-  return {
-    count: cnt,
-    share: cnt / n,
-    center,
-    hex: toHex(ccLab2Rgb(center[0], center[1], center[2])),
-    point: { x: (px + 0.5) / w, y: (py + 0.5) / h },
-    box: { x1: x1 / w, y1: y1 / h, x2: (x2 + 1) / w, y2: (y2 + 1) / h },
-  };
-}
-
-// أقنعة التغيير: المنطقة اليدوية بتغلب الآلية على بكسلاتها، فما يتنازع
-// رقمان على نفس المكان ولا يتلوّن بكسل مرّتين
 function ccResampleMask(m, sw, sh, dw, dh) {
   if (sw === dw && sh === dh) return m;
   const out = new Float32Array(dw * dh);
@@ -3266,36 +1971,423 @@ function ccResampleMask(m, sw, sh, dw, dh) {
   return out;
 }
 
-// viewMap: التحديد اليدوي بينحسب دايماً على مقاس المعاينة وبعدين بينكبّر.
-// خطوة المقارنة بين بكسلين بتصغر كل ما زادت الدقّة، فلو حسبناه ع الصورة
-// الكاملة بيطلع التحديد أوسع بكتير من اللي شايفته المصممة بالمعاينة.
-// هيك اللي بتشوفيه هو اللي بينزل.
-function ccChangeMasks(map, zones, cache, viewMap) {
-  const n = map.w * map.h;
-  const manual = [];
-  const base = viewMap || map;
-  const out = zones.map((z, i) => {
-    if (!z.manual) return null;
-    const reg = ccPickRegion(base, z.seed.x, z.seed.y, z.tol);
-    const m = ccResampleMask(ccRegionMask(reg, base.w, base.h), base.w, base.h, map.w, map.h);
-    manual.push(m);
-    return { zone: i, mask: m, center: z.center };
+function ccBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), type || 'image/png', quality);
   });
-  zones.forEach((z, i) => {
-    if (z.manual) return;
-    const base = cache && cache[i] ? cache[i] : ccZoneMask(map, z.autoIndex != null ? z.autoIndex : i);
-    const m = new Float32Array(base);
-    manual.forEach((mm) => { for (let k = 0; k < n; k++) if (mm[k] > 0) m[k] *= 1 - Math.min(1, mm[k]); });
-    out[i] = { zone: z.autoIndex != null ? z.autoIndex : i, mask: m, center: null };
-  });
+}
+
+// ---------------------------------------------------------------------------
+// القطع الصغيرة (SLIC)
+// ---------------------------------------------------------------------------
+function ccSuperpixels(lab, w, h, K, m) {
+  const n = w * h;
+  const S = Math.max(2, Math.round(Math.sqrt(n / K)));
+  const invS = 1 / S;
+  const cx = [], cy = [], cl = [], ca = [], cb = [];
+  const grad = (i) => {
+    const x = i % w, y = (i - x) / w;
+    if (x < 1 || y < 1 || x > w - 2 || y > h - 2) return Infinity;
+    const dx = lab[(i + 1) * 3] - lab[(i - 1) * 3];
+    const dy = lab[(i + w) * 3] - lab[(i - w) * 3];
+    return dx * dx + dy * dy;
+  };
+  for (let y = Math.round(S / 2); y < h; y += S) {
+    for (let x = Math.round(S / 2); x < w; x += S) {
+      let bi = y * w + x, bg = grad(bi);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const j = (y + dy) * w + (x + dx);
+          if (j < 0 || j >= n) continue;
+          const g = grad(j);
+          if (g < bg) { bg = g; bi = j; }
+        }
+      }
+      const bx = bi % w, by = (bi - bx) / w;
+      cx.push(bx); cy.push(by);
+      cl.push(lab[bi * 3]); ca.push(lab[bi * 3 + 1]); cb.push(lab[bi * 3 + 2]);
+    }
+  }
+  const k = cx.length;
+  const label = new Int32Array(n).fill(-1);
+  const dist = new Float32Array(n);
+  const m2 = m * m;
+  for (let iter = 0; iter < 10; iter++) {
+    dist.fill(Infinity);
+    for (let c = 0; c < k; c++) {
+      const x0 = Math.max(0, Math.round(cx[c] - S)), x1 = Math.min(w - 1, Math.round(cx[c] + S));
+      const y0 = Math.max(0, Math.round(cy[c] - S)), y1 = Math.min(h - 1, Math.round(cy[c] + S));
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * w + x;
+          const dl = lab[i * 3] - cl[c], da = lab[i * 3 + 1] - ca[c], db = lab[i * 3 + 2] - cb[c];
+          const dxp = (x - cx[c]) * invS, dyp = (y - cy[c]) * invS;
+          const d = dl * dl + da * da + db * db + (dxp * dxp + dyp * dyp) * m2;
+          if (d < dist[i]) { dist[i] = d; label[i] = c; }
+        }
+      }
+    }
+    const sl = new Float64Array(k), sa = new Float64Array(k), sb = new Float64Array(k);
+    const sx = new Float64Array(k), sy = new Float64Array(k), cn = new Float64Array(k);
+    for (let i = 0; i < n; i++) {
+      const c = label[i];
+      if (c < 0) continue;
+      sl[c] += lab[i * 3]; sa[c] += lab[i * 3 + 1]; sb[c] += lab[i * 3 + 2];
+      sx[c] += i % w; sy[c] += (i - (i % w)) / w; cn[c]++;
+    }
+    for (let c = 0; c < k; c++) {
+      if (!cn[c]) continue;
+      cl[c] = sl[c] / cn[c]; ca[c] = sa[c] / cn[c]; cb[c] = sb[c] / cn[c];
+      cx[c] = sx[c] / cn[c]; cy[c] = sy[c] / cn[c];
+    }
+  }
+  // كل قطعة لازم تكون كتلة وحدة متصلة
+  const out = new Int32Array(n).fill(-1);
+  const stack = new Int32Array(n), comp = new Int32Array(n);
+  let next = 0;
+  const minSize = Math.max(8, Math.round((n / k) * 0.25));
+  for (let start = 0; start < n; start++) {
+    if (out[start] !== -1) continue;
+    const l0 = label[start];
+    let top = 0, len = 0, adj = -1;
+    stack[top++] = start; out[start] = next;
+    while (top > 0) {
+      const i = stack[--top];
+      comp[len++] = i;
+      const x = i % w, y = (i - x) / w;
+      const step = (j, ok) => {
+        if (!ok || j < 0 || j >= n) return;
+        if (out[j] !== -1 && out[j] !== next) { adj = out[j]; return; }
+        if (out[j] !== -1 || label[j] !== l0) return;
+        out[j] = next; stack[top++] = j;
+      };
+      step(i - 1, x > 0); step(i + 1, x < w - 1); step(i - w, y > 0); step(i + w, y < h - 1);
+    }
+    if (len < minSize && adj >= 0) { for (let j = 0; j < len; j++) out[comp[j]] = adj; }
+    else next++;
+  }
+  const count = new Float64Array(next);
+  const L = new Float64Array(next), A = new Float64Array(next), B = new Float64Array(next);
+  const X = new Float64Array(next), Y = new Float64Array(next);
+  for (let i = 0; i < n; i++) {
+    const c = out[i];
+    count[c]++;
+    L[c] += lab[i * 3]; A[c] += lab[i * 3 + 1]; B[c] += lab[i * 3 + 2];
+    X[c] += i % w; Y[c] += (i - (i % w)) / w;
+  }
+  for (let c = 0; c < next; c++) {
+    if (!count[c]) continue;
+    L[c] /= count[c]; A[c] /= count[c]; B[c] /= count[c];
+    X[c] /= count[c]; Y[c] /= count[c];
+  }
+  return { label: out, k: next, count, L, A, B, X, Y };
+}
+
+function ccAdjacency(sp, w, h) {
+  const { label, k } = sp;
+  const seen = new Map();
+  const key = (a, b) => (a < b ? a * k + b : b * k + a);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (x < w - 1 && label[i] !== label[i + 1]) seen.set(key(label[i], label[i + 1]), 1);
+      if (y < h - 1 && label[i] !== label[i + w]) seen.set(key(label[i], label[i + w]), 1);
+    }
+  }
+  const adj = Array.from({ length: k }, () => []);
+  for (const kk of seen.keys()) {
+    const a = Math.floor(kk / k), b = kk % k;
+    const d = ccDye2(sp.A[a], sp.B[a], sp.A[b], sp.B[b]);
+    adj[a].push({ to: b, d });
+    adj[b].push({ to: a, d });
+  }
+  return adj;
+}
+
+// القطع اللي معظمها جوّا القطعة المعزولة. بلا عزل، الصورة كلها داخلة.
+function ccInside(sp, subject, n) {
+  const keep = new Uint8Array(sp.k).fill(1);
+  if (!subject) return keep;
+  const inC = new Float64Array(sp.k);
+  for (let i = 0; i < n; i++) if (subject[i] > 0.5) inC[sp.label[i]]++;
+  for (let c = 0; c < sp.k; c++) keep[c] = sp.count[c] && inC[c] / sp.count[c] > 0.6 ? 1 : 0;
+  return keep;
+}
+
+// ---------------------------------------------------------------------------
+// المناطق
+// ---------------------------------------------------------------------------
+// الدمج بيقارن مع **متوسّط اللوح** مو مع الجار المباشر. لو قارنّا بالجار
+// بتصير سلسلة — أخضر ← أخضر أغمق ← ... ← بنفسجي — وبيندمجوا كلهن بلوح واحد
+// لأن كل خطوة لحالها صغيرة. مقيس ع فستان الأخضر/البنفسجي: 89% من القطعة
+// طلعت منطقة وحدة بلون طيني.
+function ccBuildZones(sp, adj, keep) {
+  const k = sp.k;
+  const parent = new Int32Array(k);
+  const px = new Float64Array(k), mA = new Float64Array(k), mB = new Float64Array(k), mL = new Float64Array(k);
+  const alive = new Uint8Array(k);
+  const nb = [];
+  for (let c = 0; c < k; c++) {
+    parent[c] = c;
+    nb.push(new Set());
+    if (!keep[c]) continue;
+    alive[c] = 1;
+    px[c] = sp.count[c]; mA[c] = sp.A[c]; mB[c] = sp.B[c]; mL[c] = sp.L[c];
+  }
+  for (let a = 0; a < k; a++) {
+    if (!keep[a]) continue;
+    for (const e of adj[a]) if (keep[e.to]) nb[a].add(e.to);
+  }
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+
+  for (;;) {
+    let ba = -1, bb = -1, bd = Infinity;
+    for (let a = 0; a < k; a++) {
+      if (!alive[a]) continue;
+      for (const t of nb[a]) {
+        if (t <= a || !alive[t]) continue;
+        const d = ccDye2(mA[a], mB[a], mA[t], mB[t]);
+        if (d < bd) { bd = d; ba = a; bb = t; }
+      }
+    }
+    if (ba < 0 || bd > CC_PANEL_MERGE) break;
+    const tot = px[ba] + px[bb];
+    mA[ba] = (mA[ba] * px[ba] + mA[bb] * px[bb]) / tot;
+    mB[ba] = (mB[ba] * px[ba] + mB[bb] * px[bb]) / tot;
+    mL[ba] = (mL[ba] * px[ba] + mL[bb] * px[bb]) / tot;
+    px[ba] = tot;
+    alive[bb] = 0;
+    parent[bb] = ba;
+    for (const t of nb[bb]) {
+      if (t === ba || !alive[t]) continue;
+      nb[ba].add(t); nb[t].delete(bb); nb[t].add(ba);
+    }
+    nb[ba].delete(bb);
+  }
+
+  const panels = new Map();
+  for (let c = 0; c < k; c++) {
+    if (!keep[c]) continue;
+    const r = find(c);
+    let p = panels.get(r);
+    if (!p) { p = { px: px[r], L: mL[r], A: mA[r], B: mB[r], parts: [] }; panels.set(r, p); }
+    p.parts.push(c);
+  }
+
+  // ألواح متشابهة الصبغة تاخد نفس الرقم حتى لو مفصولة بالمكان:
+  // الصدر والأكمام والتنورة من نفس القماش = منطقة وحدة
+  const list = [...panels.values()].sort((a, b) => b.px - a.px);
+  const zs = [];
+  for (const p of list) {
+    const z = zs.find((q) => ccDye2(q.A, q.B, p.A, p.B) < CC_ZONE_MERGE);
+    if (z) {
+      const t = z.px + p.px;
+      z.L = (z.L * z.px + p.L * p.px) / t;
+      z.A = (z.A * z.px + p.A * p.px) / t;
+      z.B = (z.B * z.px + p.B * p.px) / t;
+      z.px = t;
+      z.parts = z.parts.concat(p.parts);
+    } else zs.push({ px: p.px, L: p.L, A: p.A, B: p.B, parts: p.parts.slice() });
+  }
+
+  let total = 0;
+  for (const z of zs) total += z.px;
+  if (!total) return { zoneOf: new Int32Array(k).fill(-1), zones: [] };
+  const big = zs.filter((z) => z.px / total >= CC_MIN_ZONE);
+  const small = zs.filter((z) => z.px / total < CC_MIN_ZONE);
+  const host = big.length ? big : zs.slice(0, 1);
+  for (const s of small) {
+    let bi = 0, bd = Infinity;
+    host.forEach((z, i) => { const d = ccDye2(z.A, z.B, s.A, s.B); if (d < bd) { bd = d; bi = i; } });
+    host[bi].parts = host[bi].parts.concat(s.parts);
+    host[bi].px += s.px;
+  }
+  host.sort((a, b) => b.px - a.px);
+  const kept = host.slice(0, CC_MAX_ZONES);
+
+  const zoneOf = new Int32Array(k).fill(-1);
+  kept.forEach((z, i) => z.parts.forEach((c) => { zoneOf[c] = i; }));
+
+  // اللون المعروض بالمربّع = لون القماش متل ما العين بتشوفه: متوسّط أوضح
+  // نصّ القطع لوناً. المتوسّط الكامل بيسحبه ظلّ الطيّات ع الطيني.
+  const shownLab = (z) => {
+    const ranked = z.parts.slice().sort((x, y) => (sp.A[y] * sp.A[y] + sp.B[y] * sp.B[y]) - (sp.A[x] * sp.A[x] + sp.B[x] * sp.B[x]));
+    const take = Math.max(1, Math.round(ranked.length * 0.5));
+    let p = 0, L = 0, A = 0, B = 0;
+    for (let j = 0; j < take; j++) {
+      const c = ranked[j];
+      p += sp.count[c]; L += sp.L[c] * sp.count[c]; A += sp.A[c] * sp.count[c]; B += sp.B[c] * sp.count[c];
+    }
+    return p ? [L / p, A / p, B / p] : [z.L, z.A, z.B];
+  };
+
+  return {
+    zoneOf,
+    zones: kept.map((z) => {
+      const s2 = shownLab(z);
+      return { share: z.px / total, lab: [z.L, z.A, z.B], hex: toHex(ccLab2Rgb(s2[0], s2[1], s2[2])), parts: z.parts };
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// التحديد بالضغط
+// ---------------------------------------------------------------------------
+// السلايدر = كم فرق صبغة مسموح للتحديد يمشي فيه، بمضاعفات مقياس الصورة
+// نفسها، فمعناه واحد ع كل صورة.
+function ccScale(adj, keep) {
+  const v = [];
+  for (let a = 0; a < adj.length; a++) {
+    if (!keep[a]) continue;
+    for (const e of adj[a]) if (keep[e.to] && e.to > a) v.push(e.d);
+  }
+  if (!v.length) return 1;
+  v.sort((x, y) => x - y);
+  return Math.max(0.5, v[Math.floor(v.length * 0.5)]);
+}
+
+const ccBudget = (slider, scale) => scale * (0.4 + Math.pow(Math.max(0, Math.min(100, slider)) / 100, 1.6) * 22);
+
+// headBox: صندوق الرأس من التسمية. بينستعمل **بخطوة القفز البعيد وحدها**،
+// مو بالانتشار المتصل — عشان جناح الكتف اللي جنب الرقبة يضلّ ينمسك، وبنفس
+// الوقت الشعر ما ينسحب من بعيد لأنه قريب لوناً من قماش غامق.
+function ccPick(sp, adj, keep, seed, budget, headBox, w, h) {
+  const k = sp.k;
+  const done = new Uint8Array(k);
+  if (seed < 0 || seed >= k || !keep[seed]) return done;
+  const cost = new Float64Array(k).fill(Infinity);
+  cost[seed] = 0;
+  for (;;) {
+    let best = -1, bc = Infinity;
+    for (let i = 0; i < k; i++) if (!done[i] && keep[i] && cost[i] < bc) { bc = cost[i]; best = i; }
+    if (best < 0 || bc > budget) break;
+    done[best] = 1;
+    for (const e of adj[best]) if (keep[e.to]) {
+      const c = bc + e.d;
+      if (c < cost[e.to]) cost[e.to] = c;
+    }
+  }
+  // نفس القماش لو ظاهر بمكان تاني منفصل بياخد نفس التحديد.
+  // الشرط مشدود عن قصد: الصبغة **والإضاءة** لازم يكونوا قريبين. بالصبغة
+  // وحدها كان شعر العارضة الغامق بينحسب من نفس القماش لأن البنفسجي بالظلّ
+  // كمان غامق وقليل التشبّع — ومقيس: الشعر انصبغ أخضر مع التنورة.
+  let px = 0, A = 0, B = 0, L = 0;
+  for (let c = 0; c < k; c++) if (done[c]) {
+    px += sp.count[c];
+    A += sp.A[c] * sp.count[c]; B += sp.B[c] * sp.count[c]; L += sp.L[c] * sp.count[c];
+  }
+  if (px) {
+    A /= px; B /= px; L /= px;
+    const hx1 = headBox && w ? (headBox.x1 / 100) * w : -1;
+    const hx2 = headBox && w ? (headBox.x2 / 100) * w : -1;
+    const hy1 = headBox && h ? (headBox.y1 / 100) * h : -1;
+    const hy2 = headBox && h ? (headBox.y2 / 100) * h : -1;
+    for (let c = 0; c < k; c++) {
+      if (done[c] || !keep[c]) continue;
+      if (ccDye2(sp.A[c], sp.B[c], A, B) >= CC_SAME_FABRIC) continue;
+      if (Math.abs(sp.L[c] - L) > CC_SAME_LIGHT) continue;
+      if (hx1 >= 0 && sp.X[c] >= hx1 && sp.X[c] <= hx2 && sp.Y[c] >= hy1 && sp.Y[c] <= hy2) continue;
+      done[c] = 1;
+    }
+  }
+  return done;
+}
+
+// وسط التحديد ولونه ونقطة الرقم عليه
+function ccSelInfo(sp, sel, w, h) {
+  let px = 0, L = 0, A = 0, B = 0, X = 0, Y = 0;
+  for (let c = 0; c < sp.k; c++) {
+    if (!sel[c]) continue;
+    px += sp.count[c];
+    L += sp.L[c] * sp.count[c]; A += sp.A[c] * sp.count[c]; B += sp.B[c] * sp.count[c];
+    X += sp.X[c] * sp.count[c]; Y += sp.Y[c] * sp.count[c];
+  }
+  if (!px) return null;
+  L /= px; A /= px; B /= px; X /= px; Y /= px;
+  // الرقم بيتحطّ ع أقرب قطعة محدّدة لمركز الثقل، فما يطلع برّا التحديد
+  let bi = -1, bd = Infinity;
+  for (let c = 0; c < sp.k; c++) {
+    if (!sel[c]) continue;
+    const d = Math.pow(sp.X[c] - X, 2) + Math.pow(sp.Y[c] - Y, 2);
+    if (d < bd) { bd = d; bi = c; }
+  }
+  const ranked = [];
+  for (let c = 0; c < sp.k; c++) if (sel[c]) ranked.push(c);
+  ranked.sort((x, y) => (sp.A[y] * sp.A[y] + sp.B[y] * sp.B[y]) - (sp.A[x] * sp.A[x] + sp.B[x] * sp.B[x]));
+  const take = Math.max(1, Math.round(ranked.length * 0.5));
+  let p2 = 0, L2 = 0, A2 = 0, B2 = 0;
+  for (let j = 0; j < take; j++) {
+    const c = ranked[j];
+    p2 += sp.count[c]; L2 += sp.L[c] * sp.count[c]; A2 += sp.A[c] * sp.count[c]; B2 += sp.B[c] * sp.count[c];
+  }
+  return {
+    px,
+    share: px / (w * h),
+    lab: [L, A, B],
+    hex: toHex(ccLab2Rgb(p2 ? L2 / p2 : L, p2 ? A2 / p2 : A, p2 ? B2 / p2 : B)),
+    point: bi >= 0 ? { x: (sp.X[bi] + 0.5) / w, y: (sp.Y[bi] + 0.5) / h } : { x: 0.5, y: 0.5 },
+  };
+}
+
+// قناع بكسل من تحديد قطع، بحافة ناعمة
+function ccMask(sel, sp, w, h) {
+  const n = w * h;
+  const hard = new Float32Array(n);
+  for (let i = 0; i < n; i++) hard[i] = sel[sp.label[i]] ? 1 : 0;
+  const r = Math.max(1, Math.round(Math.min(w, h) * 0.004));
+  const d = r * 2 + 1;
+  const tmp = new Float32Array(n), out = new Float32Array(n);
+  const cx = (x) => (x < 0 ? 0 : x > w - 1 ? w - 1 : x);
+  const cy = (y) => (y < 0 ? 0 : y > h - 1 ? h - 1 : y);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let s = 0;
+    for (let x = -r; x <= r; x++) s += hard[row + cx(x)];
+    for (let x = 0; x < w; x++) { tmp[row + x] = s / d; s += hard[row + cx(x + r + 1)] - hard[row + cx(x - r)]; }
+  }
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let y = -r; y <= r; y++) s += tmp[cy(y) * w + x];
+    for (let y = 0; y < h; y++) { out[y * w + x] = s / d; s += tmp[cy(y + r + 1) * w + x] - tmp[cy(y - r) * w + x]; }
+  }
+  // جوّا التحديد تلوين كامل، والتدرّج ع الحافّة وحدها
+  for (let i = 0; i < n; i++) if (hard[i] > 0) out[i] = 1;
   return out;
 }
 
-// دليل الألوان المرسَل للنموذج: نفس الصورة، والمناطق المطلوب تغييرها مدهونة
-// بلون مسطّح صريح. مسطّح عن قصد — النموذج يقرأ منه المكان واللون فقط،
-// والملمس والظلّ والخرز يأخذها من الصورة الأصلية.
-const CC_GUIDE_CUT = 0.5;      // وزن القناع الذي يُعدّ داخل المنطقة
+// أقنعة كل المناطق المطلوب تغييرها، بأي دقّة. اليدوية بتغلب الآلية.
+function ccZoneMasks(data, zones, w, h) {
+  const { sp, adj, keep, zoneOf, scale, headBox } = data;
+  const sels = zones.map((z) => {
+    if (z.manual) {
+      const sx = Math.max(0, Math.min(data.w - 1, Math.round(z.seed.x * data.w)));
+      const sy = Math.max(0, Math.min(data.h - 1, Math.round(z.seed.y * data.h)));
+      return ccPick(sp, adj, keep, sp.label[sy * data.w + sx], ccBudget(z.tol, scale), headBox, data.w, data.h);
+    }
+    const s = new Uint8Array(sp.k);
+    for (let c = 0; c < sp.k; c++) if (zoneOf[c] === z.autoIndex) s[c] = 1;
+    return s;
+  });
+  // بكسل لمنطقة وحدة بس: اليدوية بتاخده من الآلية
+  for (let i = 0; i < sels.length; i++) {
+    if (zones[i].manual) continue;
+    for (let j = 0; j < sels.length; j++) {
+      if (!zones[j].manual) continue;
+      for (let c = 0; c < sp.k; c++) if (sels[j][c]) sels[i][c] = 0;
+    }
+  }
+  return sels.map((s) => {
+    const m = ccMask(s, sp, data.w, data.h);
+    return ccResampleMask(m, data.w, data.h, w, h);
+  });
+}
 
+// ---------------------------------------------------------------------------
+// دليل الألوان المرسَل للنموذج
+// ---------------------------------------------------------------------------
+// نفس الصورة، والمناطق المطلوب تغييرها مدهونة بلون مسطّح صريح. الأقنعة
+// جاية من القطع فهي مصمتة بطبيعتها — الدليل ما بيطلع منقّط متل قبل، فالنموذج
+// بيفهم المنطقة كاملة مو نصّها.
 function ccGuide(canvas, fills) {
   const out = tpCanvas(canvas.width, canvas.height);
   const ctx = out.getContext('2d', { willReadFrequently: true });
@@ -3304,108 +2396,43 @@ function ccGuide(canvas, fills) {
   const d = img.data;
   const n = out.width * out.height;
   let painted = 0;
-
   fills.forEach((f) => {
     if (!f || !f.mask || !tpHexOk(f.hex)) return;
     const [r, g, b] = ccHexRgb(f.hex);
     for (let i = 0; i < n; i++) {
-      if (f.mask[i] < CC_GUIDE_CUT) continue;
+      if (f.mask[i] < 0.5) continue;
       d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255;
       painted++;
     }
   });
-
   if (!painted) return null;
   ctx.putImageData(img, 0, 0);
   return out;
 }
 
-function ccBlob(canvas, type, quality) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('blob'))),
-      type || 'image/png',
-      quality,
-    );
+// صورة مرقّمة تُرسل مع طلب التسمية
+function ccNumbered(canvas, zones) {
+  const c = tpCanvas(canvas.width, canvas.height);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(canvas, 0, 0);
+  const r = Math.max(12, Math.round(Math.min(c.width, c.height) * 0.028));
+  ctx.font = '700 ' + Math.round(r * 1.15) + 'px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  zones.forEach((z) => {
+    const x = z.x * c.width;
+    const y = z.y * c.height;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.94)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#111';
+    ctx.stroke();
+    ctx.fillStyle = '#111';
+    ctx.fillText(String(z.n), x, y + 1);
   });
-}
-
-// التلوين نفسه: تُحفظ الإضاءة وتفاوت التشبّع، ويُستبدل اللون
-function ccRecolor(canvas, map, centers, changes) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = img.data;
-  const n = canvas.width * canvas.height;
-  const out = new Float32Array(map.lab);
-  let touched = false;
-
-  changes.forEach((ch) => {
-    const mask = ch.mask || ccZoneMask(map, ch.zone);
-    const src = ch.center || centers[ch.zone];
-    if (!src) return;
-    const t = rgbToLab(ccHexRgb(ch.hex));
-    const srcC = Math.max(Math.sqrt(src[1] * src[1] + src[2] * src[2]), 0.001);
-    const tgtC = Math.sqrt(t[1] * t[1] + t[2] * t[2]);
-    // القماش المتدرّج: الدرجة بتلفّ بفرق ثابت بدل ما تنستبدل بدرجة وحدة.
-    // هيك تدرّج الفوشي للكحلي بيضلّ تدرّج، بس بلون تاني — لو استبدلناها
-    // بدرجة وحدة كان التدرّج مات وصار الفستان لون مسطّح واحد.
-    const dHue = (ccHue(t[1], t[2]) - ccHue(src[1], src[2])) * (Math.PI / 180);
-    const cScale = Math.min(CC_CHROMA_MAX / srcC, tgtC / srcC);
-    const tCos = tgtC > 0.001 ? t[1] / tgtC : 1;
-    const tSin = tgtC > 0.001 ? t[2] / tgtC : 0;
-    touched = true;
-    // تباين المنطقة نفسها: منطقة واسعة فيها ظلّ وضوء تباينها عالي، ومنطقة
-    // ضيّقة تباينها واطي. بلا تعويض، المنطقة الضيّقة بتطلع لون مسطّح متل
-    // ملصق ملزوق ع الفستان. فمنقيس التباين ومنعوّضه حتى يضلّ القماش قماش.
-    let wSum = 0;
-    let lSum = 0;
-    for (let i = 0; i < n; i++) {
-      const w = mask[i];
-      if (w < 0.004) continue;
-      wSum += w;
-      lSum += map.lab[i * 3] * w;
-    }
-    if (!wSum) return;
-    const meanL = lSum / wSum;
-    let varSum = 0;
-    for (let i = 0; i < n; i++) {
-      const w = mask[i];
-      if (w < 0.004) continue;
-      const dv = map.lab[i * 3] - meanL;
-      varSum += dv * dv * w;
-    }
-    const sd = Math.sqrt(varSum / wSum);
-    const gain = Math.max(0.8, Math.min(2, 13 / Math.max(5, sd)));
-    for (let i = 0; i < n; i++) {
-      const w = mask[i];
-      if (w < 0.004) continue;
-      const L = map.lab[i * 3];
-      const a = map.lab[i * 3 + 1];
-      const b = map.lab[i * 3 + 2];
-      const chroma = Math.sqrt(a * a + b * b);
-      const nl = Math.max(2, Math.min(98, t[0] + (L - meanL) * gain));
-      // التشبّع بينضرب بنسبة، فالظلّ بيضلّ ظلّ والفاقع بيضلّ فاقع
-      const nc = Math.min(CC_CHROMA_MAX, chroma * cScale);
-      // بكسل تشبّعه واطي درجته مو موثوقة، فبدل ما نلفّها ونطلّع لون عشوائي
-      // منسحبها ع درجة الهدف. كل ما زاد التشبّع، زاد الاعتماد ع اللفّ.
-      const trust = Math.min(1, chroma / ccChromaGate(L));
-      const hr = Math.atan2(b, a) + dHue;
-      const na = nc * (Math.cos(hr) * trust + tCos * (1 - trust));
-      const nb = nc * (Math.sin(hr) * trust + tSin * (1 - trust));
-      out[i * 3] = out[i * 3] * (1 - w) + nl * w;
-      out[i * 3 + 1] = out[i * 3 + 1] * (1 - w) + na * w;
-      out[i * 3 + 2] = out[i * 3 + 2] * (1 - w) + nb * w;
-    }
-  });
-
-  if (!touched) return null;
-  for (let i = 0; i < n; i++) {
-    const rgb = ccLab2Rgb(out[i * 3], out[i * 3 + 1], out[i * 3 + 2]);
-    d[i * 4] = rgb[0]; d[i * 4 + 1] = rgb[1]; d[i * 4 + 2] = rgb[2];
-  }
-  const res = tpCanvas(canvas.width, canvas.height);
-  res.getContext('2d').putImageData(img, 0, 0);
-  return res;
+  return c;
 }
 
 // ---------------------------------------------------------------------------
@@ -3491,36 +2518,28 @@ function CcPreview({ data, zones, showPins, picking, onPick }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!data || !ref.current) return;
-    const masks = ccChangeMasks(data.map, zones, data.maskCache);
-    const changes = zones
-      .map((z, i) => ({ i, z }))
-      .filter(({ z }) => z.mode === 'change' && tpHexOk(z.target))
-      .map(({ i, z }) => ({ zone: masks[i].zone, hex: z.target, mask: masks[i].mask, center: masks[i].center }));
-    const out = changes.length ? ccRecolor(data.view, data.map, data.centers, changes) : data.view;
     const c = ref.current;
-    c.width = data.view.width;
-    c.height = data.view.height;
+    c.width = data.w;
+    c.height = data.h;
     const ctx = c.getContext('2d');
-    ctx.drawImage(out, 0, 0);
+    ctx.drawImage(data.view, 0, 0);
     if (showPins) {
       const r = Math.max(12, Math.round(Math.min(c.width, c.height) * 0.026));
       ctx.font = '700 ' + Math.round(r * 1.1) + 'px Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       zones.forEach((z, i) => {
-        (z.points || [{ x: z.x, y: z.y }]).forEach((pt) => {
-          const x = pt.x * c.width;
-          const y = pt.y * c.height;
-          ctx.beginPath();
-          ctx.arc(x, y, r, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(255,255,255,0.92)';
-          ctx.fill();
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = z.mode === 'change' ? '#1d7a4c' : '#111';
-          ctx.stroke();
-          ctx.fillStyle = '#111';
-          ctx.fillText(String(i + 1), x, y + 1);
-        });
+        const x = z.x * c.width;
+        const y = z.y * c.height;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = z.mode === 'change' ? '#1d7a4c' : '#111';
+        ctx.stroke();
+        ctx.fillStyle = '#111';
+        ctx.fillText(String(i + 1), x, y + 1);
       });
     }
   }, [data, zones, showPins, picking]);
