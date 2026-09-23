@@ -404,58 +404,46 @@ export default function Home() {
       const view = ccScaled(full, CC_VIEW_MAX);
       const probe = ccScaled(full, CC_ANALYSIS_MAX);
 
-      setCcStage('جارٍ كشف مناطق الألوان…');
-      let d = null;
-      let why = '';
-      try {
-        const fd = new FormData();
-        fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
-        const r = await fetch('/api/colorzones', { method: 'POST', body: fd });
-        let body = null;
-        try { body = await r.json(); } catch (e) { body = null; }
-        if (r.ok && body && Array.isArray(body.zones) && body.zones.length) d = body;
-        else why = (body && body.error) || ('تعذّر التحليل (' + r.status + ')');
-      } catch (e) {
-        if (typeof console !== 'undefined') console.warn('[gh] colorzones', e && e.message);
-        why = 'انقطع الاتصال بخدمة التحليل';
+      setCcStage('جارٍ كشف ألوان القطعة…');
+      const fd = new FormData();
+      fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
+      const r = await fetch('/api/colorzones', { method: 'POST', body: fd });
+      let body = null;
+      try { body = await r.json(); } catch (e) { body = null; }
+      if (!r.ok || !body || !Array.isArray(body.zones) || !body.zones.length) {
+        throw tpUserError((body && body.error) || ('تعذّر تحليل ألوان القطعة (' + r.status + ')'));
       }
 
-      // شبكة احتياطية: القسم ما بيوقف. المناطق بتنستخرج من بكسلات الصورة،
-      // بلا أسماء أجزاء، والتغيير بيضلّ شغّال لأن النموذج بيعرف اللون القديم.
-      if (!d) {
-        const local = ccLocalZones(view, 5);
-        if (!local.length) throw tpUserError(why || 'تعذّر تحليل مناطق الألوان — جرّبي مرة ثانية');
-        d = { description: '', descriptionAr: '', zones: local };
-        setCcNote('تعذّر تحليل أجزاء القطعة (' + why + ') — المناطق مستخرجة من ألوان الصورة، والتغيير شغّال');
-      }
-
-      const zones = d.zones.map((z, i) => {
-        const hex = ccSampleHex(view, z.points) || z.hex;
-        const pt = nearestPantone(hex);
+      // اللون من النموذج، والبانتون من الجدول المحلي. ولا قراءة بكسلات:
+      // كانت تحتاج إحداثيات، والإحداثيات هي ما كان يسقط.
+      const zones = body.zones.map((z, i) => {
+        const pt = nearestPantone(z.hex);
         return {
           n: i + 1,
-          kind: z.kind || 'other',
-          hex,
+          kind: z.kind === 'trim' ? 'trim' : 'garment',
+          hex: z.hex,
           pantone: pt ? pt.code : '',
-          name: z.name || (pt ? ccPtName(pt.name) : hex),
+          name: z.name || (pt ? ccPtName(pt.name) : z.hex),
           nameEn: z.name || '',
           parts: z.parts || '',
           partsAr: z.partsAr || z.parts || '',
           material: z.material || '',
-          points: Array.isArray(z.points) ? z.points : [],
           box: z.box || null,
           mode: 'keep',
-          target: hex,
+          target: z.hex,
         };
       });
+      if (!zones.some((z) => z.box)) {
+        setCcNote('النموذج ما حدّد أماكن على الصورة، فالأرقام ما رح تظهر عليها — تغيير الألوان شغّال عادي');
+      }
 
       setCcData({
         full,
         view,
         w: view.width,
         h: view.height,
-        description: d.description || '',
-        descriptionAr: d.descriptionAr || '',
+        description: '',
+        descriptionAr: body.descriptionAr || '',
       });
       setCcZones(zones);
     } catch (e) {
@@ -1814,118 +1802,6 @@ function ccBlob(canvas, type, quality) {
 // القطع الصغيرة (SLIC)
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// شبكة احتياطية: مناطق من بكسلات الصورة وحدها
-// ---------------------------------------------------------------------------
-// تُستعمل فقط إن تعذّر التحليل. بلا أسماء أجزاء ولا خامات، لكن كل منطقة
-// لها لونها ونقطتها وصندوقها، فتغيير الألوان يبقى شغّالاً: برومبت الرسم
-// يعرّف المنطقة بلونها القديم، وهو وحده كافٍ.
-function ccLocalZones(canvas, k) {
-  if (!canvas || !canvas.width || !canvas.height) return [];
-  const w = canvas.width;
-  const h = canvas.height;
-  let ctx;
-  try { ctx = canvas.getContext('2d', { willReadFrequently: true }); } catch (e) { ctx = canvas.getContext('2d'); }
-  if (!ctx) return [];
-  let d;
-  try { d = ctx.getImageData(0, 0, w, h).data; } catch (e) { return []; }
-
-  const step = Math.max(1, Math.round(Math.sqrt((w * h) / 12000)));
-  const px = [];
-  const xs = [];
-  const ys = [];
-  for (let y = 0; y < h; y += step) {
-    for (let x = 0; x < w; x += step) {
-      const i = (y * w + x) * 4;
-      if (d[i + 3] < 200) continue;
-      px.push([d[i], d[i + 1], d[i + 2]]);
-      xs.push((x / w) * 100);
-      ys.push((y / h) * 100);
-    }
-  }
-  if (px.length < 20) return [];
-
-  const cl = clusterColors(px, Math.max(2, Math.min(6, k || 5)));
-  if (!cl.length) return [];
-
-  return cl.map((c) => {
-    let bd = Infinity;
-    let bx = 50;
-    let by = 50;
-    let x1 = 100;
-    let y1 = 100;
-    let x2 = 0;
-    let y2 = 0;
-    for (let i = 0; i < px.length; i++) {
-      let own = true;
-      let dd = cDist(px[i], c.rgb);
-      for (const o of cl) {
-        if (o === c) continue;
-        if (cDist(px[i], o.rgb) < dd) { own = false; break; }
-      }
-      if (!own) continue;
-      if (xs[i] < x1) x1 = xs[i];
-      if (xs[i] > x2) x2 = xs[i];
-      if (ys[i] < y1) y1 = ys[i];
-      if (ys[i] > y2) y2 = ys[i];
-      if (dd < bd) { bd = dd; bx = xs[i]; by = ys[i]; }
-    }
-    return {
-      name: '',
-      hex: toHex(c.rgb),
-      kind: 'garment',
-      parts: '',
-      partsAr: '',
-      material: '',
-      points: [{ x: bx, y: by }],
-      box: x2 > x1 ? { x1, y1, x2, y2 } : null,
-    };
-  });
-}
-
-// ---------------------------------------------------------------------------
-// قراءة لون المنطقة من بكسلات الصورة
-// ---------------------------------------------------------------------------
-// النموذج يعطي نقاطاً داخل المنطقة، والقيمة المعروضة تُقاس من الصورة:
-// قرص صغير حول كل نقطة، ثم الوسيط لكل محور في LAB. الوسيط لا يتأثّر ببريق
-// أو ظلّ وقع داخل القرص، والمتوسّط يتأثّر.
-function ccSampleHex(canvas, points) {
-  if (!canvas || !Array.isArray(points) || !points.length) return '';
-  const w = canvas.width;
-  const h = canvas.height;
-  if (!w || !h) return '';
-  let ctx;
-  try { ctx = canvas.getContext('2d', { willReadFrequently: true }); } catch (e) { ctx = canvas.getContext('2d'); }
-  if (!ctx) return '';
-
-  const r = Math.max(2, Math.round(Math.min(w, h) * CC_SAMPLE_R));
-  const L = [];
-  const A = [];
-  const B = [];
-
-  points.slice(0, 4).forEach((p) => {
-    const px = Number(p && p.x);
-    const py = Number(p && p.y);
-    if (!Number.isFinite(px) || !Number.isFinite(py)) return;
-    const cx = Math.max(r, Math.min(w - r - 1, Math.round((px / 100) * w)));
-    const cy = Math.max(r, Math.min(h - r - 1, Math.round((py / 100) * h)));
-    let d;
-    try { d = ctx.getImageData(cx - r, cy - r, r * 2 + 1, r * 2 + 1).data; } catch (e) { return; }
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] < 200) continue;
-      const lab = rgbToLab([d[i], d[i + 1], d[i + 2]]);
-      L.push(lab[0]); A.push(lab[1]); B.push(lab[2]);
-    }
-  });
-
-  if (!L.length) return '';
-  const med = (arr) => {
-    const s = arr.slice().sort((x, y) => x - y);
-    return s[(s.length - 1) >> 1];
-  };
-  return toHex(ccLab2Rgb(med(L), med(A), med(B)));
-}
-
-// ---------------------------------------------------------------------------
 // مختار اللون: بحث بانتون + مربّع تشبّع/إضاءة + شريط درجة + أقرب ثلاثة
 // ---------------------------------------------------------------------------
 function CcPicker({ value, onPick }) {
@@ -2044,10 +1920,9 @@ function CcPreview({ data, zones, hover }) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     zones.forEach((z, i) => {
-      const p = z.points && z.points[0];
-      if (!p) return;
-      const x = (p.x / 100) * c.width;
-      const y = (p.y / 100) * c.height;
+      if (!z.box) return;
+      const x = ((z.box.x1 + z.box.x2) / 200) * c.width;
+      const y = ((z.box.y1 + z.box.y2) / 200) * c.height;
       const on = i === hover;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
