@@ -152,23 +152,31 @@ function colourWord(hex) {
   if (h < 0) h += 360;
   const steps = [
     [14, 'red'], [38, 'orange'], [50, 'golden yellow'], [62, 'yellow'], [85, 'yellow-green'],
-    [155, 'green'], [178, 'teal'], [198, 'cyan'], [222, 'sky blue'], [248, 'blue'],
-    [268, 'indigo'], [295, 'purple'], [328, 'magenta'], [348, 'pink'], [361, 'red'],
+    [165, 'green'], [185, 'teal'], [200, 'cyan'], [222, 'sky blue'], [248, 'blue'],
+    [268, 'indigo'], [318, 'purple'], [335, 'magenta'], [350, 'pink'], [361, 'red'],
   ];
   let base = 'red';
   for (const [lim, name] of steps) { if (h < lim) { base = name; break; } }
-  if ((base === 'orange' || base === 'golden yellow' || base === 'red') && l < 0.33 && s < 0.7) base = 'brown';
+  if ((base === 'orange' || base === 'golden yellow' || base === 'red') && l < 0.42 && s < 0.75) base = 'brown';
+  if ((base === 'yellow' || base === 'golden yellow' || base === 'yellow-green') && l < 0.36) return 'olive';
   const tone = l < 0.24 ? 'dark ' : (l > 0.74 ? 'light ' : '');
   return tone + base;
 }
 
 // ---------------------------------------------------------------------------
 // البرومبت. كل سطر = جزء واحد من القطعة، يُعرَّف بمكانه أولاً ثم بلونه
-// الحالي. المكان هو المُعرِّف الأساسي لأن نفس اللون قد يظهر على أجزاء
-// أخرى تبقى كما هي. وفي النهاية قائمة تحقّق بكل جزء ولونه النهائي.
+// الحالي، ومعه امتداده. المكان هو المُعرِّف الأساسي لأن نفس اللون قد يظهر
+// على أجزاء أخرى تبقى كما هي.
+//
+// من النتيجة الحقيقية الثانية: النموذج (1) يتجاوز الأجزاء الصغيرة المدفونة
+// بين أجزاء كبيرة، و(2) يترك أثر اللون القديم على أطراف الجزء المتدرّج.
+// لذلك: الجزء الصغير يُعلَّم «تفصيلة صغيرة» ويتصدّر قائمة التحقّق، وكل سطر
+// يحمل امتداد الجزء، وقاعدة التغطية الكاملة تمنع بقاء أي أثر للون القديم.
+const describe = (hex, name) => [colourWord(hex), name ? '"' + name + '"' : '', hex].filter(Boolean).join(' ');
+
 function buildPrompt(changes, keeps, subject) {
   const line = (c, i) => {
-    const now = [colourWord(c.fromHex), c.fromName ? '"' + c.fromName + '"' : '', c.fromHex].filter(Boolean).join(' ');
+    const now = describe(c.fromHex, c.fromName) || 'its current colour';
     const to = [
       colourWord(c.toHex),
       c.toName ? '"' + c.toName + '"' : '',
@@ -177,17 +185,23 @@ function buildPrompt(changes, keeps, subject) {
     ].filter(Boolean).join(' ');
     const part = c.parts || 'this area of the garment';
     const mat = c.material ? ' (' + c.material + ')' : '';
-    return (i + 1) + '. ' + part + mat + ' — now ' + (now || 'its current colour') + ' → becomes ' + to + '.';
+    const reach = c.extent ? ' It covers ' + c.extent.replace(/\.$/, '') + '.' : '';
+    const small = c.size === 'small' ? ' SMALL DETAIL — easy to miss, recolour all of it.' : '';
+    return (i + 1) + '. ' + part + mat + ' — now ' + now + ' → becomes ' + to + '.' + reach + small;
   };
 
   const keepLines = keeps.map((k) => {
-    const now = [colourWord(k.hex), k.name ? '"' + k.name + '"' : '', k.hex].filter(Boolean).join(' ');
+    const now = describe(k.hex, k.name);
     return '- ' + (k.parts || 'the rest of the garment') + ' — stays ' + (now || 'exactly as it is') + '.';
   });
 
-  const check = changes.map((c) => {
-    const was = colourWord(c.fromHex) || 'its old colour';
-    return '- ' + (c.parts || 'recoloured area') + ': was ' + was + ', must now be ' + (colourWord(c.toHex) || c.toHex) + ' (' + c.toHex + ').';
+  // التفاصيل الصغيرة أولاً في قائمة التحقّق: هي ما يُنسى
+  const ordered = changes.slice().sort((a, b) => (a.size === 'small' ? 0 : 1) - (b.size === 'small' ? 0 : 1));
+  const check = ordered.map((c) => {
+    const was = colourWord(c.fromHex);
+    const target = (colourWord(c.toHex) || 'the new colour') + ' (' + c.toHex + ')';
+    return '- ' + (c.parts || 'recoloured area') + ': ' + target + ' over ALL of it' +
+      (was ? ', with no ' + was + ' left anywhere on it — not at its tips, edges or hem' : '') + '.';
   }).concat(keeps.map((k) => '- ' + (k.parts || 'kept area') + ': unchanged, still ' + (colourWord(k.hex) || 'as before') + '.'));
 
   return `This is a real product photograph${subject ? ' — ' + subject : ''}. Recolour ONLY the garment parts listed below and return the same photograph, identical in every other respect.
@@ -196,6 +210,12 @@ RECOLOUR — each line is ONE garment part. Recolour that part and nothing else:
 ${changes.map(line).join('\n')}
 
 All lines apply together, each to the ORIGINAL photograph. The same original colour may also appear on other parts of the garment: those other parts keep their own colour unless they have their own line above. A colour that one line produces never changes which part another line refers to.
+
+COMPLETE COVERAGE:
+- Recolour each listed part all of it: every petal, panel, fold, tip, underside, edge and inner surface, right to where it meets a different part.
+- No trace of a listed part's old colour may remain on it: not at its tips, not along its hem or edges, not in its shadows, not where the fabric turns thin or translucent, not where it shades or fades.
+- A part that shades from one colour into another is recoloured across its whole length, ends included.
+- Small parts count as much as large ones. A part marked SMALL DETAIL must be fully recoloured, including its centre and inner petals.
 
 KEEP EXACTLY AS IT IS:
 ${keepLines.length ? keepLines.join('\n') + '\n' : ''}- The model's face, skin, hair, hands, nails, jewellery and shoes.
@@ -310,6 +330,8 @@ export default async function handler(req, res) {
   const changes = parseList(getField(fields.changes)).slice(0, MAX_CHANGES).map((c) => ({
     parts: str(c && c.parts),
     material: str(c && c.material),
+    size: ['large', 'medium', 'small'].includes(str(c && c.size)) ? str(c.size) : 'medium',
+    extent: str(c && c.extent).slice(0, 160),
     fromName: str(c && c.fromName),
     fromHex: hexOk(str(c && c.fromHex)) ? str(c.fromHex).toUpperCase() : '',
     toHex: str(c && c.toHex).toUpperCase(),
