@@ -125,6 +125,8 @@ const TOOL = {
             parts_ar: { type: 'string', description: 'The same, in Arabic.' },
             material: { type: 'string', description: 'Material, 1 to 3 English words.' },
             trim: { type: 'boolean', description: 'true only for beads, crystals, zips, buttons or metal hardware.' },
+            size: { type: 'string', enum: ['large', 'medium', 'small'], description: 'How much of the garment this zone covers.' },
+            extent: { type: 'string', description: 'Where this zone runs to, English, 4 to 14 words: its ends, tips, inner surfaces.' },
             point: {
               type: 'object',
               description: 'One point well inside this zone, percent 0-100 of width and height.',
@@ -153,6 +155,7 @@ What a zone is:
 - The same colour on two different garment parts is TWO zones. The designer may want the bodice and the skirt in different colours even when they share a colour now. Never merge separate parts into one zone just because they are the same colour.
 - A part that shades from one colour into another (ombre, dip-dye, petal tips darker than the petal) is split where the colour changes: one zone for each colour.
 - Light and shadow never make a new zone.
+- Small parts are zones too: a flower appliqué and its centre, a bow, a strap, piping, a sash, a lining that shows. Do not drop a part because it is small.
 - Give between 3 and 8 zones. Put the largest and most visible parts first.
 
 Never include:
@@ -167,6 +170,8 @@ For every zone give:
 - parts_ar: the same in Arabic, short.
 - material: the material in 1 to 3 English words: "silk organza", "duchess satin", "beaded tulle".
 - trim: true only for beading, crystals, zips, buttons or metal hardware. Otherwise false.
+- size: "large" for a main panel, "medium" for a clear secondary part, "small" for a detail such as an appliqué, flower centre, bow, strap or piping.
+- extent: where this zone reaches, so that none of it is missed, 4 to 14 words: "every petal tip down to the hem of the train", "the whole flower including its inner petals and centre".
 - point: one point that lands well inside this zone, on a clearly visible spot of it, as {"x":..,"y":..} in percent of the image width and height. It places the zone's number on the photograph, so it must sit on this zone and not on a neighbouring one.
 - box: optional. A rough rectangle over this zone, {"x1":..,"y1":..,"x2":..,"y2":..} in percent.
 
@@ -175,7 +180,8 @@ Answer with the tool only.`;
 const JSON_TAIL = 'Return ONLY one JSON object, no markdown fence, no other text:\n' +
   '{"description_ar":"فستان سهرة بلونين","zones":[{"name":"Chartreuse","hex":"#C8D23C",' +
   '"parts":"bodice centre panel","parts_ar":"منتصف الصدر",' +
-  '"material":"silk organza","trim":false,"point":{"x":52,"y":30}}]}';
+  '"material":"silk organza","trim":false,"size":"large","extent":"the whole centre panel from neckline to waist",' +
+  '"point":{"x":52,"y":30}}]}';
 
 // ---------------------------------------------------------------------------
 function normalise(parsed) {
@@ -189,6 +195,8 @@ function normalise(parsed) {
       parts: str(o.parts).slice(0, 160),
       partsAr: str(o.parts_ar).slice(0, 160),
       material: str(o.material).slice(0, 60),
+      size: ['large', 'medium', 'small'].includes(str(o.size).toLowerCase()) ? str(o.size).toLowerCase() : 'medium',
+      extent: str(o.extent).slice(0, 160),
       point: readPoint(o.point),
       box: readBox(o.box),
     };
