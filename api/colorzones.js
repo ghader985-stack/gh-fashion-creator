@@ -1,16 +1,17 @@
 // api/colorzones.js
-// كشف ألوان القطعة في قسم «تغيير الألوان».
+// كشف مناطق الألوان في قسم «تغيير الألوان».
 //
-// المطلوب من هذا المسار شيء واحد: قائمة أقمشة القطعة، لكل قماش لونه واسمه
-// ومكانه. ولا إحداثيات ولا صناديق ولا أقنعة — كل ما يُطلب من النموذج هو
-// نصّ ولون.
+// المنطقة = جزء واحد من القطعة بلون واحد: «الصدر — أخضر مصفر»،
+// «أطراف البتلات — بنفسجي»، «ألواح التنورة الداخلية — أخضر مصفر».
+// نفس اللون على جزأين مختلفين = منطقتان، لأن المصمّمة قد تريد الصدر
+// بلون والتنورة بلون آخر. التقسيم باللون وحده كان يجعل «كل الأخضر» منطقة
+// واحدة على طول الفستان، فلا يمكن تغيير جزء منه.
 //
-// لماذا بهذا الضيق: كل فشل سابق في هذا المسار كان في الهندسة لا في اللون.
-// النموذج يسمّي القماش بدقّة، وأي شيء يتطلّب إحداثيات كان يسقط ويأخذ معه
-// القائمة كلها. فالإحداثي صار اختيارياً بالكامل: إن جاء يُستعمل للأرقام على
-// الصورة، وإن لم يأتِ لا شيء يتعطّل.
+// المطلوب من النموذج نصّ ولون، ونقطة داخل كل منطقة لوضع رقمها. النقطة
+// والصندوق اختياريان: غيابهما لا يُسقط المنطقة. الشرط الوحيد لبقاء المنطقة
+// أن يكون لونها مقروءاً.
 //
-// والقطعة وحدها: لا بشرة ولا شعر ولا خلفية. المصمّمة لا تغيّر لون الحائط.
+// ولا بشرة ولا شعر ولا خلفية. المصمّمة لا تغيّر لون الحائط.
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -23,7 +24,7 @@ export const config = {
 const MODEL = 'claude-sonnet-5';        // نفس موديل التيك باك، مُجرَّب مع الصور
 const MAX_TOKENS = 2000;                // الخرج صغير: نصّ وألوان فقط
 const CALL_TIMEOUT_MS = 55000;          // لكل محاولة على حدة
-const MAX_ZONES = 8;
+const MAX_ZONES = 10;
 
 const pickFile = (f) => (Array.isArray(f) ? f[0] : f) || null;
 const str = (v) => (typeof v === 'string' ? v.trim() : (typeof v === 'number' ? String(v) : ''));
@@ -61,6 +62,23 @@ function readHex(v) {
   return '';
 }
 
+// النقطة اختيارية: {x,y} أو [x,y] أو نصّ، بالمئة أو 0–1
+function readPoint(v) {
+  let x = null;
+  let y = null;
+  if (Array.isArray(v) && v.length >= 2) { x = numOf(v[0]); y = numOf(v[1]); }
+  else if (v && typeof v === 'object') {
+    x = numOf(v.x !== undefined ? v.x : v[0]);
+    y = numOf(v.y !== undefined ? v.y : v[1]);
+  } else if (typeof v === 'string') {
+    const m = (v.match(/-?\d+(?:\.\d+)?/g) || []).map(parseFloat);
+    if (m.length >= 2) { x = m[0]; y = m[1]; }
+  }
+  if (x === null || y === null) return null;
+  if (x <= 1.5 && y <= 1.5) { x *= 100; y *= 100; }
+  return { x: clamp(x), y: clamp(y) };
+}
+
 // الصندوق اختياري بالكامل: أي شكل مقبول، وغيابه لا يسقط المنطقة
 function readBox(v) {
   let a = null;
@@ -90,8 +108,8 @@ function readBox(v) {
 
 // ---------------------------------------------------------------------------
 const TOOL = {
-  name: 'report_fabrics',
-  description: 'Report the fabrics of the garment and their colours.',
+  name: 'report_zones',
+  description: 'Report the colour zones of the garment: one zone per garment part per colour.',
   input_schema: {
     type: 'object',
     properties: {
@@ -103,13 +121,18 @@ const TOOL = {
           properties: {
             name: { type: 'string', description: 'Colour name in English, 1 to 3 words.' },
             hex: { type: 'string', description: 'The colour as #RRGGBB.' },
-            parts: { type: 'string', description: 'Where it sits on the garment, English, 3 to 8 words.' },
+            parts: { type: 'string', description: 'The one garment part this zone covers, English, 2 to 6 words. Unique per zone.' },
             parts_ar: { type: 'string', description: 'The same, in Arabic.' },
             material: { type: 'string', description: 'Material, 1 to 3 English words.' },
             trim: { type: 'boolean', description: 'true only for beads, crystals, zips, buttons or metal hardware.' },
+            point: {
+              type: 'object',
+              description: 'One point well inside this zone, percent 0-100 of width and height.',
+              properties: { x: { type: 'number' }, y: { type: 'number' } },
+            },
             box: {
               type: 'object',
-              description: 'Optional. Rough rectangle over this fabric, percent 0-100.',
+              description: 'Optional. Rough rectangle over this zone, percent 0-100.',
               properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } },
             },
           },
@@ -123,33 +146,36 @@ const TOOL = {
 
 const PROMPT = `Look at this photograph of a garment.
 
-List the FABRICS the garment is made of — one entry per fabric colour that a designer would recolour on its own.
+Split the garment into COLOUR ZONES the way a designer marks up a sketch before recolouring it: one zone for each distinct garment part in one colour.
 
-What counts as one entry:
-- One cloth in one dye is ONE entry, however much the light and shadow change it across the photograph.
-- A cloth that is dip-dyed or ombre, shading from one colour into another, is TWO entries: one for each end of the shading. Do not invent entries for the blend in between.
-- Most gowns have 2 or 3 entries. Never more than 6.
+What a zone is:
+- ONE garment part in ONE colour. Examples: "bodice centre panel — yellow-green", "outer petal ruffles — deep purple", "inner skirt panels — yellow-green", "waist flower appliqué — olive green", "halter strap — navy".
+- The same colour on two different garment parts is TWO zones. The designer may want the bodice and the skirt in different colours even when they share a colour now. Never merge separate parts into one zone just because they are the same colour.
+- A part that shades from one colour into another (ombre, dip-dye, petal tips darker than the petal) is split where the colour changes: one zone for each colour.
+- Light and shadow never make a new zone.
+- Give between 3 and 8 zones. Put the largest and most visible parts first.
 
-What must NOT appear in the list, at all:
+Never include:
 - the model's skin, face, hands or hair
-- the background, the wall, the floor, any prop
-- shadows, highlights or the blended middle of an ombre
+- the background, the wall, the floor, furniture or props
+- shoes or jewellery, unless they are clearly part of the design
 
-For every entry:
-- name: the colour in English, 1 to 3 words, the way a fashion colour card names it: "Magenta Pink", "Deep Navy", "Sage Green".
-- hex: that colour as #RRGGBB, read from a normally lit part of the cloth — not from the highlight and not from the shadow. Be precise: this exact value is shown to the designer and matched to a Pantone.
-- parts: where this fabric sits on the garment, in English, 3 to 8 words naming real garment parts: "right bust panel, centre front ruffles, skirt panels".
-- parts_ar: the same text in Arabic, short.
-- material: the material in 1 to 3 English words: "silk chiffon", "duchess satin", "beaded mesh".
+For every zone give:
+- name: the colour in English, 1 to 3 words, the way a fashion colour card names it: "Chartreuse", "Deep Magenta Purple", "Royal Blue".
+- hex: that colour as #RRGGBB, read from a normally lit spot of that zone — not the highlight, not the shadow. Be precise: this value is shown to the designer and matched to a Pantone.
+- parts: the ONE garment part this zone covers, in English, 2 to 6 words, precise enough that someone could find it without seeing a marker: "bodice centre panel", "outer petal ruffles of the skirt", "inner skirt panels", "train hem". Two zones must never have the same parts text.
+- parts_ar: the same in Arabic, short.
+- material: the material in 1 to 3 English words: "silk organza", "duchess satin", "beaded tulle".
 - trim: true only for beading, crystals, zips, buttons or metal hardware. Otherwise false.
-- box: optional. If you can, a rough rectangle covering where this fabric mostly sits, as {"x1":..,"y1":..,"x2":..,"y2":..} in percent of the image. Leave it out if unsure — it is only used to draw a marker.
+- point: one point that lands well inside this zone, on a clearly visible spot of it, as {"x":..,"y":..} in percent of the image width and height. It places the zone's number on the photograph, so it must sit on this zone and not on a neighbouring one.
+- box: optional. A rough rectangle over this zone, {"x1":..,"y1":..,"x2":..,"y2":..} in percent.
 
 Answer with the tool only.`;
 
 const JSON_TAIL = 'Return ONLY one JSON object, no markdown fence, no other text:\n' +
-  '{"description_ar":"فستان سهرة بلونين","zones":[{"name":"Magenta Pink","hex":"#B02E78",' +
-  '"parts":"bodice, centre ruffles, skirt panels","parts_ar":"الصدر، الكشكشات الأمامية، ألواح التنورة",' +
-  '"material":"duchess satin","trim":false}]}';
+  '{"description_ar":"فستان سهرة بلونين","zones":[{"name":"Chartreuse","hex":"#C8D23C",' +
+  '"parts":"bodice centre panel","parts_ar":"منتصف الصدر",' +
+  '"material":"silk organza","trim":false,"point":{"x":52,"y":30}}]}';
 
 // ---------------------------------------------------------------------------
 function normalise(parsed) {
@@ -163,6 +189,7 @@ function normalise(parsed) {
       parts: str(o.parts).slice(0, 160),
       partsAr: str(o.parts_ar).slice(0, 160),
       material: str(o.material).slice(0, 60),
+      point: readPoint(o.point),
       box: readBox(o.box),
     };
     // الشرط الوحيد للبقاء: لون مقروء. لا إحداثي ولا أي شيء آخر.
