@@ -428,6 +428,8 @@ export default function Home() {
           parts: z.parts || '',
           partsAr: z.partsAr || z.parts || '',
           material: z.material || '',
+          size: z.size || 'medium',
+          extent: z.extent || '',
           point: z.point || null,
           box: z.box || null,
           mode: 'keep',
@@ -530,6 +532,8 @@ export default function Home() {
         return {
           parts: z.parts,
           material: z.material,
+          size: z.size,
+          extent: z.extent,
           fromName: z.nameEn,
           fromHex: z.hex,
           toHex: z.target,
@@ -541,7 +545,7 @@ export default function Home() {
       // القطع اللي بتضلّ متل ما هي تُذكر بالاسم كمان، فالنموذج ما بيلمسها
       const keeps = ccZones
         .filter((z) => (z.kind === 'garment' || z.kind === 'trim') && !ccChangedZones.includes(z))
-        .map((z) => ({ name: z.nameEn, parts: z.parts, material: z.material, hex: z.hex }));
+        .map((z) => ({ name: z.nameEn, parts: z.parts, material: z.material, hex: z.hex, size: z.size }));
 
       const fd = new FormData();
       fd.append('image', await ccBlob(send, 'image/jpeg', 0.94), 'image.jpg');
