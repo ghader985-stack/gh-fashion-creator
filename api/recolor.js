@@ -5,9 +5,13 @@
 // ثانية — التجربة السابقة بيّنت أن الدليل المدهون هو نفسه سبب النتيجة
 // المسطّحة، لأن النموذج يقلّد ما يراه.
 //
-// البديل: وصف دقيق بالنصّ. المناطق تُسمّى بأسماء أجزاء القطعة الحقيقية
-// (جاية من /api/colorzones)، واللون الجديد يُعطى بالاسم والبانتون والهيكس،
-// ويُكتب صراحة ما الذي يجب ألّا يتغيّر.
+// البديل: وصف دقيق بالنصّ في **استدعاء واحد** مهما كان عدد المناطق — كلفة
+// ثابتة للنتيجة. كل منطقة سطر مستقل يبدأ بالجزء ثم لونه الحالي ثم الجديد،
+// والأجزاء التي تبقى تُذكر بأسمائها وألوانها، وفي النهاية قائمة تحقّق.
+//
+// لماذا بهذه الصياغة: أول نتيجة حقيقية على النشرة كانت فوتوغرافية ممتازة
+// لكن النموذج خلط أي جزء يأخذ أي لون، لأن وصف المكانين كان متداخلاً ولم
+// يُذكر ما يبقى. التعريف بالجزء أولاً وذكر ما يبقى يزيلان هذا الالتباس.
 //
 // شكل الاستدعاء هو نفسه المستعمل في «الفلات سكتش» على النشرة:
 // رفع الصورة لـ Replicate ثم predictions مع Prefer: wait.
@@ -22,14 +26,15 @@ export const config = {
 };
 
 // النموذج: سطر واحد.
-//   google/nano-banana-pro   ← الافتراضي، وهو المستعمل أصلاً في الفلات سكتش
-// أي بديل أرخص يُبدَّل من هنا بعد التأكد من اسمه على Replicate.
-const MODEL = 'google/nano-banana-pro';
+//   google/nano-banana-2-lite  ← الافتراضي. مُثبت على حساب Replicate نفسه:
+//                                تنبّؤات ناجحة بكلفة ‎$0.03 للصورة.
+//   google/nano-banana-pro     ← أعلى جودة، ‎$0.15 للصورة.
+const MODEL = 'google/nano-banana-2-lite';
 
 const WAIT_SECONDS = 60;
 const POLL_MS = 2000;
 const TOTAL_TIMEOUT_MS = 270000;
-const MAX_CHANGES = 8;
+const MAX_CHANGES = 8;           // كلها باستدعاء واحد: ‎$0.03 للنتيجة
 
 const RATIOS = [
   ['1:1', 1], ['2:3', 2 / 3], ['3:2', 3 / 2], ['3:4', 3 / 4], ['4:3', 4 / 3],
@@ -113,38 +118,98 @@ async function persist(url) {
 }
 
 // ---------------------------------------------------------------------------
-// البرومبت. ثلاث كتل: شو بيتغيّر، شو ممنوع يتغيّر، وكيف ينحطّ اللون.
+// اسم عائلة اللون بالإنكليزي من الهيكس: «purple»، «yellow-green»، «dark blue».
+// اسم البانتون («Evening Primrose») لا يقول للنموذج ما هو اللون، وهذا يقول.
+function hexRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function colourWord(hex) {
+  const c = hexRgb(hex);
+  if (!c) return '';
+  const r = c[0] / 255;
+  const g = c[1] / 255;
+  const b = c[2] / 255;
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const d = mx - mn;
+  const l = (mx + mn) / 2;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (s < 0.14 || d < 0.07) {
+    if (l < 0.14) return 'black';
+    if (l > 0.9) return 'white';
+    if (l > 0.72) return 'light grey';
+    if (l < 0.32) return 'charcoal';
+    return 'grey';
+  }
+  let h = 0;
+  if (mx === r) h = 60 * (((g - b) / d) % 6);
+  else if (mx === g) h = 60 * ((b - r) / d + 2);
+  else h = 60 * ((r - g) / d + 4);
+  if (h < 0) h += 360;
+  const steps = [
+    [14, 'red'], [38, 'orange'], [50, 'golden yellow'], [62, 'yellow'], [85, 'yellow-green'],
+    [155, 'green'], [178, 'teal'], [198, 'cyan'], [222, 'sky blue'], [248, 'blue'],
+    [268, 'indigo'], [295, 'purple'], [328, 'magenta'], [348, 'pink'], [361, 'red'],
+  ];
+  let base = 'red';
+  for (const [lim, name] of steps) { if (h < lim) { base = name; break; } }
+  if ((base === 'orange' || base === 'golden yellow' || base === 'red') && l < 0.33 && s < 0.7) base = 'brown';
+  const tone = l < 0.24 ? 'dark ' : (l > 0.74 ? 'light ' : '');
+  return tone + base;
+}
+
+// ---------------------------------------------------------------------------
+// البرومبت. كل سطر = جزء واحد من القطعة، يُعرَّف بمكانه أولاً ثم بلونه
+// الحالي. المكان هو المُعرِّف الأساسي لأن نفس اللون قد يظهر على أجزاء
+// أخرى تبقى كما هي. وفي النهاية قائمة تحقّق بكل جزء ولونه النهائي.
 function buildPrompt(changes, keeps, subject) {
-  const change = changes.map((c, i) => {
-    const where = c.parts ? ' — ' + c.parts + ' — ' : ' ';
-    const what = [c.fromName ? 'The ' + c.fromName.toLowerCase() : 'The', c.material || 'fabric'].join(' ');
+  const line = (c, i) => {
+    const now = [colourWord(c.fromHex), c.fromName ? '"' + c.fromName + '"' : '', c.fromHex].filter(Boolean).join(' ');
     const to = [
-      c.toName || '',
-      c.toCode ? '(PANTONE ' + c.toCode + ')' : '',
+      colourWord(c.toHex),
+      c.toName ? '"' + c.toName + '"' : '',
+      c.toCode ? 'PANTONE ' + c.toCode : '',
       c.toHex,
     ].filter(Boolean).join(' ');
-    return (i + 1) + '. ' + what + where + 'becomes ' + to + '. Apply it to every part of that fabric wherever it appears in the photograph, including the parts deep in a fold and the parts in bright highlight.';
-  }).join('\n');
+    const part = c.parts || 'this area of the garment';
+    const mat = c.material ? ' (' + c.material + ')' : '';
+    return (i + 1) + '. ' + part + mat + ' — now ' + (now || 'its current colour') + ' → becomes ' + to + '.';
+  };
 
-  const keep = keeps.length
-    ? keeps.map((k) => '- ' + (k.name ? k.name + ' ' : '') + (k.material || 'area') + (k.parts ? ' (' + k.parts + ')' : '') + ': keeps its original colour exactly.').join('\n') + '\n'
-    : '';
+  const keepLines = keeps.map((k) => {
+    const now = [colourWord(k.hex), k.name ? '"' + k.name + '"' : '', k.hex].filter(Boolean).join(' ');
+    return '- ' + (k.parts || 'the rest of the garment') + ' — stays ' + (now || 'exactly as it is') + '.';
+  });
 
-  return `This is a real product photograph${subject ? ' — ' + subject : ''}. Recolour only the fabrics listed below and return the same photograph, unchanged in every other respect.
+  const check = changes.map((c) => {
+    const was = colourWord(c.fromHex) || 'its old colour';
+    return '- ' + (c.parts || 'recoloured area') + ': was ' + was + ', must now be ' + (colourWord(c.toHex) || c.toHex) + ' (' + c.toHex + ').';
+  }).concat(keeps.map((k) => '- ' + (k.parts || 'kept area') + ': unchanged, still ' + (colourWord(k.hex) || 'as before') + '.'));
 
-RECOLOUR:
-${change}
+  return `This is a real product photograph${subject ? ' — ' + subject : ''}. Recolour ONLY the garment parts listed below and return the same photograph, identical in every other respect.
 
-DO NOT CHANGE:
-${keep}- The model's face, skin, hair, hands, nails and jewellery.
-- The background, the wall, the floor and the light falling on them.
-- The pose, the framing, the crop, the camera angle, the focus, the depth of field and the grain of the photograph.
-- The cut of the garment: no seam, ruffle, pleat, fold, dart, strap or edge moves, and nothing is added or removed.
+RECOLOUR — each line is ONE garment part. Recolour that part and nothing else:
+${changes.map(line).join('\n')}
+
+All lines apply together, each to the ORIGINAL photograph. The same original colour may also appear on other parts of the garment: those other parts keep their own colour unless they have their own line above. A colour that one line produces never changes which part another line refers to.
+
+KEEP EXACTLY AS IT IS:
+${keepLines.length ? keepLines.join('\n') + '\n' : ''}- The model's face, skin, hair, hands, nails, jewellery and shoes.
+- The background, the wall, the floor, the furniture and the light on them.
+- The pose, the framing, the crop, the camera angle, the focus and the grain.
+- The cut of the garment: no seam, ruffle, petal, pleat, fold or edge moves, and nothing is added or removed.
 
 HOW TO APPLY THE COLOUR:
-Replace the hue only. Inside each recoloured fabric every light and dark passage stays exactly where it is: the highlights, the shading inside the folds, the sheen of the material, the weave, the seams and topstitching, and any beading, sequins, crystals, lace or embroidery. A fold that was dark stays dark, in the new colour. A beaded panel stays beaded, in the new colour. The result must read as the same cloth dyed differently and photographed under the same light, never as flat paint laid over the picture.
+Replace the hue only. Inside each recoloured part every light and dark passage stays exactly where it is: highlights, the shading inside folds, the sheen and translucency of the material, the weave, seams and stitching, beading and embroidery. A fold that was dark stays dark, in the new colour. Where one part meets another, the boundary stays exactly where it is in the original. The result must read as the same cloth dyed differently and photographed under the same light — never as flat paint.
 
-In the areas that are lit normally, the fabric must match the given hex value.
+In normally lit areas each recoloured part must match its given hex.
+
+FINAL CHECK — before answering, confirm every line is true:
+${check.join('\n')}
 
 Output the finished photograph only, at the same size and framing as the input.`;
 }
@@ -162,6 +227,51 @@ async function settle(token, prediction, signal, deadline) {
     p = await r.json();
   }
   return { prediction: p };
+}
+
+// ---------------------------------------------------------------------------
+// استدعاء واحد للنموذج على صورة واحدة. يرجع { url } أو { error, status }.
+// الطلب المرفوض قبل إنشاء الـprediction (400/422) لا يُحاسَب عليه رصيد.
+async function runOne(token, imageUrl, prompt, w, h, signal, deadline) {
+  // الأول بنفس شكل الاستدعاء الشغّال في «الفلات سكتش»، والثاني أضيق منه
+  const attempts = [
+    { prompt, image_input: [imageUrl], aspect_ratio: nearestRatio(w, h), output_format: 'jpg' },
+    { prompt, image_input: [imageUrl] },
+  ];
+
+  let prediction = null;
+  let lastStatus = 0;
+  for (const input of attempts) {
+    const r = await fetch('https://api.replicate.com/v1/models/' + MODEL + '/predictions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait=' + WAIT_SECONDS },
+      signal,
+      body: JSON.stringify({ input }),
+    });
+    if (r.ok) { prediction = await r.json(); break; }
+    lastStatus = r.status;
+    let detail = '';
+    try { detail = (await r.text()).slice(0, 300); } catch (e) { detail = ''; }
+    if (typeof console !== 'undefined') console.warn('[gh] recolor status', r.status, detail);
+    if (r.status === 402) return { status: 402, error: 'رصيد Replicate خلص' };
+    if (r.status !== 400 && r.status !== 422) break;
+  }
+  if (!prediction) return { status: 502, error: 'تعذّر إنشاء النتيجة (' + (lastStatus || 502) + ')' };
+
+  const done = await settle(token, prediction, signal, deadline);
+  if (done.timeout) return { status: 504, error: 'انتهت مهلة الرسم' };
+  if (done.failed) {
+    if (typeof console !== 'undefined') console.warn('[gh] recolor poll', done.failed);
+    return { status: 502, error: 'تعذّر إنشاء النتيجة' };
+  }
+  const p = done.prediction;
+  if (!p || p.status !== 'succeeded') {
+    if (typeof console !== 'undefined') console.warn('[gh] recolor end', p && p.status, p && p.error);
+    return { status: 502, error: 'تعذّر إنشاء النتيجة' };
+  }
+  const out = Array.isArray(p.output) ? p.output[0] : p.output;
+  if (!out || typeof out !== 'string') return { status: 502, error: 'النموذج ما رجّع صورة' };
+  return { url: out };
 }
 
 // ---------------------------------------------------------------------------
@@ -195,21 +305,25 @@ export default async function handler(req, res) {
     } catch (e) { return []; }
   };
 
+  const hexOk = (h) => /^#[0-9a-fA-F]{6}$/.test(h);
+
   const changes = parseList(getField(fields.changes)).slice(0, MAX_CHANGES).map((c) => ({
     parts: str(c && c.parts),
     material: str(c && c.material),
     fromName: str(c && c.fromName),
-    toHex: str(c && c.toHex),
+    fromHex: hexOk(str(c && c.fromHex)) ? str(c.fromHex).toUpperCase() : '',
+    toHex: str(c && c.toHex).toUpperCase(),
     toName: str(c && c.toName),
     toCode: str(c && c.toCode),
-  })).filter((c) => /^#[0-9a-fA-F]{6}$/.test(c.toHex));
+  })).filter((c) => hexOk(c.toHex));
 
   if (!changes.length) return res.status(400).json({ error: 'ما في تغيير ألوان مطلوب' });
 
-  const keeps = parseList(getField(fields.keeps)).slice(0, 8).map((k) => ({
+  const keeps = parseList(getField(fields.keeps)).slice(0, 10).map((k) => ({
     name: str(k && k.name),
     parts: str(k && k.parts),
     material: str(k && k.material),
+    hex: hexOk(str(k && k.hex)) ? str(k.hex).toUpperCase() : '',
   }));
 
   const subject = str(getField(fields.subject)).slice(0, 200);
@@ -230,73 +344,12 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: 'تعذّر رفع الصورة لخدمة الرسم' });
     }
 
-    const prompt = buildPrompt(changes, keeps, subject);
-
-    // الشكل الأول هو المطلوب، والثاني هو الشكل المُثبت بالإنتاج.
-    // الطلب المرفوض قبل إنشاء الـprediction لا يُحاسَب عليه رصيد.
-    // المحاولة الأولى شكلها مطابق حرفياً للاستدعاء الشغّال في «الفلات سكتش»
-    // على النشرة: prompt + image_input + aspect_ratio + output_format، بلا
-    // أي حقل غير مُجرَّب. والثانية أضيق منها إن رُفض حقل.
-    const attempts = [
-      { prompt, image_input: [source], aspect_ratio: nearestRatio(w, h), output_format: 'jpg' },
-      { prompt, image_input: [source] },
-    ];
-
-    let prediction = null;
-    let lastStatus = 0;
-    let lastDetail = '';
-
-    for (const input of attempts) {
-      const r = await fetch('https://api.replicate.com/v1/models/' + MODEL + '/predictions', {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer ' + token,
-          'Content-Type': 'application/json',
-          Prefer: 'wait=' + WAIT_SECONDS,
-        },
-        signal: ctrl.signal,
-        body: JSON.stringify({ input }),
-      });
-
-      if (r.ok) { prediction = await r.json(); break; }
-
-      lastStatus = r.status;
-      try { lastDetail = (await r.text()).slice(0, 300); } catch (e) { lastDetail = ''; }
-      if (typeof console !== 'undefined') console.warn('[gh] recolor status', r.status, lastDetail);
-      if (r.status === 402) {
-        clearTimeout(timer);
-        return res.status(402).json({ error: 'رصيد Replicate خلص' });
-      }
-      if (r.status !== 400 && r.status !== 422) break;
-    }
-
-    if (!prediction) {
-      clearTimeout(timer);
-      return res.status(502).json({ error: 'تعذّر إنشاء النتيجة (' + (lastStatus || 502) + ')' });
-    }
-
-    const done = await settle(token, prediction, ctrl.signal, deadline);
+    // استدعاء واحد لكل التغييرات: كلفة ثابتة مهما كان عدد المناطق
+    const one = await runOne(token, source, buildPrompt(changes, keeps, subject), w, h, ctrl.signal, deadline);
     clearTimeout(timer);
+    if (!one.url) return res.status(one.status || 502).json({ error: one.error });
 
-    if (done.timeout) return res.status(504).json({ error: 'انتهت مهلة الرسم' });
-    if (done.failed) {
-      if (typeof console !== 'undefined') console.warn('[gh] recolor poll', done.failed);
-      return res.status(502).json({ error: 'تعذّر إنشاء النتيجة' });
-    }
-
-    const p = done.prediction;
-    if (!p || p.status !== 'succeeded') {
-      if (typeof console !== 'undefined') console.warn('[gh] recolor end', p && p.status, p && p.error);
-      return res.status(502).json({ error: 'تعذّر إنشاء النتيجة' });
-    }
-
-    const out = Array.isArray(p.output) ? p.output[0] : p.output;
-    if (!out || typeof out !== 'string') {
-      if (typeof console !== 'undefined') console.warn('[gh] recolor output', typeof out);
-      return res.status(502).json({ error: 'النموذج ما رجّع صورة' });
-    }
-
-    return res.status(200).json({ url: await persist(out) });
+    return res.status(200).json({ url: await persist(one.url) });
   } catch (e) {
     clearTimeout(timer);
     const aborted = e && e.name === 'AbortError';
