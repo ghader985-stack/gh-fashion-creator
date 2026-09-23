@@ -428,12 +428,13 @@ export default function Home() {
           parts: z.parts || '',
           partsAr: z.partsAr || z.parts || '',
           material: z.material || '',
+          point: z.point || null,
           box: z.box || null,
           mode: 'keep',
           target: z.hex,
         };
       });
-      if (!zones.some((z) => z.box)) {
+      if (!zones.some((z) => z.point || z.box)) {
         setCcNote('النموذج ما حدّد أماكن على الصورة، فالأرقام ما رح تظهر عليها — تغيير الألوان شغّال عادي');
       }
 
@@ -530,6 +531,7 @@ export default function Home() {
           parts: z.parts,
           material: z.material,
           fromName: z.nameEn,
+          fromHex: z.hex,
           toHex: z.target,
           toName: pt ? ccPtName(pt.name) : '',
           toCode: pt ? pt.code : '',
@@ -539,7 +541,7 @@ export default function Home() {
       // القطع اللي بتضلّ متل ما هي تُذكر بالاسم كمان، فالنموذج ما بيلمسها
       const keeps = ccZones
         .filter((z) => (z.kind === 'garment' || z.kind === 'trim') && !ccChangedZones.includes(z))
-        .map((z) => ({ name: z.nameEn, parts: z.parts, material: z.material }));
+        .map((z) => ({ name: z.nameEn, parts: z.parts, material: z.material, hex: z.hex }));
 
       const fd = new FormData();
       fd.append('image', await ccBlob(send, 'image/jpeg', 0.94), 'image.jpg');
@@ -1920,9 +1922,11 @@ function CcPreview({ data, zones, hover }) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     zones.forEach((z, i) => {
-      if (!z.box) return;
-      const x = ((z.box.x1 + z.box.x2) / 200) * c.width;
-      const y = ((z.box.y1 + z.box.y2) / 200) * c.height;
+      // النقطة جوّا المنطقة أولاً؛ مركز الصندوق بس إذا ما في نقطة
+      const p = z.point || (z.box ? { x: (z.box.x1 + z.box.x2) / 2, y: (z.box.y1 + z.box.y2) / 2 } : null);
+      if (!p) return;
+      const x = (p.x / 100) * c.width;
+      const y = (p.y / 100) * c.height;
       const on = i === hover;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
