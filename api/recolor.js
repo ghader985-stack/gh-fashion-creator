@@ -174,7 +174,7 @@ function colourWord(hex) {
 // يحمل امتداد الجزء، وقاعدة التغطية الكاملة تمنع بقاء أي أثر للون القديم.
 const describe = (hex, name) => [colourWord(hex), name ? '"' + name + '"' : '', hex].filter(Boolean).join(' ');
 
-function buildPrompt(changes, keeps, subject) {
+function buildPrompt(changes, keeps, subject, closeup, refParts) {
   const line = (c, i) => {
     const now = describe(c.fromHex, c.fromName) || 'its current colour';
     const to = [
@@ -204,7 +204,18 @@ function buildPrompt(changes, keeps, subject) {
       (was ? ', with no ' + was + ' left anywhere on it — not at its tips, edges or hem' : '') + '.';
   }).concat(keeps.map((k) => '- ' + (k.parts || 'kept area') + ': unchanged, still ' + (colourWord(k.hex) || 'as before') + '.'));
 
-  return `This is a real product photograph${subject ? ' — ' + subject : ''}. Recolour ONLY the garment parts listed below and return the same photograph, identical in every other respect.
+  const opening = closeup
+    ? 'This is a close-up cut out of a real garment photograph. The part named below fills much of this close-up. Recolour ALL of it — every petal, filament, stamen, bead, fold and edge of it — and return the same close-up, identical in every other respect, at exactly the same framing so it can be placed back into the full photograph.'
+    : 'This is a real product photograph' + (subject ? ' — ' + subject : '') + '. Recolour ONLY the garment parts listed below and return the same photograph, identical in every other respect.';
+
+  // صور المرجع: قصّات مكبّرة من الصورة نفسها للأجزاء الصغيرة
+  const refNote = (refParts && refParts.length)
+    ? '\n\nREFERENCE CLOSE-UPS: image 1 is the photograph to edit and to return. ' +
+      refParts.map((pt, i) => 'Image ' + (i + 2) + ' is an enlarged close-up cut from image 1 showing the ' + pt).join('. ') +
+      '. They are there only so you can see those small parts clearly: recolour those parts in image 1 exactly as listed, every filament, stamen, petal and edge of them. Do not return or paste the close-ups; return image 1 only.'
+    : '';
+
+  return `${opening}${refNote}
 
 RECOLOUR — each line is ONE garment part. Recolour that part and nothing else:
 ${changes.map(line).join('\n')}
@@ -252,11 +263,12 @@ async function settle(token, prediction, signal, deadline) {
 // ---------------------------------------------------------------------------
 // استدعاء واحد للنموذج على صورة واحدة. يرجع { url } أو { error, status }.
 // الطلب المرفوض قبل إنشاء الـprediction (400/422) لا يُحاسَب عليه رصيد.
-async function runOne(token, imageUrl, prompt, w, h, signal, deadline) {
+async function runOne(token, imageUrl, prompt, w, h, signal, deadline, refs) {
+  const images = [imageUrl].concat(refs || []);
   // الأول بنفس شكل الاستدعاء الشغّال في «الفلات سكتش»، والثاني أضيق منه
   const attempts = [
-    { prompt, image_input: [imageUrl], aspect_ratio: nearestRatio(w, h), output_format: 'jpg' },
-    { prompt, image_input: [imageUrl] },
+    { prompt, image_input: images, aspect_ratio: nearestRatio(w, h), output_format: 'jpg' },
+    { prompt, image_input: images },
   ];
 
   let prediction = null;
@@ -316,6 +328,11 @@ export default async function handler(req, res) {
   }
 
   const image = pickFile(files.image);
+  // حتى قصّتين مرجع للأجزاء الصغيرة، بنفس الطلب — بلا استدعاء زيادة
+  const refFiles = [files.ref0, files.ref1].map(pickFile).filter(Boolean);
+  let refParts = [];
+  try { refParts = JSON.parse(getField(fields.refParts) || '[]'); } catch (e) { refParts = []; }
+  refParts = (Array.isArray(refParts) ? refParts : []).map(str).slice(0, refFiles.length);
   if (!image) return res.status(400).json({ error: 'الصورة مطلوبة' });
 
   const parseList = (raw) => {
@@ -349,6 +366,7 @@ export default async function handler(req, res) {
   }));
 
   const subject = str(getField(fields.subject)).slice(0, 200);
+  const closeup = getField(fields.detail) === '1';
   const w = Number(getField(fields.w)) || 0;
   const h = Number(getField(fields.h)) || 0;
 
@@ -367,7 +385,14 @@ export default async function handler(req, res) {
     }
 
     // استدعاء واحد لكل التغييرات: كلفة ثابتة مهما كان عدد المناطق
-    const one = await runOne(token, source, buildPrompt(changes, keeps, subject), w, h, ctrl.signal, deadline);
+    const refs = [];
+    for (const f of refFiles) {
+      const rb = fs.readFileSync(f.filepath);
+      const u = await uploadToReplicate(rb, detectImageType(rb), token, ctrl.signal);
+      if (u) refs.push(u);
+    }
+    const parts = refs.length ? refParts.slice(0, refs.length) : [];
+    const one = await runOne(token, source, buildPrompt(changes, keeps, subject, closeup, parts), w, h, ctrl.signal, deadline, refs);
     clearTimeout(timer);
     if (!one.url) return res.status(one.status || 502).json({ error: one.error });
 
