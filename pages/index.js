@@ -527,7 +527,7 @@ export default function Home() {
     try {
       const send = ccScaled(ccData.full, CC_SEND_MAX);
 
-      const changes = ccChangedZones.map((z) => {
+      const toChange = (z) => {
         const pt = nearestPantone(z.target);
         return {
           parts: z.parts,
@@ -540,7 +540,8 @@ export default function Home() {
           toName: pt ? ccPtName(pt.name) : '',
           toCode: pt ? pt.code : '',
         };
-      });
+      };
+      const changes = ccChangedZones.map(toChange);
 
       // القطع اللي بتضلّ متل ما هي تُذكر بالاسم كمان، فالنموذج ما بيلمسها
       const keeps = ccZones
@@ -555,6 +556,17 @@ export default function Home() {
       fd.append('w', String(send.width));
       fd.append('h', String(send.height));
 
+      // الأجزاء الصغيرة: قصّة مكبّرة من الصورة الأصلية ترافق الطلب نفسه،
+      // فيراها النموذج كبيرة وهو يرسم. ولا استدعاء زيادة.
+      const smallRefs = ccDetailGroups(
+        ccChangedZones.filter((z) => z.size === 'small' && (z.box || z.point)), send.width, send.height);
+      for (let i = 0; i < smallRefs.length; i++) {
+        fd.append('ref' + i, await ccBlob(ccCropCanvas(send, smallRefs[i].r), 'image/jpeg', 0.92), 'ref' + i + '.jpg');
+      }
+      if (smallRefs.length) {
+        fd.append('refParts', JSON.stringify(smallRefs.map((g) => g.zones.map((z) => z.parts).join(' and '))));
+      }
+
       const r = await fetch('/api/recolor', { method: 'POST', body: fd });
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
@@ -562,10 +574,45 @@ export default function Home() {
         throw tpUserError((d && d.error) || ('تعذّر الرسم (' + r.status + ') — جرّبي مرة ثانية'));
       }
 
+      // مرور التفاصيل: كل جزء صغير اتغيّر بينقصّ وبينرسم لحاله، وبيرجع لمكانه.
+      // أي فشل هون ما بيضيّع النتيجة الأساسية.
+      let finalUrl = d.url;
+      const smalls = ccChangedZones.filter((z) => z.size === 'small' && (z.box || z.point));
+      if (CC_DETAIL_PASS && smalls.length) {
+        setCcProgress('جارٍ رسم التفاصيل الصغيرة…');
+        try {
+          const base = await ccLoadCanvas(proxied(d.url));
+          let done = 0;
+          for (const g of ccDetailGroups(smalls, base.width, base.height)) {
+            try {
+              const crop = ccCropCanvas(base, g.r);
+              const fdd = new FormData();
+              fdd.append('image', await ccBlob(crop, 'image/jpeg', 0.95), 'detail.jpg');
+              fdd.append('changes', JSON.stringify(g.zones.map(toChange)));
+              fdd.append('keeps', '[]');
+              fdd.append('detail', '1');
+              fdd.append('w', String(g.r.w));
+              fdd.append('h', String(g.r.h));
+              const rd = await fetch('/api/recolor', { method: 'POST', body: fdd });
+              let dd = null;
+              try { dd = await rd.json(); } catch (e) { dd = null; }
+              if (!rd.ok || !dd || !dd.url) continue;
+              ccFeatherPaste(base, await ccLoadCanvas(proxied(dd.url)), g.r);
+              done += 1;
+            } catch (e) {
+              if (typeof console !== 'undefined') console.warn('[gh] cc detail', e && e.message);
+            }
+          }
+          if (done) finalUrl = URL.createObjectURL(await ccBlob(base, 'image/jpeg', 0.95));
+        } catch (e) {
+          if (typeof console !== 'undefined') console.warn('[gh] cc detail base', e && e.message);
+        }
+      }
+
       setCcResults((list) => [{
         id: 'cc' + Date.now(),
         createdAt: Date.now(),
-        url: d.url,
+        url: finalUrl,
         dots: ccChangedZones.map((z) => z.target),
       }].concat(list));
       ccSpend(CC_CREDITS_PER_IMAGE);
@@ -1678,6 +1725,14 @@ const CC_CREDITS_PER_IMAGE = 2;
 const CC_SAMPLE_R = 0.012;       // نصف قطر قراءة اللون، نسبة من أصغر ضلع
 const CC_CLASH_DE = 22;          // تحت هذا الفرق تظهر المنطقتان بلون واحد
 
+// مرور التفاصيل: الجزء الصغير يُقصّ ويُرسم لحاله ثم يُعاد لمكانه.
+// النموذج يتجاوز التفاصيل الصغيرة في الصورة الكاملة، ويراها في القصّة كبيرة.
+const CC_DETAIL_PASS = false;    // مرور منفصل = استدعاء زيادة. البديل المجاني: قصّات مرجع بنفس الطلب
+const CC_DETAIL_MAX = 2;         // سقف القصّات للنتيجة: كل قصّة استدعاء ‎$0.03
+const CC_DETAIL_PAD = 1.8;       // ضلع القصّة = أكبر ضلع للجزء × هذا
+const CC_DETAIL_MIN = 0.14;      // وأصغر ضلع مسموح، من أصغر ضلع للصورة
+const CC_DETAIL_FEATHER = 0.2;   // عرض الحافة الناعمة من ضلع القصّة
+
 const CC_KIND_AR = {
   garment: 'قماش',
   trim: 'إكسسوار',
@@ -1807,6 +1862,93 @@ function ccBlob(canvas, type, quality) {
 // ---------------------------------------------------------------------------
 // القطع الصغيرة (SLIC)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// مرور التفاصيل: قصّ مربّع حول الجزء الصغير، ولصق ناعم الحواف
+// ---------------------------------------------------------------------------
+function ccLoadCanvas(src) {
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = () => {
+      const c = tpCanvas(im.naturalWidth, im.naturalHeight);
+      c.getContext('2d').drawImage(im, 0, 0);
+      resolve(c);
+    };
+    im.onerror = () => reject(new Error('تعذّر تحميل الصورة'));
+    im.src = src;
+  });
+}
+
+// مربّع بالبكسل حول المنطقة، داخل حدود الصورة
+function ccDetailRect(z, W, H) {
+  const m = Math.min(W, H);
+  let cx;
+  let cy;
+  let side;
+  if (z.box) {
+    const bw = ((z.box.x2 - z.box.x1) / 100) * W;
+    const bh = ((z.box.y2 - z.box.y1) / 100) * H;
+    cx = ((z.box.x1 + z.box.x2) / 200) * W;
+    cy = ((z.box.y1 + z.box.y2) / 200) * H;
+    side = Math.max(bw, bh) * CC_DETAIL_PAD;
+  } else if (z.point) {
+    cx = (z.point.x / 100) * W;
+    cy = (z.point.y / 100) * H;
+    side = 0;
+  } else {
+    return null;
+  }
+  side = Math.round(Math.max(m * CC_DETAIL_MIN, Math.min(m * 0.6, side)));
+  const x = Math.round(Math.max(0, Math.min(W - side, cx - side / 2)));
+  const y = Math.round(Math.max(0, Math.min(H - side, cy - side / 2)));
+  return { x, y, w: Math.min(side, W), h: Math.min(side, H) };
+}
+
+function ccCropCanvas(src, r) {
+  const c = tpCanvas(r.w, r.h);
+  c.getContext('2d').drawImage(src, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+  return c;
+}
+
+// لصق القصّة المرسومة فوق النتيجة بحافة متدرّجة، فلا يظهر خط القصّ
+function ccFeatherPaste(base, patch, r) {
+  const t = tpCanvas(r.w, r.h);
+  const tc = t.getContext('2d');
+  tc.imageSmoothingQuality = 'high';
+  tc.drawImage(patch, 0, 0, r.w, r.h);
+  const bctx = base.getContext('2d');
+  const B = bctx.getImageData(r.x, r.y, r.w, r.h);
+  const P = tc.getImageData(0, 0, r.w, r.h).data;
+  const band = Math.max(2, Math.min(r.w, r.h) * CC_DETAIL_FEATHER);
+  for (let y = 0; y < r.h; y++) {
+    const dy = Math.min(y, r.h - 1 - y) / band;
+    for (let x = 0; x < r.w; x++) {
+      let a = Math.min(1, Math.min(Math.min(x, r.w - 1 - x) / band, dy));
+      a = a * a * (3 - 2 * a);
+      const i = (y * r.w + x) * 4;
+      B.data[i] = B.data[i] * (1 - a) + P[i] * a;
+      B.data[i + 1] = B.data[i + 1] * (1 - a) + P[i + 1] * a;
+      B.data[i + 2] = B.data[i + 2] * (1 - a) + P[i + 2] * a;
+    }
+  }
+  bctx.putImageData(B, r.x, r.y);
+}
+
+// تجميع الأجزاء الصغيرة المتجاورة في قصّة واحدة، فلا تتكرّر الكلفة
+function ccDetailGroups(smalls, W, H) {
+  const groups = [];
+  smalls.forEach((z) => {
+    const r = ccDetailRect(z, W, H);
+    if (!r) return;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    const g = groups.find((q) => cx >= q.r.x && cx <= q.r.x + q.r.w && cy >= q.r.y && cy <= q.r.y + q.r.h);
+    if (g) g.zones.push(z);
+    else groups.push({ r, zones: [z] });
+  });
+  return groups.slice(0, CC_DETAIL_MAX);
+}
+
 // ---------------------------------------------------------------------------
 // مختار اللون: بحث بانتون + مربّع تشبّع/إضاءة + شريط درجة + أقرب ثلاثة
 // ---------------------------------------------------------------------------
