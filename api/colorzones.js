@@ -173,7 +173,7 @@ For every zone give:
 - size: "large" for a main panel, "medium" for a clear secondary part, "small" for a detail such as an appliqué, flower centre, bow, strap or piping.
 - extent: where this zone reaches, so that none of it is missed, 4 to 14 words: "every petal tip down to the hem of the train", "the whole flower including its inner petals and centre".
 - point: one point that lands well inside this zone, on a clearly visible spot of it, as {"x":..,"y":..} in percent of the image width and height. It places the zone's number on the photograph, so it must sit on this zone and not on a neighbouring one.
-- box: optional. A rough rectangle over this zone, {"x1":..,"y1":..,"x2":..,"y2":..} in percent.
+- box: the rectangle over this zone, {"x1":..,"y1":..,"x2":..,"y2":..} in percent. REQUIRED for small zones, and TIGHT around the part: it is used to cut out a close-up of it.
 
 Answer with the tool only.`;
 
