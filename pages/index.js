@@ -1719,7 +1719,7 @@ function clusterColors(points, k) {
 
 const CC_SRC_MAX = 2400;         // دقّة الصورة الأصلية في الذاكرة
 const CC_VIEW_MAX = 1000;        // دقّة المعاينة وقراءة الألوان
-const CC_ANALYSIS_MAX = 1100;    // دقّة الصورة المرسَلة للتحليل
+const CC_ANALYSIS_MAX = 1000;    // دقّة الصورة المرسَلة للتحليل
 const CC_SEND_MAX = 1800;        // دقّة الصورة المرسَلة لنموذج الرسم
 const CC_CREDITS_PER_IMAGE = 2;
 const CC_SAMPLE_R = 0.012;       // نصف قطر قراءة اللون، نسبة من أصغر ضلع
