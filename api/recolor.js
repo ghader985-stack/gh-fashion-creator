@@ -172,7 +172,6 @@ function colourWord(hex) {
 // بين أجزاء كبيرة، و(2) يترك أثر اللون القديم على أطراف الجزء المتدرّج.
 // لذلك: الجزء الصغير يُعلَّم «تفصيلة صغيرة» ويتصدّر قائمة التحقّق، وكل سطر
 // يحمل امتداد الجزء، وقاعدة التغطية الكاملة تمنع بقاء أي أثر للون القديم.
-const describe = (hex, name) => [colourWord(hex), name ? '"' + name + '"' : '', hex].filter(Boolean).join(' ');
 
 // LAB للمقارنة: درجتان من نفس القماش (مضوّية ومظلّلة) قريبتان بالصبغة
 function hexLab(hex) {
@@ -212,94 +211,57 @@ function groupChanges(changes, keeps) {
   return groups;
 }
 
+// البرومبت: قصير وبصيغة أمر.
+//
+// أربع نتائج حقيقية بـ lite والبرومبت طويل ومليء بالمنع («لا تغيّري»، «قائمة
+// ما يبقى»، «قائمة تحقّق») — وكل مرة ترك النموذج أجزاء بلا تلوين. نموذج
+// التعديل يقرأ كثرة المنع كتحذير فيعدّل أقل. البرومبت صار: ماذا يتلوّن،
+// سطراً لكل مجموعة، ثم جملة واحدة لما يبقى.
 function buildPrompt(changes, keeps, subject, closeup, refParts) {
-  const line = (c, i) => {
-    const now = describe(c.fromHex, c.fromName) || 'its current colour';
-    const to = [
-      colourWord(c.toHex),
-      c.toName ? '"' + c.toName + '"' : '',
-      c.toCode ? 'PANTONE ' + c.toCode : '',
-      c.toHex,
-    ].filter(Boolean).join(' ');
-    const part = c.parts || 'this area of the garment';
-    const mat = c.material ? ' (' + c.material + ')' : '';
-    const reach = c.extent ? ' It covers ' + c.extent.replace(/\.$/, '') + '.' : '';
-    const small = c.size === 'small'
-      ? ' SMALL DETAIL — easy to miss. Change every ' + (colourWord(c.fromHex) || 'listed-colour') +
-        ' area of it; any other colour inside it (a centre, stamens, veins) keeps its own colour unless it has its own line.'
-      : '';
-    return (i + 1) + '. ' + part + mat + ' — now ' + now + ' → becomes ' + to + '.' + reach + small;
-  };
+  const now = (hex, name) => [colourWord(hex), name ? '"' + name + '"' : '', hex].filter(Boolean).join(' ');
+  const target = (c) => [
+    colourWord(c.toHex),
+    c.toHex,
+    c.toName ? '(' + (c.toCode ? 'PANTONE ' + c.toCode + ' ' : '') + c.toName + ')' : '',
+  ].filter(Boolean).join(' ');
 
-  const keepLines = keeps.map((k) => {
-    const now = describe(k.hex, k.name);
-    return '- ' + (k.parts || 'the rest of the garment') + ' — stays ' + (now || 'exactly as it is') + '.';
+  const lines = groupChanges(changes, keeps).map((g, i) => {
+    const c = g.items[0];
+    const names = g.items.map((x) => x.parts).filter(Boolean);
+    const parts = names.length ? names.join(', plus the ') : 'listed area';
+    const smalls = g.items.filter((x) => x.size === 'small');
+    let small = '';
+    if (smalls.length === g.items.length) {
+      small = ' — a small detail, do not skip it; change only its ' + (colourWord(c.fromHex) || 'listed-colour') + ' areas';
+    } else if (smalls.length) {
+      small = ' — the ' + smalls.map((x) => x.parts).join(' and ') + ' ' + (smalls.length > 1 ? 'are small details' : 'is a small detail') + ', do not skip ' + (smalls.length > 1 ? 'them' : 'it');
+    }
+    if (g.exclusive && g.items.length > 1) {
+      return (i + 1) + '. All the ' + now(c.fromHex, c.fromName) + ' fabric of the garment (' + parts + ')' + small + ': make all of it ' + target(c) + '.';
+    }
+    return (i + 1) + '. The ' + parts + ', now ' + now(c.fromHex, c.fromName) + small + ': make ' + (g.items.length > 1 ? 'all of them ' : 'it ') + target(c) + '.';
   });
 
-  // التفاصيل الصغيرة أولاً في قائمة التحقّق: هي ما يُنسى
-  const ordered = changes.slice().sort((a, b) => (a.size === 'small' ? 0 : 1) - (b.size === 'small' ? 0 : 1));
-  const check = ordered.map((c) => {
-    const was = colourWord(c.fromHex);
-    const target = (colourWord(c.toHex) || 'the new colour') + ' (' + c.toHex + ')';
-    return '- ' + (c.parts || 'recoloured area') + ': ' + target + ' over ALL of it' +
-      (was ? ', with no ' + was + ' left anywhere on it — not at its tips, edges or hem' : '') + '.';
-  }).concat(keeps.map((k) => '- ' + (k.parts || 'kept area') + ': unchanged, still ' + (colourWord(k.hex) || 'as before') + '.'));
+  // الأجزاء الباقية تُذكر فقط إذا كانت بنفس لون جزء يتغيّر — هناك يلزم التمييز
+  const stays = keeps
+    .filter((k) => k.parts && k.hex && changes.some((c) => c.fromHex && sameCloth(c.fromHex, k.hex)))
+    .map((k) => 'The ' + k.parts + ' stay ' + (colourWord(k.hex) || 'as they are') + '.');
 
-  const opening = closeup
-    ? 'This is a close-up cut out of a real garment photograph. The part named below fills much of this close-up. Recolour every area of its listed colour — and only that colour: other colours inside it keep their own — and return the same close-up, identical in every other respect, at exactly the same framing so it can be placed back into the full photograph.'
-    : 'This is a real product photograph' + (subject ? ' — ' + subject : '') + '. Recolour ONLY the garment parts listed below and return the same photograph, identical in every other respect.';
-
-  // صور المرجع: قصّات مكبّرة من الصورة نفسها للأجزاء الصغيرة
   const refNote = (refParts && refParts.length)
-    ? '\n\nREFERENCE CLOSE-UPS: image 1 is the photograph to edit and to return. ' +
-      refParts.map((pt, i) => 'Image ' + (i + 2) + ' is an enlarged close-up cut from image 1 showing the ' + pt).join('. ') +
-      '. They are there only so you can see those small parts clearly: recolour those parts in image 1 exactly as listed — only their listed colours, each area to its own new colour; a different colour inside them (a centre, stamens) follows its own line or stays as it is. Do not return or paste the close-ups; return image 1 only.'
+    ? '\n\nImage 1 is the photo to edit and return. ' +
+      refParts.map((pt, i) => 'Image ' + (i + 2) + ' is an enlarged close-up of the ' + pt + ' from image 1, so you can see it clearly').join('. ') +
+      '. Return image 1 only.'
     : '';
 
-  // سطر لكل مجموعة: جزء واحد، أو «كل القماش بهاللون» لعدّة أجزاء
-  const groupLine = (g, i) => {
-    if (g.items.length === 1) return line(g.items[0], i);
-    const c = g.items[0];
-    const to = [colourWord(c.toHex), c.toName ? '"' + c.toName + '"' : '', c.toCode ? 'PANTONE ' + c.toCode : '', c.toHex]
-      .filter(Boolean).join(' ');
-    const parts = g.items.map((x) => x.parts).filter(Boolean).join(', ');
-    const small = g.items.some((x) => x.size === 'small') ? ' Includes a SMALL DETAIL — change its ' + (colourWord(c.fromHex) || 'listed-colour') + ' areas; other colours inside it keep their own.' : '';
-    const reach = g.exclusive
-      ? ' Every area of this colour on the garment changes, wherever it is, including sheer layers seen through or between other parts.'
-      : ' These parts all change, including where they are sheer or show between other parts. Other parts of this colour follow their own line.';
-    return (i + 1) + '. ALL of these ' + describe(c.fromHex, c.fromName) + ' parts — ' + parts + ' → become ' + to + '.' + reach + small;
-  };
-  const groups = groupChanges(changes, keeps);
+  const opening = closeup
+    ? 'Recolour the part in this close-up, cut from a garment photo. Return the same close-up at exactly the same framing.'
+    : 'Recolour the garment in this photo' + (subject ? ' — ' + subject : '') + '.';
 
-  return `${opening}${refNote}
+  return `${opening}
 
-RECOLOUR — each line is ONE garment part, or ALL of one fabric colour. Recolour exactly that and nothing else:
-${groups.map(groupLine).join('\n')}
+${lines.join('\n')}
 
-All lines apply together, each to the ORIGINAL photograph. The same original colour may also appear on other parts of the garment: those other parts keep their own colour unless they have their own line above. A colour that one line produces never changes which part another line refers to.
-
-COMPLETE COVERAGE:
-- Recolour each listed part all of it: every petal, panel, fold, tip, underside, edge and inner surface, right to where it meets a different part.
-- No trace of a listed part's old colour may remain on it: not at its tips, not along its hem or edges, not in its shadows, not where the fabric turns thin or translucent, not where it shades or fades.
-- A part that shades from one colour into another is recoloured across its whole length, ends included.
-- Small parts count as much as large ones. In a part marked SMALL DETAIL every area of its listed colour must change — but only that colour: a flower whose centre or stamens are a different colour keeps that different colour unless the centre has its own line. Never merge a small part's colours into one.
-- Sheer and translucent layers — organza, chiffon, tulle — are recoloured too, including where they show through or between other parts. A sheer panel between petals takes its own listed colour, never the colour of the petals around it.
-
-KEEP EXACTLY AS IT IS:
-${keepLines.length ? keepLines.join('\n') + '\n' : ''}- The model's face, skin, hair, hands, nails, jewellery and shoes.
-- The background, the wall, the floor, the furniture and the light on them.
-- The pose, the framing, the crop, the camera angle, the focus and the grain.
-- The cut of the garment: no seam, ruffle, petal, pleat, fold or edge moves, and nothing is added or removed.
-
-HOW TO APPLY THE COLOUR:
-Replace the hue only. Inside each recoloured part every light and dark passage stays exactly where it is: highlights, the shading inside folds, the sheen and translucency of the material, the weave, seams and stitching, beading and embroidery. A fold that was dark stays dark, in the new colour. Where one part meets another, the boundary stays exactly where it is in the original. The result must read as the same cloth dyed differently and photographed under the same light — never as flat paint.
-
-In normally lit areas each recoloured part must match its given hex.
-
-FINAL CHECK — before answering, confirm every line is true:
-${check.join('\n')}
-
-Output the finished photograph only, at the same size and framing as the input.`;
+Recolour every listed part completely, edge to edge — including sheer layers, the parts seen between other layers, folds, petal tips and hems. ${stays.length ? stays.join(' ') + ' ' : ''}Parts not listed keep their colour. Keep the design, folds, shading, sheen and fabric texture, the model, pose and background exactly as they are.${refNote}`;
 }
 
 // ---------------------------------------------------------------------------
