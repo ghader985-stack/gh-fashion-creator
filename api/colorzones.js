@@ -21,7 +21,9 @@ export const config = {
   maxDuration: 120,
 };
 
-const MODEL = 'claude-haiku-4-5-20251001';  // مُجرَّب مع الصور بالفلات سكتش. الأغلى: 'claude-sonnet-5'
+// sonnet: haiku جُرِّب على النشرة واخترع أجزاء غير موجودة (أكمام)، ووضع رقماً على
+// الحائط، وأعطى أكثر من منطقة نفس الهيكس. فرق الكلفة ~سنتان، والتقسيم هو أساس القسم.
+const MODEL = 'claude-sonnet-5';
 const MAX_TOKENS = 2000;                // الخرج صغير: نصّ وألوان فقط
 const CALL_TIMEOUT_MS = 55000;          // لكل محاولة على حدة
 const MAX_ZONES = 10;
