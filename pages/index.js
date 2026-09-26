@@ -1161,7 +1161,6 @@ export default function Home() {
                                   <strong dir="auto">{z.name}</strong>
                                   <span className="cc-zone-hex" dir="ltr">{z.hex}</span>
                                   {z.pantone && <span className="cc-zone-pt" dir="ltr">PANTONE {z.pantone}</span>}
-                                  {z.kind !== 'garment' && <span className="cc-kind">{CC_KIND_AR[z.kind] || z.kind}</span>}
                                 </div>
                                 <div className="cc-zone-where" dir="auto">
                                   {z.partsAr || 'منطقة لونية على التصميم'}{z.material ? ' · ' + z.material : ''}
@@ -1732,15 +1731,6 @@ const CC_DETAIL_MAX = 2;         // سقف القصّات للنتيجة: كل �
 const CC_DETAIL_PAD = 1.8;       // ضلع القصّة = أكبر ضلع للجزء × هذا
 const CC_DETAIL_MIN = 0.14;      // وأصغر ضلع مسموح، من أصغر ضلع للصورة
 const CC_DETAIL_FEATHER = 0.2;   // عرض الحافة الناعمة من ضلع القصّة
-
-const CC_KIND_AR = {
-  garment: 'قماش',
-  trim: 'إكسسوار',
-  skin: 'بشرة',
-  hair: 'شعر',
-  background: 'خلفية',
-  other: 'غير ذلك',
-};
 
 // ---------------------------------------------------------------------------
 // تحويلات الألوان
