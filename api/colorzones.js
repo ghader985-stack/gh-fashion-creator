@@ -21,7 +21,7 @@ export const config = {
   maxDuration: 120,
 };
 
-const MODEL = 'claude-sonnet-5';        // نفس موديل التيك باك، مُجرَّب مع الصور
+const MODEL = 'claude-haiku-4-5-20251001';  // مُجرَّب مع الصور بالفلات سكتش. الأغلى: 'claude-sonnet-5'
 const MAX_TOKENS = 2000;                // الخرج صغير: نصّ وألوان فقط
 const CALL_TIMEOUT_MS = 55000;          // لكل محاولة على حدة
 const MAX_ZONES = 10;
@@ -155,7 +155,8 @@ What a zone is:
 - The same colour on two different garment parts is TWO zones. The designer may want the bodice and the skirt in different colours even when they share a colour now. Never merge separate parts into one zone just because they are the same colour.
 - A part that shades from one colour into another (ombre, dip-dye, petal tips darker than the petal) is split where the colour changes: one zone for each colour.
 - Light and shadow never make a new zone.
-- Small parts are zones too: a flower appliqué and its centre, a bow, a strap, piping, a sash, a lining that shows. Do not drop a part because it is small.
+- Small parts are zones too: a flower appliqué, a bow, a strap, piping, a sash, a lining that shows. Do not drop a part because it is small.
+- A small part made of more than one colour is one zone PER COLOUR: a flower with chartreuse petals and a purple centre is two zones, "waist flower petals — chartreuse" and "waist flower centre and stamens — purple". Never merge the colours of a small part into one zone.
 - Give between 3 and 8 zones. Put the largest and most visible parts first.
 
 Never include:
