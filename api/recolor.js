@@ -236,7 +236,8 @@ function buildPrompt(changes, keeps, subject, closeup, refParts) {
     } else if (smalls.length) {
       small = ' — the ' + smalls.map((x) => x.parts).join(' and ') + ' ' + (smalls.length > 1 ? 'are small details' : 'is a small detail') + ', do not skip ' + (smalls.length > 1 ? 'them' : 'it');
     }
-    if (g.exclusive && g.items.length > 1) {
+    // منطقة لون (أو مجموعة) لا يشاركها لونَها أي جزء آخر: «كل هذا اللون أينما كان»
+    if (g.exclusive && !keeps.some((k) => k.hex && c.fromHex && sameCloth(k.hex, c.fromHex))) {
       return (i + 1) + '. All the ' + now(c.fromHex, c.fromName) + ' fabric of the garment (' + parts + ')' + small + ': make all of it ' + target(c) + '.';
     }
     return (i + 1) + '. The ' + parts + ', now ' + now(c.fromHex, c.fromName) + small + ': make ' + (g.items.length > 1 ? 'all of them ' : 'it ') + target(c) + '.';
@@ -261,7 +262,7 @@ function buildPrompt(changes, keeps, subject, closeup, refParts) {
 
 ${lines.join('\n')}
 
-Recolour every listed part completely, edge to edge — including sheer layers, the parts seen between other layers, folds, petal tips and hems. ${stays.length ? stays.join(' ') + ' ' : ''}Parts not listed keep their colour. Keep the design, folds, shading, sheen and fabric texture, the model, pose and background exactly as they are.${refNote}`;
+Recolour every listed colour completely, edge to edge — including sheer layers, the parts seen between other layers, folds, petal tips and hems. Where the garment shades from one listed colour into another, keep the same smooth shading between their new colours. ${stays.length ? stays.join(' ') + ' ' : ''}Parts not listed keep their colour. Keep the design, folds, shading, sheen and fabric texture, the model, pose and background exactly as they are.${refNote}`;
 }
 
 // ---------------------------------------------------------------------------
