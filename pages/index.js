@@ -679,6 +679,9 @@ export default function Home() {
         n: i + 1,
         name: z.name || '',
         nameAr: z.nameAr || z.name || '',
+        colour: z.colour || '',
+        hex: z.hex || '',
+        material: z.fabric || '',
         parts: z.parts || '',
         partsAr: z.partsAr || z.parts || '',
         current: z.current || '',
@@ -776,10 +779,11 @@ export default function Home() {
           fd.append(key, await ccBlob(c, 'image/jpeg', 0.92), key + '.jpg');
           fabric = { kind: 'up', file: key };
         }
-        changes.push({ parts: z.parts, name: z.name, current: z.current, fabric });
+        changes.push({ colour: z.colour, hex: z.hex, material: z.material, parts: z.parts, name: z.name, current: z.current, fabric });
       }
       fd.append('changes', JSON.stringify(changes));
-      fd.append('keeps', JSON.stringify(fsZones.filter((z) => !z.fabric).map((z) => ({ parts: z.parts }))));
+      fd.append('keeps', JSON.stringify(fsZones.filter((z) => !z.fabric).map((z) => (
+        { colour: z.colour, hex: z.hex, material: z.material, parts: z.parts }))));
       fd.append('subject', fsData.detected || '');
       fd.append('w', String(send.width));
       fd.append('h', String(send.height));
@@ -1493,6 +1497,7 @@ export default function Home() {
                             <div className="fs-zone-info">
                               <div className="fs-zone-title">
                                 <span className="cc-zone-num">{z.n}</span>
+                                {z.hex && <span className="cc-chip" style={{ background: z.hex }} title={z.colour || z.hex} />}
                                 <strong dir="auto">{z.nameAr}</strong>
                                 {z.name && z.name !== z.nameAr && <span className="fs-zone-en" dir="ltr">{z.name}</span>}
                               </div>
@@ -2149,12 +2154,18 @@ const FS_FABRICS = [
   { id: 'olive-linen', cat: 'Cotton & Linen', name: 'Olive Linen' },
   { id: 'indigo-denim', cat: 'Cotton & Linen', name: 'Indigo Denim' },
   { id: 'navy-corduroy', cat: 'Cotton & Linen', name: 'Navy Corduroy' },
-  { id: 'black-satin', cat: 'Silk & Satin', name: 'Black Satin' },
-  { id: 'teal-satin', cat: 'Silk & Satin', name: 'Teal Satin' },
-  { id: 'silver-satin', cat: 'Silk & Satin', name: 'Silver Satin' },
+  { id: 'ivory-silk', cat: 'Silk & Satin', name: 'Ivory Silk' },
+  { id: 'white-satin', cat: 'Silk & Satin', name: 'White Satin' },
+  { id: 'champagne-satin', cat: 'Silk & Satin', name: 'Champagne Satin' },
+  { id: 'emerald-satin', cat: 'Silk & Satin', name: 'Emerald Satin' },
+  { id: 'burgundy-satin', cat: 'Silk & Satin', name: 'Burgundy Satin' },
+  { id: 'navy-satin', cat: 'Silk & Satin', name: 'Navy Satin' },
   { id: 'red-velvet', cat: 'Silk & Satin', name: 'Red Velvet' },
-  { id: 'lavender-chiffon', cat: 'Silk & Satin', name: 'Lavender Chiffon' },
-  { id: 'white-tulle', cat: 'Silk & Satin', name: 'White Tulle' },
+  { id: 'emerald-velvet', cat: 'Silk & Satin', name: 'Emerald Velvet' },
+  { id: 'white-organza', cat: 'Silk & Satin', name: 'White Organza' },
+  { id: 'blush-tulle', cat: 'Silk & Satin', name: 'Blush Tulle' },
+  { id: 'magenta-chiffon', cat: 'Silk & Satin', name: 'Magenta Chiffon' },
+  { id: 'glitter-tulle', cat: 'Silk & Satin', name: 'Glitter Tulle' },
   { id: 'beige-cable-knit', cat: 'Wool & Knits', name: 'Beige Cable Knit' },
   { id: 'grey-rib-knit', cat: 'Wool & Knits', name: 'Grey Rib Knit' },
   { id: 'brown-cable-knit', cat: 'Wool & Knits', name: 'Brown Cable Knit' },
@@ -2166,7 +2177,9 @@ const FS_FABRICS = [
   { id: 'silver-lame', cat: 'Technical & Leather', name: 'Silver Lamé' },
   { id: 'grey-mesh', cat: 'Technical & Leather', name: 'Grey Technical Mesh' },
   { id: 'beige-lace', cat: 'Patterns & Prints', name: 'Beige Lace' },
+  { id: 'white-eyelet', cat: 'Patterns & Prints', name: 'White Eyelet Lace' },
   { id: 'gold-sequin', cat: 'Patterns & Prints', name: 'Gold Sequin' },
+  { id: 'rose-gold-sequin', cat: 'Patterns & Prints', name: 'Rose Gold Sequin' },
   { id: 'houndstooth', cat: 'Patterns & Prints', name: 'Black & White Houndstooth' },
   { id: 'red-tartan', cat: 'Patterns & Prints', name: 'Red Tartan' },
   { id: 'blue-floral', cat: 'Patterns & Prints', name: 'Blue Floral Print' },
