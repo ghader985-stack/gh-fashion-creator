@@ -102,35 +102,87 @@ async function persist(url) {
 }
 
 // ---------------------------------------------------------------------------
-// changes: [{ parts, name, current, fabric: { kind: 'lib'|'up'|'text', name, desc, pattern, img } }]
+// اسم عائلة اللون من الهيكس («yellow-green»، «dark purple») — نفس دالة recolor.js.
+// النموذج بيعرف المنطقة بلونها أدق بكتير من أسامي الأجزاء.
+function hexRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function colourWord(hex) {
+  const c = hexRgb(hex);
+  if (!c) return '';
+  const r = c[0] / 255; const g = c[1] / 255; const b = c[2] / 255;
+  const mx = Math.max(r, g, b); const mn = Math.min(r, g, b);
+  const d = mx - mn; const l = (mx + mn) / 2;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (s < 0.14 || d < 0.07) {
+    if (l < 0.14) return 'black';
+    if (l > 0.9) return 'white';
+    if (l > 0.72) return 'light grey';
+    if (l < 0.32) return 'charcoal';
+    return 'grey';
+  }
+  let h = 0;
+  if (mx === r) h = 60 * (((g - b) / d) % 6);
+  else if (mx === g) h = 60 * ((b - r) / d + 2);
+  else h = 60 * ((r - g) / d + 4);
+  if (h < 0) h += 360;
+  const steps = [
+    [14, 'red'], [38, 'orange'], [50, 'golden yellow'], [62, 'yellow'], [85, 'yellow-green'],
+    [165, 'green'], [185, 'teal'], [200, 'cyan'], [222, 'sky blue'], [248, 'blue'],
+    [268, 'indigo'], [318, 'purple'], [335, 'magenta'], [350, 'pink'], [361, 'red'],
+  ];
+  let base = 'red';
+  for (const [lim, name] of steps) { if (h < lim) { base = name; break; } }
+  if ((base === 'orange' || base === 'golden yellow' || base === 'red') && l < 0.42 && s < 0.75) base = 'brown';
+  if ((base === 'yellow' || base === 'golden yellow' || base === 'yellow-green') && l < 0.36) return 'olive';
+  const tone = l < 0.24 ? 'dark ' : (l > 0.74 ? 'light ' : '');
+  return tone + base;
+}
+
+// «the pistachio green (yellow-green, #A9B84E) duchess satin»
+function describeZone(z) {
+  const fam = colourWord(z.hex);
+  const col = [z.colour, [fam, z.hex].filter(Boolean).join(', ')].filter(Boolean);
+  const colour = col.length > 1 ? col[0] + ' (' + col[1] + ')' : (col[0] || '');
+  return [colour, z.fabric || 'fabric'].filter(Boolean).join(' ');
+}
+
+// changes: [{ colour, hex, fabric, parts, name, current, to: { kind, name, desc, pattern, img } }]
 // img = رقم الصورة المرجعية بالطلب (2، 3…) أو 0 إذا ما في صورة.
+//
+// من أول نتيجة حقيقية: تعريف المنطقة بأسامي الأجزاء خلّى الشيفون يفيض من
+// البنفسجي عالساتان الفستقي عند الخصر. الحل متل تغيير الألوان: كل منطقة
+// بتنعرف بلونها — «كل الساتان الفستقي» — والأجزاء بس للتوضيح.
 export function buildPrompt(changes, keeps, subject) {
   const lines = changes.map((c, i) => {
-    const where = 'The ' + (c.parts || c.name) + (c.name && c.parts ? ' (' + c.name + ')' : '') +
-      (c.current ? ', now ' + c.current : '');
-    const f = c.fabric;
+    const t = c.to;
     let what;
-    if (f.img) {
-      const label = f.kind === 'up' ? '' : ' — ' + f.name + (f.desc ? ', ' + f.desc : '');
-      what = 'remake in the fabric shown in image ' + f.img + label +
-        '. Match its colour, ' + (f.pattern ? 'pattern, ' : '') + 'weave and surface exactly' +
-        (f.pattern ? ', with the pattern at a realistic scale for the garment' : '') + '.';
-    } else if (f.kind === 'text') {
-      what = 'remake in ' + f.name + ', keeping its current colour.';
+    if (t.img) {
+      const label = t.kind === 'up' ? '' : ' — ' + t.name + (t.desc ? ', ' + t.desc : '');
+      what = 'replace it with the fabric shown in image ' + t.img + label +
+        '. Match its colour, ' + (t.pattern ? 'pattern, ' : '') + 'weave and surface exactly' +
+        (t.pattern ? ', with the pattern at a realistic scale for the garment' : '') + '.';
+    } else if (t.kind === 'text') {
+      what = 'replace it with ' + t.name + ' in the same colour.';
     } else {
-      what = 'remake in ' + f.name + (f.desc ? ', ' + f.desc : '') + '.';
+      what = 'replace it with ' + t.name + (t.desc ? ', ' + t.desc : '') + '.';
     }
-    return (i + 1) + '. ' + where + ': ' + what;
+    return (i + 1) + '. All the ' + describeZone(c) + (c.parts ? ' — ' + c.parts : '') + ': ' + what;
   });
 
-  const stays = keeps.filter((k) => k.parts).map((k) => k.parts);
-  const refs = changes.filter((c) => c.fabric.img).length;
+  const stays = keeps.filter((k) => k.hex || k.parts)
+    .map((k) => 'The ' + describeZone(k) + (k.parts ? ' (' + k.parts + ')' : '') + ' stays exactly as it is.');
+  const refs = changes.filter((c) => c.to.img).length;
 
-  return `Change the fabric of the garment in image 1${subject ? ' — ' + subject : ''}.
+  return `Change the fabrics of the garment in image 1${subject ? ' — ' + subject : ''}. Each fabric is named by its current colour: change every area of the garment in that colour, wherever it is, and nothing outside it.
 
 ${lines.join('\n')}
 
-Render each new fabric with its real texture, weight, sheen and drape, following the garment's seams, folds and silhouette. ${stays.length ? 'The ' + stays.join('; the ') + ' keep their current fabric. ' : ''}Keep the model, face, pose, cut, lighting and background exactly as they are.${refs ? ' The other images are fabric swatches only. Return image 1 edited.' : ''}`;
+Each new fabric fills exactly the same area as the old one — same shape, same edges, same folds. Where two colours meet, keep the border exactly where it is now. ${stays.length ? stays.join(' ') + ' ' : ''}Render each new fabric with its real texture, weight, sheen and drape. Keep the model, face, pose, cut, lighting and background exactly as they are.${refs ? ' The other images are fabric swatches only. Return image 1 edited.' : ''}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,25 +265,33 @@ export default async function handler(req, res) {
   };
 
   // التحقق من كل تغيير قبل أي استدعاء مدفوع
+  const hexOk = (h) => (/^#[0-9a-fA-F]{6}$/.test(h) ? h.toUpperCase() : '');
+  const zoneOf = (c) => ({
+    colour: clean(c && c.colour, 40),
+    hex: hexOk(str(c && c.hex)),
+    fabric: clean(c && c.material, 40),
+    parts: clean(c && c.parts, 200),
+    name: clean(c && c.name, 50),
+    current: clean(c && c.current, 160),
+  });
   const changes = [];
   for (const c of parseList(getField(fields.changes)).slice(0, MAX_CHANGES)) {
     const f = (c && c.fabric) || {};
-    const base = { parts: clean(c && c.parts, 200), name: clean(c && c.name, 50), current: clean(c && c.current, 160) };
+    const base = zoneOf(c);
     if (f.kind === 'lib') {
       const lib = fabricById(str(f.id));
-      if (lib) changes.push({ ...base, fabric: { kind: 'lib', lib, name: lib.name, desc: lib.desc, pattern: Boolean(lib.pattern) } });
+      if (lib) changes.push({ ...base, to: { kind: 'lib', lib, name: lib.name, desc: lib.desc, pattern: Boolean(lib.pattern) } });
     } else if (f.kind === 'up') {
       const file = pickFile(files[str(f.file)]);
-      if (file && /^up\d$/.test(str(f.file))) changes.push({ ...base, fabric: { kind: 'up', file, name: 'custom fabric' } });
+      if (file && /^up\d$/.test(str(f.file))) changes.push({ ...base, to: { kind: 'up', file, name: 'custom fabric' } });
     } else if (f.kind === 'text') {
       const name = clean(f.name, 40);
-      if (name) changes.push({ ...base, fabric: { kind: 'text', name } });
+      if (name) changes.push({ ...base, to: { kind: 'text', name } });
     }
   }
   if (!changes.length) return res.status(400).json({ error: 'اختاري قماش لمنطقة وحدة عالأقل' });
 
-  const keeps = parseList(getField(fields.keeps)).slice(0, 6)
-    .map((k) => ({ parts: clean(k && k.parts, 200) })).filter((k) => k.parts);
+  const keeps = parseList(getField(fields.keeps)).slice(0, 6).map(zoneOf).filter((k) => k.parts || k.hex);
   const subject = clean(getField(fields.subject), 200).replace(/[.\s]+$/, '');
   const w = Number(getField(fields.w)) || 0;
   const h = Number(getField(fields.h)) || 0;
@@ -251,7 +311,7 @@ export default async function handler(req, res) {
     // العيّنات: مكتبة ← رابط Blob (أو رفع البايتات إذا ما في Blob)، مرفوعة ← رفع
     const images = [source];
     for (const c of changes) {
-      const f = c.fabric;
+      const f = c.to;
       let url = null;
       if (f.kind === 'lib') {
         const sw = await ensureSwatch(f.lib, 'ref');
