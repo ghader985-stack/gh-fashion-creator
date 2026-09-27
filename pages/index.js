@@ -190,6 +190,7 @@ export default function Home() {
         { id: 'moodboard', name: 'المود بورد', num: '01', desc: 'لوحة الإلهام' },
         { id: 'studio', name: 'استوديو AI', num: '02', desc: 'توليد صورة القطعة' },
         { id: 'color', name: 'تغيير الألوان', num: '03', desc: 'ألوان جديدة لأي منطقة' },
+        { id: 'fabric', name: 'تبديل القماش', num: '08', desc: 'قماش جديد لأي منطقة' },
       ],
     },
     {
@@ -204,12 +205,6 @@ export default function Home() {
       items: [
         { id: 'marketing', name: 'المحتوى التسويقي', num: '06', desc: 'كابشنات وأفكار' },
         { id: 'video', name: 'الفيديو', num: '07', desc: 'برومبتات سينمائية' },
-      ],
-    },
-    {
-      label: 'أدوات الصور',
-      items: [
-        { id: 'fabric', name: 'تبديل القماش', num: '08', desc: 'قماش جديد لأي منطقة' },
       ],
     },
   ];
@@ -1450,7 +1445,17 @@ export default function Home() {
                   </section>
                 )}
 
-                {fsLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{fsStage || 'جارٍ التحضير…'}</p></div>}
+                {fsLoading && (
+                  <div className="cc-work">
+                    <div className="cc-stage">
+                      <div className="fs-stage-head"><strong>منتجك</strong></div>
+                      {fsPreview && <img src={fsPreview} alt="product" className="cc-canvas" />}
+                    </div>
+                    <div className="cc-panel">
+                      <div className="loading-block"><span className="spinner-lg"></span><p>{fsStage || 'جارٍ التحضير…'}</p></div>
+                    </div>
+                  </div>
+                )}
 
                 {fsPreview && !fsLoading && !fsData && (
                   <section className="card">
@@ -2134,35 +2139,37 @@ const CC_DETAIL_FEATHER = 0.2;   // عرض الحافة الناعمة من ضل
 // ===== تبديل القماش — المكتبة =====
 // ===========================================================================
 // نفس القائمة الموجودة بـ api/_fabrics.js (هناك رابط المصدر والوصف للنموذج).
-// الصور من Poly Haven — CC0، مسموحة تجارياً — وبتنحفظ بـ Blob من أول طلب.
+// الصور من Pexels — صور قماش حقيقية، مجانية تجارياً — وبتنحفظ بـ Blob من أول طلب.
 const FS_CREDITS = 2;
 const FS_UPLOAD_MAX = 1024;      // دقّة قماش المصممة المرسَل للنموذج
 const FS_CATS = ['Cotton & Linen', 'Silk & Satin', 'Wool & Knits', 'Technical & Leather', 'Patterns & Prints'];
 const FS_FABRICS = [
-  { id: 'stretch_poplin', cat: 'Cotton & Linen', name: 'Green Stretch Poplin' },
-  { id: 'rough_linen', cat: 'Cotton & Linen', name: 'Blue Linen' },
-  { id: 'cotton_jersey', cat: 'Cotton & Linen', name: 'Beige Cotton Jersey' },
-  { id: 'denim_fabric_03', cat: 'Cotton & Linen', name: 'Light Blue Denim' },
-  { id: 'ribbed_corduroy', cat: 'Cotton & Linen', name: 'Green Corduroy' },
-  { id: 'waffle_pique_cotton', cat: 'Cotton & Linen', name: 'Yellow Waffle Piqué' },
-  { id: 'crepe_satin', cat: 'Silk & Satin', name: 'Gold Crepe Satin' },
-  { id: 'crepe_georgette', cat: 'Silk & Satin', name: 'Teal Crepe Georgette' },
-  { id: 'velour_velvet', cat: 'Silk & Satin', name: 'Red Velvet' },
-  { id: 'terlenka', cat: 'Silk & Satin', name: 'Cream Terlenka' },
-  { id: 'wool_boucle', cat: 'Wool & Knits', name: 'Wool Bouclé' },
-  { id: 'poly_wool_herringbone', cat: 'Wool & Knits', name: 'Grey Herringbone' },
-  { id: 'jersey_melange', cat: 'Wool & Knits', name: 'Blue Melange Jersey' },
-  { id: 'knitted_fleece', cat: 'Wool & Knits', name: 'Brown Knitted Fleece' },
-  { id: 'caban', cat: 'Wool & Knits', name: 'Orange Wool Coating' },
-  { id: 'leather_white', cat: 'Technical & Leather', name: 'White Leather' },
-  { id: 'leather_red_03', cat: 'Technical & Leather', name: 'Red Leather' },
-  { id: 'brown_leather', cat: 'Technical & Leather', name: 'Brown Leather' },
-  { id: 'scuba_suede', cat: 'Technical & Leather', name: 'Turquoise Scuba Suede' },
-  { id: 'bi_stretch', cat: 'Technical & Leather', name: 'Yellow Bi-Stretch' },
-  { id: 'floral_jacquard', cat: 'Patterns & Prints', name: 'Black Floral Jacquard' },
-  { id: 'quatrefoil_jacquard_fabric', cat: 'Patterns & Prints', name: 'Burgundy Quatrefoil Jacquard' },
-  { id: 'gingham_check', cat: 'Patterns & Prints', name: 'Green Gingham' },
-  { id: 'fabric_pattern_05', cat: 'Patterns & Prints', name: 'Windowpane Plaid' },
+  { id: 'white-cotton', cat: 'Cotton & Linen', name: 'White Cotton' },
+  { id: 'natural-linen', cat: 'Cotton & Linen', name: 'Natural Linen' },
+  { id: 'olive-linen', cat: 'Cotton & Linen', name: 'Olive Linen' },
+  { id: 'indigo-denim', cat: 'Cotton & Linen', name: 'Indigo Denim' },
+  { id: 'navy-corduroy', cat: 'Cotton & Linen', name: 'Navy Corduroy' },
+  { id: 'black-satin', cat: 'Silk & Satin', name: 'Black Satin' },
+  { id: 'teal-satin', cat: 'Silk & Satin', name: 'Teal Satin' },
+  { id: 'silver-satin', cat: 'Silk & Satin', name: 'Silver Satin' },
+  { id: 'red-velvet', cat: 'Silk & Satin', name: 'Red Velvet' },
+  { id: 'lavender-chiffon', cat: 'Silk & Satin', name: 'Lavender Chiffon' },
+  { id: 'white-tulle', cat: 'Silk & Satin', name: 'White Tulle' },
+  { id: 'beige-cable-knit', cat: 'Wool & Knits', name: 'Beige Cable Knit' },
+  { id: 'grey-rib-knit', cat: 'Wool & Knits', name: 'Grey Rib Knit' },
+  { id: 'brown-cable-knit', cat: 'Wool & Knits', name: 'Brown Cable Knit' },
+  { id: 'multicolour-boucle', cat: 'Wool & Knits', name: 'Multicolour Bouclé' },
+  { id: 'brown-tweed', cat: 'Wool & Knits', name: 'Brown Tweed Bouclé' },
+  { id: 'black-leather', cat: 'Technical & Leather', name: 'Black Leather' },
+  { id: 'brown-suede', cat: 'Technical & Leather', name: 'Brown Suede' },
+  { id: 'gold-lame', cat: 'Technical & Leather', name: 'Gold Lamé' },
+  { id: 'silver-lame', cat: 'Technical & Leather', name: 'Silver Lamé' },
+  { id: 'grey-mesh', cat: 'Technical & Leather', name: 'Grey Technical Mesh' },
+  { id: 'beige-lace', cat: 'Patterns & Prints', name: 'Beige Lace' },
+  { id: 'gold-sequin', cat: 'Patterns & Prints', name: 'Gold Sequin' },
+  { id: 'houndstooth', cat: 'Patterns & Prints', name: 'Black & White Houndstooth' },
+  { id: 'red-tartan', cat: 'Patterns & Prints', name: 'Red Tartan' },
+  { id: 'blue-floral', cat: 'Patterns & Prints', name: 'Blue Floral Print' },
 ];
 const fsSwatchUrl = (id) => '/api/fabricswatch?id=' + encodeURIComponent(id);
 
