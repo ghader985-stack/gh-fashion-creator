@@ -88,6 +88,19 @@ export default function Home() {
   const [ccResults, setCcResults] = useState([]);
   const [ccProgress, setCcProgress] = useState('');
 
+  // ===== تبديل القماش (فابريك سواب) =====
+  const [fsPreview, setFsPreview] = useState('');
+  const [fsData, setFsData] = useState(null);
+  const [fsZones, setFsZones] = useState([]);
+  const [fsHover, setFsHover] = useState(-1);
+  const [fsLoading, setFsLoading] = useState(false);
+  const [fsStage, setFsStage] = useState('');
+  const [fsBusy, setFsBusy] = useState(false);
+  const [fsError, setFsError] = useState('');
+  const [fsResults, setFsResults] = useState([]);
+  const [fsShown, setFsShown] = useState(0);
+  const [fsPicker, setFsPicker] = useState(null);   // { zone, cat, pick }
+
   // ===== التيك باك =====
   const [tpImage, setTpImage] = useState(null);
   const [tpPreview, setTpPreview] = useState('');
@@ -191,6 +204,12 @@ export default function Home() {
       items: [
         { id: 'marketing', name: 'المحتوى التسويقي', num: '06', desc: 'كابشنات وأفكار' },
         { id: 'video', name: 'الفيديو', num: '07', desc: 'برومبتات سينمائية' },
+      ],
+    },
+    {
+      label: 'أدوات الصور',
+      items: [
+        { id: 'fabric', name: 'تبديل القماش', num: '08', desc: 'قماش جديد لأي منطقة' },
       ],
     },
   ];
@@ -628,6 +647,171 @@ export default function Home() {
     const name = 'color-' + new Date(rec.createdAt).toISOString().slice(0, 19).replace(/[:T]/g, '-');
     downloadFlat(rec.url, name);
   };
+
+  // ===== تبديل القماش =====
+  // خطوتان متل Adstronaut:
+  //   1) تحليل: مناطق القماش مع رقم لكل منطقة عالصورة (بلا نقاط)
+  //   2) رسم: استدعاء واحد مهما كان عدد المناطق — FS_CREDITS نقطة
+  const handleFsImage = async (file) => {
+    if (!file) return;
+    if (!gate()) return;
+    setFsError('');
+    setFsZones([]);
+    setFsData(null);
+    setFsHover(-1);
+    setFsResults([]);
+    setFsShown(0);
+    setFsPicker(null);
+    setFsPreview(URL.createObjectURL(file));
+    setFsLoading(true);
+    try {
+      setFsStage('جارٍ قراءة الصورة…');
+      const full = await tpFileToCanvas(file, CC_SRC_MAX);
+      const view = ccScaled(full, CC_VIEW_MAX);
+      const probe = ccScaled(full, CC_ANALYSIS_MAX);
+
+      setFsStage('جارٍ تحليل أقمشة القطعة…');
+      const fd = new FormData();
+      fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
+      const r = await fetch('/api/fabriczones', { method: 'POST', body: fd });
+      let body = null;
+      try { body = await r.json(); } catch (e) { body = null; }
+      if (!r.ok || !body || !Array.isArray(body.zones) || !body.zones.length) {
+        throw tpUserError((body && body.error) || ('تعذّر تحليل أقمشة القطعة (' + r.status + ')'));
+      }
+
+      setFsZones(body.zones.map((z, i) => ({
+        n: i + 1,
+        name: z.name || '',
+        nameAr: z.nameAr || z.name || '',
+        parts: z.parts || '',
+        partsAr: z.partsAr || z.parts || '',
+        current: z.current || '',
+        currentAr: z.currentAr || z.current || '',
+        suggestions: Array.isArray(z.suggestions) ? z.suggestions.slice(0, 3) : [],
+        point: z.point || null,
+        box: z.box || null,
+        fabric: null,
+        mode: 'keep',
+      })));
+      setFsData({
+        full,
+        view,
+        w: view.width,
+        h: view.height,
+        detected: body.detected || '',
+        detectedAr: body.detectedAr || body.detected || '',
+      });
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] fabricswap analyse', e && e.message);
+      setFsError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
+      setFsData(null);
+    }
+    setFsLoading(false);
+    setFsStage('');
+  };
+
+  const fsClear = () => {
+    setFsPreview('');
+    setFsData(null);
+    setFsZones([]);
+    setFsHover(-1);
+    setFsResults([]);
+    setFsShown(0);
+    setFsPicker(null);
+    setFsError('');
+  };
+
+  const fsSetFabric = (i, fabric) => {
+    setFsZones((list) => list.map((z, j) => (j === i ? { ...z, fabric, mode: fabric ? 'change' : 'keep' } : z)));
+  };
+
+  const fsChanged = fsZones.filter((z) => z.fabric);
+
+  const fsOpenPicker = (i) => {
+    const cur = fsZones[i] && fsZones[i].fabric;
+    const lib = cur && cur.kind === 'lib' ? FS_FABRICS.find((f) => f.id === cur.id) : null;
+    setFsPicker({ zone: i, cat: lib ? lib.cat : FS_CATS[0], pick: cur && cur.kind !== 'text' ? cur : null });
+  };
+
+  const fsApplyPick = () => {
+    if (!fsPicker || !fsPicker.pick) return;
+    fsSetFabric(fsPicker.zone, fsPicker.pick);
+    setFsPicker(null);
+  };
+
+  const fsAffordable = () => {
+    if (!user) return 0;
+    if (user.plan === 'admin') return 99;
+    const limit = plans[user.plan]?.limit || 0;
+    return Math.max(0, Math.floor((limit - usageCount) / FS_CREDITS));
+  };
+
+  // الاستدعاء المدفوع الوحيد
+  const fsGenerate = async () => {
+    if (!fsData || !fsChanged.length) {
+      setFsError('اختاري قماش لمنطقة وحدة عالأقل');
+      return;
+    }
+    if (!gate()) return;
+    if (fsAffordable() < 1) {
+      setFsError('رصيدك ما بيكفي لصورة وحدة — جدّدي الاشتراك');
+      setShowPricing(true);
+      return;
+    }
+
+    setFsError('');
+    setFsBusy(true);
+    try {
+      const send = ccScaled(fsData.full, CC_SEND_MAX);
+      const fd = new FormData();
+      fd.append('image', await ccBlob(send, 'image/jpeg', 0.94), 'image.jpg');
+
+      let up = 0;
+      const changes = [];
+      for (const z of fsChanged) {
+        const f = z.fabric;
+        let fabric;
+        if (f.kind === 'lib') fabric = { kind: 'lib', id: f.id };
+        else if (f.kind === 'text') fabric = { kind: 'text', name: f.name };
+        else {
+          const key = 'up' + up;
+          up += 1;
+          const c = await tpFileToCanvas(f.file, FS_UPLOAD_MAX);
+          fd.append(key, await ccBlob(c, 'image/jpeg', 0.92), key + '.jpg');
+          fabric = { kind: 'up', file: key };
+        }
+        changes.push({ parts: z.parts, name: z.name, current: z.current, fabric });
+      }
+      fd.append('changes', JSON.stringify(changes));
+      fd.append('keeps', JSON.stringify(fsZones.filter((z) => !z.fabric).map((z) => ({ parts: z.parts }))));
+      fd.append('subject', fsData.detected || '');
+      fd.append('w', String(send.width));
+      fd.append('h', String(send.height));
+
+      const r = await fetch('/api/fabricswap', { method: 'POST', body: fd });
+      let d = null;
+      try { d = await r.json(); } catch (e) { d = null; }
+      if (!r.ok || !d || !d.url) {
+        throw tpUserError((d && d.error) || ('تعذّر الرسم (' + r.status + ') — جرّبي مرة ثانية'));
+      }
+
+      setFsResults((list) => [{
+        id: 'fs' + Date.now(),
+        createdAt: Date.now(),
+        url: d.url,
+        applied: fsChanged.map((z) => ({ zone: z.nameAr || z.name, fabric: z.fabric.name, thumb: z.fabric.thumb || '' })),
+      }].concat(list));
+      setFsShown(0);
+      ccSpend(FS_CREDITS);
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] fabricswap generate', e && e.message);
+      setFsError((e && e.userMessage) || 'تعذّر إنشاء النتيجة، جرّبي مرة ثانية');
+    }
+    setFsBusy(false);
+  };
+
+  const fsStamp = (t) => new Date(t).toISOString().slice(0, 19).replace(/[:T]/g, '-');
 
   // ===== بناء ورقة التيك باك =====
   // الترتيب: تجهيز الصور وأداة الـ PDF محلياً أولاً (بلا أي كلفة)، ثم استدعاء
@@ -1246,6 +1430,220 @@ export default function Home() {
               </div>
             )}
 
+            {activeTab === 'fabric' && (
+              <div className="tool">
+                {!fsPreview && (
+                  <section className="card">
+                    <p className="card-hint">بدّلي قماش أي منطقة بقطعتك بأي خامة، بملمس وانسدال حقيقيين. الموديل والوضعية والقصّة والخلفية بيضلّوا متل ما هنّ.</p>
+                    <div className="field">
+                      <label>صورة المنتج</label>
+                      <div className="upload-area">
+                        <label className="upload-label">
+                          <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+                            onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) handleFsImage(f); }} />
+                          <span>اضغطي لرفع صورة منتج واحدة</span>
+                          <span className="fs-up-note">صورة واضحة · JPG أو PNG أو WEBP</span>
+                        </label>
+                      </div>
+                    </div>
+                    {fsError && <div className="err">{fsError}</div>}
+                  </section>
+                )}
+
+                {fsLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{fsStage || 'جارٍ التحضير…'}</p></div>}
+
+                {fsPreview && !fsLoading && !fsData && (
+                  <section className="card">
+                    {fsError && <div className="err">{fsError}</div>}
+                    <button type="button" className="cc-btn" onClick={fsClear}>رفع صورة ثانية</button>
+                  </section>
+                )}
+
+                {fsData && fsZones.length > 0 && (
+                  <div className="cc-work">
+                    <div className="cc-stage">
+                      <div className="fs-stage-head">
+                        <strong>منتجك</strong>
+                        <button type="button" className="cc-btn" onClick={fsClear}>تغيير الصورة</button>
+                      </div>
+                      <CcPreview data={fsData} zones={fsZones} hover={fsHover} />
+                      {fsData.detectedAr && (
+                        <div className="fs-detected" dir="auto"><strong>القطعة:</strong> {fsData.detectedAr}</div>
+                      )}
+                    </div>
+
+                    <div className="cc-panel">
+                      <div className="cc-panel-top">
+                        <div className="cc-panel-titles">
+                          <div className="cc-panel-head">اختاري الأقمشة الجديدة</div>
+                          <div className="cc-desc">اختاري قماش لكل منطقة بدك تغيّريها — الباقي بيضل متل ما هو</div>
+                        </div>
+                        <span className="cc-credits">{FS_CREDITS} نقطة</span>
+                      </div>
+
+                      {fsZones.map((z, i) => (
+                        <div className={'cc-zone fs-zone' + (z.fabric ? ' on' : '')} key={'fz' + i}
+                          onMouseEnter={() => setFsHover(i)} onMouseLeave={() => setFsHover(-1)}>
+                          <div className="fs-zone-row">
+                            <div className="fs-zone-info">
+                              <div className="fs-zone-title">
+                                <span className="cc-zone-num">{z.n}</span>
+                                <strong dir="auto">{z.nameAr}</strong>
+                                {z.name && z.name !== z.nameAr && <span className="fs-zone-en" dir="ltr">{z.name}</span>}
+                              </div>
+                              {z.partsAr && <div className="fs-zone-parts" dir="auto">{z.partsAr}</div>}
+                              {z.currentAr && <div className="fs-zone-cur" dir="auto">الحالي: {z.currentAr}</div>}
+                            </div>
+                            {z.fabric ? (
+                              <div className="fs-picked">
+                                <button type="button" className="fs-picked-btn" onClick={() => fsOpenPicker(i)}>
+                                  {z.fabric.thumb
+                                    ? <img src={z.fabric.thumb} alt="" className="fs-picked-sw" />
+                                    : <span className="fs-picked-sw fs-sw-text">Aa</span>}
+                                  <span className="fs-picked-name" dir="auto">{z.fabric.name}</span>
+                                </button>
+                                <button type="button" className="fs-x" aria-label="إلغاء" onClick={() => fsSetFabric(i, null)}>✕</button>
+                              </div>
+                            ) : (
+                              <button type="button" className="fs-change" onClick={() => fsOpenPicker(i)}>غيّري القماش</button>
+                            )}
+                          </div>
+                          {z.fabric && z.fabric.kind === 'text' && (
+                            <div className="fs-zone-note">بنفس لونها الحالي</div>
+                          )}
+                          {!z.fabric && z.suggestions.length > 0 && (
+                            <div className="fs-sugs">
+                              <span>مقترح:</span>
+                              {z.suggestions.map((s, k) => (
+                                <button type="button" className="fs-sug" key={'s' + k} dir="ltr"
+                                  onClick={() => fsSetFabric(i, { kind: 'text', name: s })}>{s}</button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      {fsChanged.length > 0 && (
+                        <div className="fs-selected">
+                          <div className="fs-selected-head">التغييرات المختارة:</div>
+                          <div className="fs-selected-list">
+                            {fsChanged.map((z) => (
+                              <span className="fs-selected-chip" key={'c' + z.n} dir="auto">{z.nameAr}: {z.fabric.name}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {fsError && <div className="err">{fsError}</div>}
+
+                      <button className="cta" onClick={fsGenerate}
+                        disabled={fsBusy || !fsChanged.length || fsAffordable() < 1}>
+                        {fsBusy ? <><span className="spinner"></span> جارٍ تبديل القماش…</>
+                          : 'بدّلي القماش · ' + FS_CREDITS + ' نقطة'}
+                      </button>
+                      {!fsChanged.length && <div className="fs-hint">اختاري قماش لمنطقة وحدة عالأقل</div>}
+                    </div>
+                  </div>
+                )}
+
+                {fsResults.length > 0 && fsResults[fsShown] && (
+                  <div className="fs-results">
+                    <div className="fs-compare">
+                      <div className="fs-col">
+                        <div className="fs-col-head">المنتج الأصلي</div>
+                        <div className="fs-col-img"><img src={fsPreview} alt="original" /></div>
+                        <div className="fs-col-foot">
+                          <button type="button" className="cc-btn" onClick={() => downloadFlat(fsPreview, 'original-' + fsStamp(fsResults[fsShown].createdAt))}>نزّليها</button>
+                        </div>
+                      </div>
+                      <div className="fs-col">
+                        <div className="fs-col-head">النتيجة</div>
+                        <div className="fs-col-img"><img src={fsResults[fsShown].url} alt="result" /></div>
+                        <div className="fs-applied">
+                          <span className="fs-applied-head">الأقمشة المطبّقة</span>
+                          <div className="fs-applied-list">
+                            {fsResults[fsShown].applied.map((a, k) => (
+                              <span className="fs-applied-item" key={'a' + k}>
+                                {a.thumb ? <img src={a.thumb} alt="" /> : <span className="fs-sw-text">Aa</span>}
+                                <span><strong dir="auto">{a.zone}</strong><em dir="auto">{a.fabric}</em></span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="fs-col-foot">
+                          <button type="button" className="cc-btn" onClick={() => downloadFlat(fsResults[fsShown].url, 'fabric-' + fsStamp(fsResults[fsShown].createdAt))}>نزّليها</button>
+                        </div>
+                      </div>
+                    </div>
+                    {fsResults.length > 1 && (
+                      <div className="fs-history">
+                        <div className="fs-history-head">كل النتائج — {fsResults.length}</div>
+                        <div className="fs-history-row">
+                          {fsResults.map((rec, k) => (
+                            <button type="button" key={rec.id} className={'fs-history-item' + (k === fsShown ? ' on' : '')}
+                              onClick={() => setFsShown(k)}>
+                              <img src={rec.url} alt="" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {fsPicker && fsZones[fsPicker.zone] && (
+                  <div className="fs-modal-bg" onClick={() => setFsPicker(null)}>
+                    <div className="fs-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+                      <div className="fs-modal-head">
+                        <div>
+                          <div className="fs-modal-title">اختاري القماش</div>
+                          <div className="fs-modal-sub" dir="auto">لـ {fsZones[fsPicker.zone].nameAr}</div>
+                        </div>
+                        <button type="button" className="fs-x lg" aria-label="إغلاق" onClick={() => setFsPicker(null)}>✕</button>
+                      </div>
+                      <div className="fs-tabs" dir="ltr">
+                        {FS_CATS.map((c) => (
+                          <button type="button" key={c} className={'fs-tab' + (fsPicker.cat === c ? ' on' : '')}
+                            onClick={() => setFsPicker((p) => ({ ...p, cat: c }))}>{c}</button>
+                        ))}
+                      </div>
+                      <div className="fs-grid" dir="ltr">
+                        <label className={'fs-tile fs-tile-up' + (fsPicker.pick && fsPicker.pick.kind === 'up' ? ' on' : '')}>
+                          <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+                            onChange={(e) => {
+                              const f = e.target.files && e.target.files[0];
+                              e.target.value = '';
+                              if (!f) return;
+                              setFsPicker((p) => ({ ...p, pick: { kind: 'up', file: f, thumb: URL.createObjectURL(f), name: 'قماشك' } }));
+                            }} />
+                          {fsPicker.pick && fsPicker.pick.kind === 'up' ? (
+                            <>
+                              <img src={fsPicker.pick.thumb} alt="" className="fs-tile-img" />
+                              <span className="fs-tile-name">قماشك</span>
+                            </>
+                          ) : (
+                            <span className="fs-up-inner"><span className="fs-up-icon">⇪</span><span>ارفعي قماشك</span></span>
+                          )}
+                        </label>
+                        {FS_FABRICS.filter((f) => f.cat === fsPicker.cat).map((f) => (
+                          <button type="button" key={f.id}
+                            className={'fs-tile' + (fsPicker.pick && fsPicker.pick.kind === 'lib' && fsPicker.pick.id === f.id ? ' on' : '')}
+                            onClick={() => setFsPicker((p) => ({ ...p, pick: { kind: 'lib', id: f.id, name: f.name, thumb: fsSwatchUrl(f.id) } }))}>
+                            <FsSwatch id={f.id} />
+                            <span className="fs-tile-name">{f.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="fs-modal-foot">
+                        <span dir="auto">{fsPicker.pick ? 'المختار: ' + fsPicker.pick.name : 'اضغطي على عيّنة لتختاريها'}</span>
+                        <button type="button" className="fs-apply" disabled={!fsPicker.pick} onClick={fsApplyPick}>تطبيق</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'techpack' && (
               <div className="tool">
                 <section className="card">
@@ -1731,6 +2129,49 @@ const CC_DETAIL_MAX = 2;         // سقف القصّات للنتيجة: كل �
 const CC_DETAIL_PAD = 1.8;       // ضلع القصّة = أكبر ضلع للجزء × هذا
 const CC_DETAIL_MIN = 0.14;      // وأصغر ضلع مسموح، من أصغر ضلع للصورة
 const CC_DETAIL_FEATHER = 0.2;   // عرض الحافة الناعمة من ضلع القصّة
+
+// ===========================================================================
+// ===== تبديل القماش — المكتبة =====
+// ===========================================================================
+// نفس القائمة الموجودة بـ api/_fabrics.js (هناك رابط المصدر والوصف للنموذج).
+// الصور من Poly Haven — CC0، مسموحة تجارياً — وبتنحفظ بـ Blob من أول طلب.
+const FS_CREDITS = 2;
+const FS_UPLOAD_MAX = 1024;      // دقّة قماش المصممة المرسَل للنموذج
+const FS_CATS = ['Cotton & Linen', 'Silk & Satin', 'Wool & Knits', 'Technical & Leather', 'Patterns & Prints'];
+const FS_FABRICS = [
+  { id: 'stretch_poplin', cat: 'Cotton & Linen', name: 'Green Stretch Poplin' },
+  { id: 'rough_linen', cat: 'Cotton & Linen', name: 'Blue Linen' },
+  { id: 'cotton_jersey', cat: 'Cotton & Linen', name: 'Beige Cotton Jersey' },
+  { id: 'denim_fabric_03', cat: 'Cotton & Linen', name: 'Light Blue Denim' },
+  { id: 'ribbed_corduroy', cat: 'Cotton & Linen', name: 'Green Corduroy' },
+  { id: 'waffle_pique_cotton', cat: 'Cotton & Linen', name: 'Yellow Waffle Piqué' },
+  { id: 'crepe_satin', cat: 'Silk & Satin', name: 'Gold Crepe Satin' },
+  { id: 'crepe_georgette', cat: 'Silk & Satin', name: 'Teal Crepe Georgette' },
+  { id: 'velour_velvet', cat: 'Silk & Satin', name: 'Red Velvet' },
+  { id: 'terlenka', cat: 'Silk & Satin', name: 'Cream Terlenka' },
+  { id: 'wool_boucle', cat: 'Wool & Knits', name: 'Wool Bouclé' },
+  { id: 'poly_wool_herringbone', cat: 'Wool & Knits', name: 'Grey Herringbone' },
+  { id: 'jersey_melange', cat: 'Wool & Knits', name: 'Blue Melange Jersey' },
+  { id: 'knitted_fleece', cat: 'Wool & Knits', name: 'Brown Knitted Fleece' },
+  { id: 'caban', cat: 'Wool & Knits', name: 'Orange Wool Coating' },
+  { id: 'leather_white', cat: 'Technical & Leather', name: 'White Leather' },
+  { id: 'leather_red_03', cat: 'Technical & Leather', name: 'Red Leather' },
+  { id: 'brown_leather', cat: 'Technical & Leather', name: 'Brown Leather' },
+  { id: 'scuba_suede', cat: 'Technical & Leather', name: 'Turquoise Scuba Suede' },
+  { id: 'bi_stretch', cat: 'Technical & Leather', name: 'Yellow Bi-Stretch' },
+  { id: 'floral_jacquard', cat: 'Patterns & Prints', name: 'Black Floral Jacquard' },
+  { id: 'quatrefoil_jacquard_fabric', cat: 'Patterns & Prints', name: 'Burgundy Quatrefoil Jacquard' },
+  { id: 'gingham_check', cat: 'Patterns & Prints', name: 'Green Gingham' },
+  { id: 'fabric_pattern_05', cat: 'Patterns & Prints', name: 'Windowpane Plaid' },
+];
+const fsSwatchUrl = (id) => '/api/fabricswatch?id=' + encodeURIComponent(id);
+
+// صورة العيّنة، وإذا ما تحمّلت بيضل مربع محايد والاسم تحته
+function FsSwatch({ id }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <span className="fs-tile-img fs-tile-miss" />;
+  return <img src={fsSwatchUrl(id)} alt="" loading="lazy" className="fs-tile-img" onError={() => setFailed(true)} />;
+}
 
 // ---------------------------------------------------------------------------
 // تحويلات الألوان
@@ -4179,6 +4620,99 @@ function StyleBlock() {
       .cc-result .cc-btn { width: 100%; padding: 0.45rem; }
       .download-btn.sm { padding: 0.4rem 0.7rem; font-size: 0.74rem; }
       @media (max-width: 980px) { .cc-work { grid-template-columns: 1fr; } .cc-stage { position: static; } }
+
+      /* ===== تبديل القماش ===== */
+      .fs-up-note { font-size: 0.74rem; color: var(--ink-soft); }
+      .fs-stage-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; font-size: 0.86rem; }
+      .fs-detected { margin-top: 0.7rem; background: #fff; border-radius: 6px; padding: 0.6rem 0.7rem;
+        font-size: 0.76rem; line-height: 1.7; color: var(--ink); }
+      .fs-zone { padding: 0.75rem; }
+      .fs-zone-row { display: flex; align-items: flex-start; gap: 0.6rem; }
+      .fs-zone-info { flex: 1; min-width: 0; }
+      .fs-zone-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.84rem; }
+      .fs-zone-en { font-size: 0.66rem; color: var(--ink-soft); background: #f4f2ef; border-radius: 4px; padding: 0.1rem 0.35rem; }
+      .fs-zone-parts { font-size: 0.72rem; color: var(--ink); margin-top: 0.3rem; line-height: 1.6; }
+      .fs-zone-cur { font-size: 0.7rem; color: var(--ink-soft); margin-top: 0.2rem; line-height: 1.6; }
+      .fs-zone-note { font-size: 0.68rem; color: #1d7a4c; margin-top: 0.4rem; }
+      .fs-change { flex: none; border: 1px solid #d9d4cc; background: #fff; border-radius: 7px; padding: 0.5rem 0.75rem;
+        font-family: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer; color: var(--ink); white-space: nowrap; }
+      .fs-change:hover { border-color: var(--ink); }
+      .fs-picked { flex: none; display: flex; align-items: center; gap: 0.3rem; max-width: 55%; }
+      .fs-picked-btn { display: flex; align-items: center; gap: 0.45rem; min-width: 0; border: 1px solid #bcd8c6;
+        background: #eef7f1; border-radius: 7px; padding: 0.3rem 0.55rem 0.3rem 0.3rem; cursor: pointer; font-family: inherit; }
+      .fs-picked-sw { width: 30px; height: 30px; border-radius: 5px; object-fit: cover; flex: none; border: 1px solid #d9d4cc; box-sizing: border-box; }
+      .fs-sw-text { display: inline-flex; align-items: center; justify-content: center; background: #f4f2ef;
+        font-size: 0.7rem; font-weight: 700; color: var(--ink-soft); }
+      .fs-picked-name { font-size: 0.74rem; font-weight: 700; color: #1d5c3a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .fs-x { flex: none; width: 24px; height: 24px; border: none; background: transparent; color: var(--ink-soft);
+        cursor: pointer; font-size: 0.8rem; border-radius: 50%; }
+      .fs-x:hover { background: #f0ece6; color: var(--ink); }
+      .fs-x.lg { width: 34px; height: 34px; font-size: 1rem; }
+      .fs-sugs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: 0.55rem; font-size: 0.7rem; color: var(--ink-soft); }
+      .fs-sug { border: 0; background: #f4f2ef; border-radius: 5px; padding: 0.25rem 0.5rem; font-size: 0.72rem;
+        font-family: inherit; color: var(--ink); cursor: pointer; }
+      .fs-sug:hover { background: #e9e4dc; }
+      .fs-selected { background: #f7f5f2; border-radius: 8px; padding: 0.6rem; }
+      .fs-selected-head { font-size: 0.72rem; color: var(--ink-soft); margin-bottom: 0.4rem; }
+      .fs-selected-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+      .fs-selected-chip { background: #1d1b1a; color: #fff; border-radius: 5px; padding: 0.3rem 0.55rem; font-size: 0.72rem; }
+      .fs-hint { text-align: center; font-size: 0.72rem; color: var(--ink-soft); }
+
+      .fs-results { margin-top: 1.4rem; }
+      .fs-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .fs-col { border: 1px solid #ece9e4; border-radius: 10px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
+      .fs-col-head { font-size: 0.84rem; font-weight: 700; padding: 0.7rem 0.9rem; border-bottom: 1px solid #ece9e4; background: #fbfaf8; }
+      .fs-col-img { padding: 0.9rem; display: flex; justify-content: center; background: #fff; }
+      .fs-col-img img { display: block; max-width: 100%; max-height: 520px; border-radius: 6px; }
+      .fs-col-foot { margin-top: auto; padding: 0.6rem 0.9rem; border-top: 1px solid #ece9e4; display: flex; justify-content: flex-end; }
+      .fs-applied { padding: 0.6rem 0.9rem; background: #fbfaf8; border-top: 1px solid #ece9e4; }
+      .fs-applied-head { display: block; font-size: 0.7rem; color: var(--ink-soft); margin-bottom: 0.4rem; }
+      .fs-applied-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+      .fs-applied-item { display: flex; align-items: center; gap: 0.4rem; border: 1px solid #ece9e4; background: #fff;
+        border-radius: 6px; padding: 0.3rem 0.5rem 0.3rem 0.3rem; }
+      .fs-applied-item img, .fs-applied-item .fs-sw-text { width: 26px; height: 26px; border-radius: 4px; object-fit: cover; flex: none; }
+      .fs-applied-item strong { display: block; font-size: 0.7rem; }
+      .fs-applied-item em { display: block; font-size: 0.66rem; font-style: normal; color: var(--ink-soft); }
+      .fs-history { margin-top: 0.9rem; }
+      .fs-history-head { font-size: 0.76rem; color: var(--ink-soft); margin-bottom: 0.45rem; }
+      .fs-history-row { display: flex; gap: 0.5rem; overflow-x: auto; }
+      .fs-history-item { flex: none; width: 76px; border: 2px solid transparent; border-radius: 7px; padding: 0; background: #fff; cursor: pointer; }
+      .fs-history-item.on { border-color: #1d1b1a; }
+      .fs-history-item img { display: block; width: 100%; border-radius: 5px; }
+
+      .fs-modal-bg { position: fixed; inset: 0; background: rgba(20,18,16,0.45); z-index: 1000;
+        display: flex; align-items: center; justify-content: center; padding: 1rem; }
+      .fs-modal { background: #fff; border-radius: 12px; width: min(860px, 100%); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+      .fs-modal-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 1rem 1.2rem 0.8rem; }
+      .fs-modal-title { font-size: 1.05rem; font-weight: 800; color: var(--ink); }
+      .fs-modal-sub { font-size: 0.8rem; color: var(--ink-soft); margin-top: 0.15rem; }
+      .fs-tabs { display: flex; gap: 0.45rem; overflow-x: auto; padding: 0.6rem 1.2rem; border-top: 1px solid #ece9e4; border-bottom: 1px solid #ece9e4; }
+      .fs-tab { flex: none; border: 0; background: #f4f2ef; border-radius: 999px; padding: 0.5rem 0.95rem; font-size: 0.82rem;
+        font-family: inherit; color: var(--ink); cursor: pointer; white-space: nowrap; }
+      .fs-tab.on { background: #1d1b1a; color: #fff; }
+      .fs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-content: start; gap: 0.75rem; padding: 1rem 1.2rem; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+      .fs-tile { position: relative; height: 0; padding: 0 0 100%; border: 2px solid transparent; border-radius: 8px; overflow: hidden;
+        background: #efedea; cursor: pointer; font-family: inherit; display: block; width: 100%; box-sizing: border-box; }
+      .fs-tile.on { border-color: #1d1b1a; box-shadow: 0 0 0 2px #fff inset; }
+      .fs-tile-img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+      .fs-tile-miss { background: linear-gradient(135deg, #ece8e2, #dcd6ce); }
+      .fs-tile-name { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(20,18,16,0.62); color: #fff;
+        font-size: 0.74rem; padding: 0.35rem 0.4rem; text-align: center; }
+      .fs-tile-up { border: 1.5px dashed #cfc9c0; background: #fff; }
+      .fs-tile-up.on { border-style: solid; border-color: #1d1b1a; }
+      .fs-up-inner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 0.35rem; font-size: 0.8rem; color: var(--ink-soft); }
+      .fs-up-icon { font-size: 1.4rem; }
+      .fs-modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.8rem 1.2rem;
+        border-top: 1px solid #ece9e4; font-size: 0.78rem; color: var(--ink-soft); }
+      .fs-apply { border: 0; background: #1d1b1a; color: #fff; border-radius: 7px; padding: 0.6rem 1.4rem; font-family: inherit;
+        font-size: 0.86rem; font-weight: 700; cursor: pointer; }
+      .fs-apply:disabled { opacity: 0.4; cursor: default; }
+      @media (max-width: 760px) {
+        .fs-compare { grid-template-columns: 1fr; }
+        .fs-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+        .fs-picked { max-width: 60%; }
+      }
 
       /* ===== ورقة التيك باك: معاينة كانفاس + لوحة تعديل ===== */
       .tp-work { display: block; }
