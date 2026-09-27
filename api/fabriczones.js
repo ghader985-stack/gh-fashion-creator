@@ -43,6 +43,15 @@ const numOf = (v) => {
 };
 const clamp = (v) => Math.max(0, Math.min(100, v));
 
+function readHex(v) {
+  const t = str(v);
+  let m = /#?([0-9a-fA-F]{6})\b/.exec(t);
+  if (m) return '#' + m[1].toUpperCase();
+  m = /^#?([0-9a-fA-F]{3})$/.exec(t);
+  if (m) return ('#' + m[1][0] + m[1][0] + m[1][1] + m[1][1] + m[1][2] + m[1][2]).toUpperCase();
+  return '';
+}
+
 function readPoint(v) {
   let x = null;
   let y = null;
@@ -85,7 +94,10 @@ const TOOL = {
           properties: {
             name: { type: 'string', description: 'Zone name in English, 2 to 4 words, e.g. "Main Bodice", "Sheer Ruffled Overlay".' },
             name_ar: { type: 'string', description: 'The zone name in Arabic.' },
-            parts: { type: 'string', description: 'Every garment part made of this fabric, English, comma-separated.' },
+            colour: { type: 'string', description: 'The exact fashion colour name of this fabric, English, 1 to 3 words, e.g. "Pistachio Green".' },
+            hex: { type: 'string', description: 'The colour as #RRGGBB, read from a normally lit spot.' },
+            fabric: { type: 'string', description: 'The fabric type now, 1 to 3 English words, e.g. "duchess satin".' },
+            parts: { type: 'string', description: 'Every garment part made of this fabric in this colour, English, comma-separated.' },
             parts_ar: { type: 'string', description: 'The same list in Arabic.' },
             current: { type: 'string', description: 'The current fabric: colour, opacity, weave or knit, finish. English, under 16 words.' },
             current_ar: { type: 'string', description: 'The same description in Arabic.' },
@@ -101,7 +113,7 @@ const TOOL = {
               properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } },
             },
           },
-          required: ['name', 'name_ar', 'parts', 'parts_ar', 'current', 'current_ar', 'suggestions', 'point'],
+          required: ['name', 'name_ar', 'colour', 'hex', 'fabric', 'parts', 'parts_ar', 'current', 'current_ar', 'suggestions', 'point'],
         },
       },
     },
@@ -111,35 +123,38 @@ const TOOL = {
 
 const PROMPT = `Look at this photograph of a garment.
 
-Split the garment into FABRIC ZONES the way a fabric-swapping tool does: one zone per distinct fabric, and for each zone every part of the garment made of that fabric.
+Split the garment into FABRIC ZONES the way a fabric-swapping tool does. A zone is ONE fabric in ONE colour, with every part of the garment made of it.
 
-What a zone is:
-- ONE fabric. Every part made of that fabric belongs to the same zone, wherever it is. Example for a gown: zone 1 "Main Bodice — sweetheart bodice and waistband", zone 2 "Sheer Ruffled Overlay — off-shoulder puff sleeves, overskirt, layered ruffles".
-- A different fabric makes a different zone even in the same colour (satin bodice vs tulle skirt). The same fabric in two colours is still two zones only if a designer would swap them separately.
+Rules:
+- The same fabric in two colours is two zones (pistachio satin and purple satin are two zones).
+- Two different fabrics are two zones even in the same colour (satin bodice and tulle skirt).
+- Every part in that fabric and colour belongs to the same zone, wherever it is: bodice, drapes, folds at the waist, bows, panels, train.
 - Light, shadow and folds never make a new zone.
-- Lining that is not visible is not a zone.
-- Usually 1 to 3 zones. Never more than 5.
-- Every visible part of the garment must belong to one zone.
-
-Never include the model's skin, face, hands or hair, the background, shoes or jewellery.
+- Beading, embroidery or sequins covering a clear area are their own zone.
+- Usually 1 to 4 zones. Never more than 5. Every visible part of the garment belongs to one zone.
+- Never include skin, face, hands, hair, the background, shoes or jewellery.
 
 For every zone give:
-- name: 2 to 4 English words naming the zone by its role, like "Main Bodice", "Sheer Ruffled Overlay", "Skirt", "Sleeves".
+- name: 2 to 4 English words naming the zone by its colour and role, like "Pistachio Satin Bodice", "Purple Satin Skirt", "Sheer Ruffled Overlay".
 - name_ar: the same in Arabic.
-- parts: every garment part in this zone, English, comma-separated.
+- colour: the exact fashion colour name. Judge the true hue carefully: pistachio (light yellow-green) is not olive (dark brownish green); plum is not burgundy.
+- hex: that colour as #RRGGBB, read from a normally lit spot of the cloth — not a highlight, not a shadow.
+- fabric: the fabric type now, 1 to 3 words: "duchess satin", "silk organza", "tulle".
+- parts: every garment part in this zone, English, comma-separated, left and right named separately.
 - parts_ar: the same in Arabic.
-- current: the fabric as it looks now — colour, opacity, weave or knit, finish — under 16 words: "light yellow opaque finely pleated woven fabric with a soft matte-satin look".
+- current: the fabric as it looks now — colour, opacity, weave or knit, finish — under 16 words.
 - current_ar: the same in Arabic.
-- suggestions: exactly 3 fabrics a designer could use instead for this zone, 1 to 3 English words each: "organza", "silk chiffon", "tulle".
-- point: one point on a clearly visible spot of this fabric ON THE GARMENT, {"x":..,"y":..} in percent of the image width and height. It places the zone's number on the photograph, so it must sit on the fabric — never on skin, hair or the background.
+- suggestions: exactly 3 fabrics a designer could use instead for this zone, 1 to 3 English words each.
+- point: {"x":..,"y":..} in percent of the image width and height, at the centre of the LARGEST clearly visible area of this zone, well inside it — never on its edge, never where it meets another zone, never on skin or background. It places the zone's number on the photograph.
 - box: the rectangle over this zone, {"x1":..,"y1":..,"x2":..,"y2":..} in percent.
 
-Also give detected: one English sentence describing the garment ("A pale yellow off-shoulder high-low evening dress with a structured bodice and voluminous sheer ruffled sleeves and skirt."), and detected_ar, the same in Arabic.
+Also give detected: one English sentence describing the garment, and detected_ar, the same in Arabic.
 
 Answer with the tool only.`;
 
 const JSON_TAIL = 'Return ONLY one JSON object, no markdown fence, no other text:\n' +
   '{"detected":"A pale yellow evening dress.","detected_ar":"فستان سهرة أصفر فاتح.","zones":[{"name":"Main Bodice","name_ar":"الصدرية",' +
+  '"colour":"Pale Yellow","hex":"#F3E7A1","fabric":"matte satin",' +
   '"parts":"bodice, waistband","parts_ar":"الصدرية، الخصر","current":"light yellow matte satin","current_ar":"ساتان مطفي أصفر فاتح",' +
   '"suggestions":["pleated chiffon","light satin","taffeta"],"point":{"x":50,"y":30},"box":{"x1":40,"y1":22,"x2":60,"y2":40}}]}';
 
@@ -153,6 +168,9 @@ export function normalise(parsed) {
     return {
       name: str(o.name).slice(0, 50),
       nameAr: str(o.name_ar).slice(0, 50),
+      colour: str(o.colour || o.color).slice(0, 40),
+      hex: readHex(o.hex),
+      fabric: str(o.fabric).slice(0, 40),
       parts: str(o.parts).slice(0, 200),
       partsAr: str(o.parts_ar).slice(0, 200),
       current: str(o.current).slice(0, 160),
