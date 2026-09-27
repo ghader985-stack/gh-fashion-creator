@@ -1,17 +1,16 @@
 // api/colorzones.js
-// كشف مناطق الألوان في قسم «تغيير الألوان».
+// كشف مناطق الألوان في قسم «تغيير الألوان» — على طريقة Adstronaut.
 //
-// المنطقة = جزء واحد من القطعة بلون واحد: «الصدر — أخضر مصفر»،
-// «أطراف البتلات — بنفسجي»، «ألواح التنورة الداخلية — أخضر مصفر».
-// نفس اللون على جزأين مختلفين = منطقتان، لأن المصمّمة قد تريد الصدر
-// بلون والتنورة بلون آخر. التقسيم باللون وحده كان يجعل «كل الأخضر» منطقة
-// واحدة على طول الفستان، فلا يمكن تغيير جزء منه.
+// المنطقة = لون قماش واحد، ومعها كل أجزاء القطعة التي بهذا اللون:
+// «Magenta: right bust panel, centre front ruffles, right skirt panel».
+// هكذا يعرض المرجع نفس الفستان (3 مناطق)، ونتيجته صحيحة كاملة.
 //
-// المطلوب من النموذج نصّ ولون، ونقطة داخل كل منطقة لوضع رقمها. النقطة
-// والصندوق اختياريان: غيابهما لا يُسقط المنطقة. الشرط الوحيد لبقاء المنطقة
-// أن يكون لونها مقروءاً.
+// التقسيم حسب الجزء جُرّب على النشرة ست مرات، وفي كل مرة سقط جزء: التنورة
+// الداخلية، ثم السداة، ثم لوحة الصدر اليسرى. «كل الفوشي يصير أصفر» أمر
+// لا يضيع منه جزء؛ سبعة أجزاء بأسمائها يضيع منها واحد دائماً.
 //
-// ولا بشرة ولا شعر ولا خلفية. المصمّمة لا تغيّر لون الحائط.
+// القماش المتدرّج بين لونين = منطقة لكل طرف، والتدرّج بينهما يُحفظ بالرسم.
+// ولا بشرة ولا شعر ولا خلفية.
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -26,7 +25,7 @@ export const config = {
 const MODEL = 'claude-sonnet-5';
 const MAX_TOKENS = 2000;                // الخرج صغير: نصّ وألوان فقط
 const CALL_TIMEOUT_MS = 55000;          // لكل محاولة على حدة
-const MAX_ZONES = 10;
+const MAX_ZONES = 6;
 
 const pickFile = (f) => (Array.isArray(f) ? f[0] : f) || null;
 const str = (v) => (typeof v === 'string' ? v.trim() : (typeof v === 'number' ? String(v) : ''));
@@ -123,12 +122,11 @@ const TOOL = {
           properties: {
             name: { type: 'string', description: 'Colour name in English, 1 to 3 words.' },
             hex: { type: 'string', description: 'The colour as #RRGGBB.' },
-            parts: { type: 'string', description: 'The one garment part this zone covers, English, 2 to 6 words. Unique per zone.' },
+            parts: { type: 'string', description: 'EVERY garment part that has this colour, English, comma-separated.' },
             parts_ar: { type: 'string', description: 'The same, in Arabic.' },
             material: { type: 'string', description: 'Material, 1 to 3 English words.' },
             trim: { type: 'boolean', description: 'true only for beads, crystals, zips, buttons or metal hardware.' },
             size: { type: 'string', enum: ['large', 'medium', 'small'], description: 'How much of the garment this zone covers.' },
-            extent: { type: 'string', description: 'Where this zone runs to, English, 4 to 14 words: its ends, tips, inner surfaces.' },
             point: {
               type: 'object',
               description: 'One point well inside this zone, percent 0-100 of width and height.',
@@ -150,16 +148,15 @@ const TOOL = {
 
 const PROMPT = `Look at this photograph of a garment.
 
-Split the garment into COLOUR ZONES the way a designer marks up a sketch before recolouring it: one zone for each distinct garment part in one colour.
+List the garment's COLOUR ZONES the way a colour-changer tool does: one zone per fabric colour, and for each zone EVERY part of the garment that has that colour.
 
 What a zone is:
-- ONE garment part in ONE colour. Examples: "bodice centre panel — yellow-green", "outer petal ruffles — deep purple", "inner skirt panels — yellow-green", "waist flower appliqué — olive green", "halter strap — navy".
-- The same colour on two different garment parts is TWO zones. The designer may want the bodice and the skirt in different colours even when they share a colour now. Never merge separate parts into one zone just because they are the same colour.
-- A part that shades from one colour into another (ombre, dip-dye, petal tips darker than the petal) is split where the colour changes: one zone for each colour.
-- Light and shadow never make a new zone.
-- Small parts are zones too: a flower appliqué, a bow, a strap, piping, a sash, a lining that shows. Do not drop a part because it is small.
-- A small part made of more than one colour is one zone PER COLOUR: a flower with chartreuse petals and a purple centre is two zones, "waist flower petals — chartreuse" and "waist flower centre and stamens — purple". Never merge the colours of a small part into one zone.
-- Give between 3 and 8 zones. Put the largest and most visible parts first.
+- ONE fabric colour. Every part of the garment in that colour belongs to the same zone, wherever it is: bodice, straps, waistband, ruffles, skirt panels, lining. Example for a two-colour gown: zone 1 "Magenta Pink — right bust panel, centre front ruffles, right skirt panel, outer ruffle layers"; zone 2 "Deep Purple — left bust panel, halter strap, waistband, left ruffles, inner skirt".
+- Light and shadow never make a new zone: the same cloth in a highlight and deep in a fold is one zone.
+- A cloth that shades from one colour into another (ombre, dip-dye, petal tips darker than the petal) gives one zone for EACH END of the shading. Never make a zone for the blended middle.
+- A small part in a clearly different colour from every fabric (gold hardware, a contrasting flower centre, a bow in another colour) is its own zone.
+- Usually 2 to 4 zones. Never more than 6.
+- Every visible part of the garment must belong to one zone. Check the whole garment, top to bottom, left and right, before answering: none may be left out.
 
 Never include:
 - the model's skin, face, hands or hair
@@ -167,24 +164,22 @@ Never include:
 - shoes or jewellery, unless they are clearly part of the design
 
 For every zone give:
-- name: the colour in English, 1 to 3 words, the way a fashion colour card names it: "Chartreuse", "Deep Magenta Purple", "Royal Blue".
-- hex: that colour as #RRGGBB, read from a normally lit spot of that zone — not the highlight, not the shadow. Be precise: this value is shown to the designer and matched to a Pantone.
-- parts: the ONE garment part this zone covers, in English, 2 to 6 words, precise enough that someone could find it without seeing a marker: "bodice centre panel", "outer petal ruffles of the skirt", "inner skirt panels", "train hem". Two zones must never have the same parts text.
-- parts_ar: the same in Arabic, short.
-- material: the material in 1 to 3 English words: "silk organza", "duchess satin", "beaded tulle".
+- name: the colour in English, 1 to 3 words, the way a fashion colour card names it: "Magenta Pink", "Deep Purple", "Chartreuse".
+- hex: that colour as #RRGGBB, read from a normally lit spot of the cloth — not the highlight, not the shadow. Be precise: this value is shown to the designer and matched to a Pantone.
+- parts: EVERY garment part that has this colour, in English, comma-separated, left and right named separately: "right bust panel, centre front ruffles, right skirt panel, outer ruffle layers".
+- parts_ar: the same list in Arabic.
+- material: the material in 1 to 3 English words: "silk crepe", "duchess satin", "silk organza".
 - trim: true only for beading, crystals, zips, buttons or metal hardware. Otherwise false.
-- size: "large" for a main panel, "medium" for a clear secondary part, "small" for a detail such as an appliqué, flower centre, bow, strap or piping.
-- extent: where this zone reaches, so that none of it is missed, 4 to 14 words: "every petal tip down to the hem of the train", "the whole flower including its inner petals and centre".
-- point: one point that lands well inside this zone, on a clearly visible spot of it, as {"x":..,"y":..} in percent of the image width and height. It places the zone's number on the photograph, so it must sit on this zone and not on a neighbouring one.
-- box: the rectangle over this zone, {"x1":..,"y1":..,"x2":..,"y2":..} in percent. REQUIRED for small zones, and TIGHT around the part: it is used to cut out a close-up of it.
+- size: "large" for a main fabric, "medium" for a clear secondary colour, "small" for a small detail.
+- point: one point on a clearly visible spot of this colour ON THE GARMENT, as {"x":..,"y":..} in percent of the image width and height. It places the zone's number on the photograph, so it must sit on the fabric — never on skin, hair or the background.
+- box: the rectangle over where this colour sits, {"x1":..,"y1":..,"x2":..,"y2":..} in percent.
 
 Answer with the tool only.`;
 
 const JSON_TAIL = 'Return ONLY one JSON object, no markdown fence, no other text:\n' +
   '{"description_ar":"فستان سهرة بلونين","zones":[{"name":"Chartreuse","hex":"#C8D23C",' +
-  '"parts":"bodice centre panel","parts_ar":"منتصف الصدر",' +
-  '"material":"silk organza","trim":false,"size":"large","extent":"the whole centre panel from neckline to waist",' +
-  '"point":{"x":52,"y":30}}]}';
+  '"parts":"right bust panel, centre front ruffles, right skirt panel","parts_ar":"الصدر الأيمن، الكشكشات الأمامية، لوح التنورة الأيمن",' +
+  '"material":"silk crepe","trim":false,"size":"large","point":{"x":60,"y":30}}]}';
 
 // ---------------------------------------------------------------------------
 function normalise(parsed) {
