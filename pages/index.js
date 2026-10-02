@@ -101,6 +101,22 @@ export default function Home() {
   const [fsShown, setFsShown] = useState(0);
   const [fsPicker, setFsPicker] = useState(null);   // { zone, cat, pick }
 
+  // ===== تنويعات التصميم (ديزاين فارييشنز) =====
+  const [dvFront, setDvFront] = useState(null);
+  const [dvFrontPrev, setDvFrontPrev] = useState('');
+  const [dvSecond, setDvSecond] = useState(null);
+  const [dvSecondPrev, setDvSecondPrev] = useState('');
+  const [dvData, setDvData] = useState(null);
+  const [dvCats, setDvCats] = useState([]);
+  const [dvPick, setDvPick] = useState({});         // { رقم الفئة: رقم الخيار }
+  const [dvNotes, setDvNotes] = useState('');
+  const [dvLoading, setDvLoading] = useState(false);
+  const [dvStage, setDvStage] = useState('');
+  const [dvBusy, setDvBusy] = useState(false);
+  const [dvError, setDvError] = useState('');
+  const [dvResults, setDvResults] = useState([]);
+  const [dvShown, setDvShown] = useState(0);
+
   // ===== التيك باك =====
   const [tpImage, setTpImage] = useState(null);
   const [tpPreview, setTpPreview] = useState('');
@@ -191,6 +207,7 @@ export default function Home() {
         { id: 'studio', name: 'استوديو AI', num: '02', desc: 'توليد صورة القطعة' },
         { id: 'color', name: 'تغيير الألوان', num: '03', desc: 'ألوان جديدة لأي منطقة' },
         { id: 'fabric', name: 'تبديل القماش', num: '08', desc: 'قماش جديد لأي منطقة' },
+        { id: 'variations', name: 'تنويعات التصميم', num: '09', desc: 'قصّات وأطوال جديدة لتصميمك' },
       ],
     },
     {
@@ -811,6 +828,129 @@ export default function Home() {
   };
 
   const fsStamp = (t) => new Date(t).toISOString().slice(0, 19).replace(/[:T]/g, '-');
+
+  // ===== تنويعات التصميم =====
+  // خطوتان متل Adstronaut:
+  //   1) تحليل: فئات التعديل المناسبة لنوع القطعة، ولكل فئة القيمة الحالية و4 خيارات
+  //   2) رسم: استدعاء واحد بالتعديلات المختارة + تعليمات المصممة — DV_CREDITS نقطة
+  const dvSetFile = (which, file) => {
+    if (!file) return;
+    if (which === 'front') { setDvFront(file); setDvFrontPrev(URL.createObjectURL(file)); }
+    else { setDvSecond(file); setDvSecondPrev(URL.createObjectURL(file)); }
+  };
+
+  const dvReset = () => {
+    setDvFront(null); setDvFrontPrev('');
+    setDvSecond(null); setDvSecondPrev('');
+    setDvData(null); setDvCats([]); setDvPick({}); setDvNotes('');
+    setDvResults([]); setDvShown(0); setDvError('');
+  };
+
+  const dvAnalyse = async () => {
+    if (!dvFront) { setDvError('ارفعي الصورة الأمامية أولاً'); return; }
+    if (!gate()) return;
+    setDvError('');
+    setDvCats([]);
+    setDvPick({});
+    setDvResults([]);
+    setDvShown(0);
+    setDvLoading(true);
+    try {
+      setDvStage('جارٍ قراءة الصورة…');
+      const full = await tpFileToCanvas(dvFront, CC_SRC_MAX);
+      const probe = ccScaled(full, CC_ANALYSIS_MAX);
+
+      setDvStage('جارٍ تحليل التصميم…');
+      const fd = new FormData();
+      fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'design.jpg');
+      const r = await fetch('/api/variationoptions', { method: 'POST', body: fd });
+      let body = null;
+      try { body = await r.json(); } catch (e) { body = null; }
+      if (!r.ok || !body || !Array.isArray(body.categories) || !body.categories.length) {
+        throw tpUserError((body && body.error) || ('تعذّر تحليل التصميم (' + r.status + ')'));
+      }
+      setDvCats(body.categories);
+      setDvData({
+        full,
+        w: full.width,
+        h: full.height,
+        detected: body.detected || '',
+        detectedAr: body.detectedAr || body.detected || '',
+      });
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] variations analyse', e && e.message);
+      setDvError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
+      setDvData(null);
+    }
+    setDvLoading(false);
+    setDvStage('');
+  };
+
+  const dvToggle = (ci, oi) => {
+    setDvPick((p) => {
+      const n = { ...p };
+      if (n[ci] === oi) delete n[ci];
+      else n[ci] = oi;
+      return n;
+    });
+  };
+
+  const dvChosen = dvCats
+    .map((c, ci) => (dvPick[ci] !== undefined && c.options[dvPick[ci]] ? { ci, cat: c, opt: c.options[dvPick[ci]] } : null))
+    .filter(Boolean);
+  const dvReady = dvChosen.length > 0 || dvNotes.trim().length > 0;
+
+  const dvAffordable = () => {
+    if (!user) return 0;
+    if (user.plan === 'admin') return 99;
+    const limit = plans[user.plan]?.limit || 0;
+    return Math.max(0, Math.floor((limit - usageCount) / DV_CREDITS));
+  };
+
+  // الاستدعاء المدفوع الوحيد
+  const dvGenerate = async () => {
+    if (!dvData || !dvReady) {
+      setDvError('اختاري تعديل واحد عالأقل أو اكتبي تعليماتك');
+      return;
+    }
+    if (!gate()) return;
+    if (dvAffordable() < 1) {
+      setDvError('رصيدك ما بيكفي لتنويع واحد — جدّدي الاشتراك');
+      setShowPricing(true);
+      return;
+    }
+    setDvError('');
+    setDvBusy(true);
+    try {
+      const send = ccScaled(dvData.full, CC_SEND_MAX);
+      const fd = new FormData();
+      fd.append('image', await ccBlob(send, 'image/jpeg', 0.94), 'front.jpg');
+      if (dvSecond) {
+        const c2 = await tpFileToCanvas(dvSecond, DV_SECOND_MAX);
+        fd.append('second', await ccBlob(c2, 'image/jpeg', 0.92), 'second.jpg');
+      }
+      fd.append('changes', JSON.stringify(dvChosen.map((x) => ({ name: x.cat.name, from: x.cat.current, to: x.opt.en }))));
+      fd.append('notes', dvNotes.trim());
+      fd.append('subject', dvData.detected || '');
+      fd.append('w', String(send.width));
+      fd.append('h', String(send.height));
+
+      const r = await fetch('/api/variation', { method: 'POST', body: fd });
+      let d = null;
+      try { d = await r.json(); } catch (e) { d = null; }
+      if (!r.ok || !d || !d.url) {
+        throw tpUserError((d && d.error) || ('تعذّر الرسم (' + r.status + ') — جرّبي مرة ثانية'));
+      }
+      const title = dvChosen.map((x) => x.opt.en).concat(dvNotes.trim() ? ['تعليماتك'] : []).join(' + ');
+      setDvResults((list) => [{ id: 'dv' + Date.now(), createdAt: Date.now(), url: d.url, title }].concat(list));
+      setDvShown(0);
+      ccSpend(DV_CREDITS);
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] variations generate', e && e.message);
+      setDvError((e && e.userMessage) || 'تعذّر إنشاء التنويع، جرّبي مرة ثانية');
+    }
+    setDvBusy(false);
+  };
 
   // ===== بناء ورقة التيك باك =====
   // الترتيب: تجهيز الصور وأداة الـ PDF محلياً أولاً (بلا أي كلفة)، ثم استدعاء
@@ -1654,6 +1794,177 @@ export default function Home() {
               </div>
             )}
 
+            {activeTab === 'variations' && (
+              <div className="tool">
+                {!dvData && !dvLoading && (
+                  <section className="card">
+                    <p className="card-hint">ولّدي تنويعات جديدة لتصميمك: قصّة، طول، أكمام، ياقة… بنفس القماش والتفاصيل.</p>
+                    <div className="dv-slots">
+                      <label className={'dv-slot' + (dvFrontPrev ? ' has' : '')}>
+                        <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+                          onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; dvSetFile('front', f); }} />
+                        <span className="dv-badge req">مطلوبة</span>
+                        {dvFrontPrev ? (
+                          <span className="dv-slot-row">
+                            <img src={dvFrontPrev} alt="" />
+                            <span><strong>الصورة الأمامية</strong><em>✓ انضافت</em></span>
+                          </span>
+                        ) : (
+                          <span className="dv-slot-empty">
+                            <span className="fs-up-icon">⇪</span>
+                            <strong>الصورة الأمامية</strong>
+                            <em>اللقطة الأساسية اللي منغيّرها</em>
+                          </span>
+                        )}
+                      </label>
+                      <label className={'dv-slot' + (dvSecondPrev ? ' has' : '')}>
+                        <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+                          onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; dvSetFile('second', f); }} />
+                        <span className="dv-badge">اختيارية</span>
+                        {dvSecondPrev ? (
+                          <span className="dv-slot-row">
+                            <img src={dvSecondPrev} alt="" />
+                            <span><strong>الزاوية التانية</strong><em>✓ انضافت</em></span>
+                            <button type="button" className="fs-x" aria-label="إزالة"
+                              onClick={(e) => { e.preventDefault(); setDvSecond(null); setDvSecondPrev(''); }}>✕</button>
+                          </span>
+                        ) : (
+                          <span className="dv-slot-empty">
+                            <span className="fs-up-icon">⇪</span>
+                            <strong>الزاوية التانية</strong>
+                            <em>من الخلف أو الجنب — اختيارية</em>
+                          </span>
+                        )}
+                      </label>
+                    </div>
+                    {dvError && <div className="err">{dvError}</div>}
+                    <button className="cta" onClick={dvAnalyse} disabled={!dvFront}>ابدئي التنويعات</button>
+                  </section>
+                )}
+
+                {dvLoading && (
+                  <div className="cc-work">
+                    <div className="cc-stage">
+                      <div className="fs-stage-head"><strong>تصميمك</strong></div>
+                      {dvFrontPrev && <img src={dvFrontPrev} alt="design" className="cc-canvas" />}
+                    </div>
+                    <div className="cc-panel">
+                      <div className="loading-block"><span className="spinner-lg"></span><p>{dvStage || 'جارٍ التحضير…'}</p></div>
+                    </div>
+                  </div>
+                )}
+
+                {dvData && !dvLoading && (
+                  <div className="cc-work">
+                    <div className="dv-left">
+                      <div className="cc-stage">
+                        <div className="fs-stage-head">
+                          <strong>تصميمك</strong>
+                          <button type="button" className="cc-btn" onClick={dvReset}>تغيير الصورة</button>
+                        </div>
+                        <img src={dvFrontPrev} alt="design" className="cc-canvas" />
+                        {dvData.detectedAr && (
+                          <div className="fs-detected" dir="auto"><strong>القطعة:</strong> {dvData.detectedAr}</div>
+                        )}
+                      </div>
+
+                      <div className="dv-builder">
+                        <div className="dv-builder-head">
+                          <strong>التعديلات</strong>
+                          <span className="cc-credits">{DV_CREDITS} نقطة</span>
+                        </div>
+                        <div className="dv-builder-box">
+                          {dvChosen.map((x, k) => (
+                            <span className="dv-chip" key={'c' + x.ci}>
+                              {k > 0 && <span className="dv-plus">+</span>}
+                              <span className="dv-chip-body" dir="ltr">
+                                {x.opt.en}
+                                <button type="button" aria-label="إزالة" onClick={() => dvToggle(x.ci, dvPick[x.ci])}>✕</button>
+                              </span>
+                            </span>
+                          ))}
+                          <input type="text" className="dv-notes" value={dvNotes} maxLength={400} dir="auto"
+                            onChange={(e) => setDvNotes(e.target.value)}
+                            placeholder={dvChosen.length ? 'زيدي تعليماتك…' : 'اختاري من الخيارات أو اكتبي تعليماتك…'} />
+                        </div>
+                        {dvError && <div className="err">{dvError}</div>}
+                        <button className="cta" onClick={dvGenerate} disabled={dvBusy || !dvReady || dvAffordable() < 1}>
+                          {dvBusy ? <><span className="spinner"></span> جارٍ رسم التنويع…</>
+                            : 'ولّدي التنويع · ' + DV_CREDITS + ' نقطة'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="cc-panel">
+                      <div className="cc-panel-top">
+                        <div className="cc-panel-titles">
+                          <div className="cc-panel-head">خصّصي تصميمك</div>
+                          <div className="cc-desc">اختاري التعديلات اللي بدك ياها — خيار واحد من كل فئة</div>
+                        </div>
+                      </div>
+                      {dvCats.map((c, ci) => (
+                        <div className="dv-cat" key={'cat' + ci}>
+                          <div className="dv-cat-head">
+                            <strong dir="auto">{c.nameAr || c.name}</strong>
+                            <span dir="auto">الحالي: {c.currentAr || c.current}</span>
+                          </div>
+                          <div className="dv-opts">
+                            {c.options.map((o, oi) => (
+                              <button type="button" key={'o' + oi} className={'dv-opt' + (dvPick[ci] === oi ? ' on' : '')}
+                                onClick={() => dvToggle(ci, oi)}>
+                                <span dir="ltr">{o.en}</span>
+                                {o.ar && <em dir="auto">{o.ar}</em>}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {dvResults.length > 0 && dvResults[dvShown] && (
+                  <div className="fs-results">
+                    <div className="dv-result-bar">
+                      <strong>التنويع</strong>
+                      <button type="button" className="cc-btn" onClick={dvGenerate} disabled={dvBusy || !dvReady || dvAffordable() < 1}>
+                        {dvBusy ? 'جارٍ الرسم…' : '↻ ولّدي مرة تانية · ' + DV_CREDITS + ' نقطة'}
+                      </button>
+                    </div>
+                    <div className="fs-compare">
+                      <div className="fs-col">
+                        <div className="fs-col-head">الصورة الأصلية</div>
+                        <div className="fs-col-img"><img src={dvFrontPrev} alt="original" /></div>
+                        <div className="fs-col-foot">
+                          <button type="button" className="cc-btn" onClick={() => downloadFlat(dvFrontPrev, 'original-' + fsStamp(dvResults[dvShown].createdAt))}>نزّليها</button>
+                        </div>
+                      </div>
+                      <div className="fs-col">
+                        <div className="fs-col-head" dir="auto">{dvResults[dvShown].title}</div>
+                        <div className="fs-col-img"><img src={dvResults[dvShown].url} alt="variation" /></div>
+                        <div className="fs-col-foot">
+                          <button type="button" className="cc-btn" onClick={() => downloadFlat(dvResults[dvShown].url, 'variation-' + fsStamp(dvResults[dvShown].createdAt))}>نزّليها</button>
+                        </div>
+                      </div>
+                    </div>
+                    {dvResults.length > 1 && (
+                      <div className="fs-history">
+                        <div className="fs-history-head">كل التنويعات — {dvResults.length}</div>
+                        <div className="fs-history-row">
+                          {dvResults.map((rec, k) => (
+                            <button type="button" key={rec.id} className={'fs-history-item' + (k === dvShown ? ' on' : '')}
+                              title={rec.title} onClick={() => setDvShown(k)}>
+                              <img src={rec.url} alt="" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'techpack' && (
               <div className="tool">
                 <section className="card">
@@ -2184,6 +2495,8 @@ const FS_FABRICS = [
   { id: 'red-tartan', cat: 'Patterns & Prints', name: 'Red Tartan' },
   { id: 'blue-floral', cat: 'Patterns & Prints', name: 'Blue Floral Print' },
 ];
+const DV_CREDITS = 2;
+const DV_SECOND_MAX = 1024;      // دقّة الزاوية التانية المرسَلة كمرجع
 const fsSwatchUrl = (id) => '/api/fabricswatch?id=' + encodeURIComponent(id);
 
 // صورة العيّنة، وإذا ما تحمّلت بيضل مربع محايد والاسم تحته
@@ -4640,6 +4953,55 @@ function StyleBlock() {
       .cc-result .cc-btn { width: 100%; padding: 0.45rem; }
       .download-btn.sm { padding: 0.4rem 0.7rem; font-size: 0.74rem; }
       @media (max-width: 980px) { .cc-work { grid-template-columns: 1fr; } .cc-stage { position: static; } }
+
+      /* ===== تنويعات التصميم ===== */
+      .dv-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; margin-bottom: 1rem; }
+      .dv-slot { position: relative; display: flex; align-items: center; justify-content: center; min-height: 170px;
+        border: 1.5px dashed var(--line); border-radius: 10px; background: var(--cream); cursor: pointer; padding: 1rem; }
+      .dv-slot.has { border-style: solid; border-color: var(--ink); background: #fff; }
+      .dv-badge { position: absolute; top: 0.6rem; right: 0.6rem; font-size: 0.68rem; border-radius: 999px;
+        padding: 0.2rem 0.55rem; background: #f0ece6; color: var(--ink-soft); }
+      .dv-badge.req { background: var(--ink); color: #fff; }
+      .dv-slot-empty { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; text-align: center; }
+      .dv-slot-empty strong { font-size: 0.92rem; color: var(--ink); }
+      .dv-slot-empty em, .dv-slot-row em { font-style: normal; font-size: 0.74rem; color: var(--ink-soft); }
+      .dv-slot-row { display: flex; align-items: center; gap: 0.7rem; width: 100%; }
+      .dv-slot-row img { width: 64px; height: 84px; object-fit: cover; border-radius: 6px; border: 1px solid #ece9e4; flex: none; }
+      .dv-slot-row > span { flex: 1; display: flex; flex-direction: column; gap: 0.2rem; }
+      .dv-slot-row strong { font-size: 0.88rem; }
+      .dv-slot-row em { color: #1d7a4c; }
+      .dv-left { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+      .dv-left .cc-stage { position: static; }
+      .dv-left .cc-canvas { max-height: 560px; width: auto; max-width: 100%; margin: 0 auto; object-fit: contain; }
+      .dv-builder { background: #fff; border: 1px solid #ece9e4; border-radius: 10px; padding: 0.9rem; display: flex; flex-direction: column; gap: 0.7rem; }
+      .dv-builder-head { display: flex; align-items: center; justify-content: space-between; font-size: 0.86rem; }
+      .dv-builder-box { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; border: 1px solid #d9d4cc;
+        border-radius: 8px; padding: 0.45rem; min-height: 46px; background: #fdfcfa; }
+      .dv-chip { display: inline-flex; align-items: center; gap: 0.35rem; }
+      .dv-plus { color: var(--ink-soft); font-size: 0.8rem; }
+      .dv-chip-body { display: inline-flex; align-items: center; gap: 0.35rem; background: #1d1b1a; color: #fff;
+        border-radius: 5px; padding: 0.3rem 0.5rem; font-size: 0.76rem; }
+      .dv-chip-body button { border: 0; background: transparent; color: #fff; cursor: pointer; font-size: 0.7rem; padding: 0; }
+      .dv-notes { flex: 1; min-width: 140px; border: 0; background: transparent; font-family: inherit; font-size: 0.8rem;
+        padding: 0.3rem; color: var(--ink); }
+      .dv-notes:focus { outline: none; }
+      .dv-cat { border-top: 1px solid #ece9e4; padding-top: 0.8rem; }
+      .dv-cat-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.55rem; }
+      .dv-cat-head strong { font-size: 0.88rem; }
+      .dv-cat-head span { font-size: 0.72rem; color: var(--ink-soft); }
+      .dv-opts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
+      .dv-opt { border: 1px solid #e3dfd8; background: #fff; border-radius: 7px; padding: 0.55rem 0.3rem; cursor: pointer;
+        font-family: inherit; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; color: var(--ink); }
+      .dv-opt span { font-size: 0.8rem; }
+      .dv-opt em { font-style: normal; font-size: 0.66rem; color: var(--ink-soft); }
+      .dv-opt:hover { border-color: var(--ink); }
+      .dv-opt.on { background: #1d1b1a; border-color: #1d1b1a; color: #fff; }
+      .dv-opt.on em { color: #d9d4cc; }
+      .dv-result-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.7rem; font-size: 0.9rem; }
+      @media (max-width: 760px) {
+        .dv-slots { grid-template-columns: 1fr; }
+        .dv-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
 
       /* ===== تبديل القماش ===== */
       .fs-up-note { font-size: 0.74rem; color: var(--ink-soft); }
