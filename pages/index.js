@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext } from 'react';
 import Head from 'next/head';
+import { useAuth, useClerk } from '@clerk/nextjs';
 
 
 // استخراج اسم البراند من نص الملاحظات الحر.
@@ -53,6 +54,9 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   const [user, setUser] = useState(null);
+  // تسجيل الدخول عبر Clerk: isLoaded = المكتبة خلصت تحميل، isSignedIn = في حساب مسجّل
+  const { isLoaded: authLoaded, isSignedIn } = useAuth();
+  const clerk = useClerk();
   const [usageCount, setUsageCount] = useState(0);
   const [adminCode, setAdminCode] = useState('');
   const [showAdminInput, setShowAdminInput] = useState(false);
@@ -246,6 +250,9 @@ export default function Home() {
     localStorage.setItem('gh_usage', n.toString());
   };
   const gate = () => {
+    // لازم حساب مسجّل أول: بدونه يظهر نافذة تسجيل الدخول وما ينفّذ شي
+    if (!authLoaded) return false;
+    if (!isSignedIn) { clerk.openSignIn(); return false; }
     if (!user) { setShowPricing(true); return false; }
     if (!checkUsageLimit()) { alert('انتهت توليداتك! جددي اشتراكك'); setShowPricing(true); return false; }
     return true;
@@ -297,6 +304,8 @@ export default function Home() {
     localStorage.removeItem('gh_user');
     localStorage.removeItem('gh_usage');
     setUsageCount(0);
+    // يطلّع من حساب Clerk كمان (لو كانت مسجّلة دخول)
+    if (isSignedIn) clerk.signOut();
   };
 
   // ===== المود بورد =====
@@ -1127,6 +1136,9 @@ export default function Home() {
           </nav>
 
           <div className="sb-foot">
+            {authLoaded && !isSignedIn && (
+              <button onClick={() => clerk.openSignIn()} className="sb-btn primary full" style={{ marginBottom: '0.6rem' }}>تسجيل الدخول</button>
+            )}
             {user ? (
               <div className="sb-user">
                 {user.plan === 'admin' ? (
@@ -1150,6 +1162,9 @@ export default function Home() {
               </div>
             ) : (
               <button onClick={() => setShowPricing(true)} className="sb-btn primary full">اشتركي الآن</button>
+            )}
+            {authLoaded && isSignedIn && !user && (
+              <button onClick={handleLogout} className="sb-btn ghost full" style={{ marginTop: '0.6rem' }}>خروج</button>
             )}
           </div>
         </aside>
