@@ -20,6 +20,10 @@ const CLAUDE_MODEL = 'claude-sonnet-5';
 const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
 // سطر واحد لتغيير نموذج الرسم بوجود صورة مرجعية (نفس نموذج تنويعات التصميم وتبديل القماش)
 const EDIT_MODEL = 'google/nano-banana-2-lite';
+// لقطة «تفاصيل» بس: نموذج أقوى (نانو بنانا 2 العادي) بدقة أعلى، لأن لوحة 2×2 تحتاج أمانة ودقة أكتر.
+// لو بدك ترجعي للأرخص: خلي DETAIL_MODEL = EDIT_MODEL ومسحي DETAIL_RESOLUTION.
+const DETAIL_MODEL = 'google/nano-banana-2';
+const DETAIL_RESOLUTION = '2K';
 
 const WAIT_SECONDS = 60;
 const POLL_MS = 2000;
@@ -63,7 +67,7 @@ const EDIT_SHOT_MAP = {
   catalog: 'ghost mannequin catalog shot: the garment shown on its own with its natural three-dimensional shape, no body and no model, the full garment clearly visible, professional e-commerce studio lighting',
   onmodel: 'the garment worn by a professional fashion model, full body, elegant natural pose, realistic studio fashion photography',
   flatlay: 'flat lay shot: the garment neatly laid flat, seen from directly above, soft even studio lighting',
-  detail: 'a detail sheet: ONE image laid out as a clean 2x2 collage of four close-up photographs of this same garment, separated by thin cream borders. Each panel is a different close-up of the most distinctive areas of the garment (for example the neckline or chest area, a sleeve and its cuff, the hem or edge trim, and a macro of the fabric and embellishment), showing the real colours, embroidery, beading, trims, linings and stitching exactly as in image 1. Do not redesign or add anything: copy every sleeve, cuff, band, trim and embroidery exactly as it appears in image 1, in the same positions and colours. No text and no labels',
+  detail: 'a detail sheet: ONE image laid out as a clean 2x2 collage of four close-up photographs of this same garment, separated by thin cream borders, all four with the same soft even studio lighting. Choose the four most distinctive areas that are actually visible in image 1 (for example the neckline or chest area, a sleeve and its cuff, the hem or edge trim, and a macro of the fabric and embellishment). Do not invent or redesign anything: every sleeve, cuff, band, trim, lining and embroidery must be exactly as in image 1, with the same shape, length, width, positions and colours. The fabric looks smooth, crisp and neatly pressed, with no random wrinkles or crumpling (keep only the pleats and gathers that are part of the design). No text and no labels',
 };
 
 export function buildEditPrompt(shot, background, description) {
@@ -178,15 +182,16 @@ async function settle(token, prediction, signal, deadline) {
   return { prediction: p };
 }
 
-async function runEdit(token, imageUrl, prompt, aspect, signal, deadline) {
+async function runEdit(token, imageUrl, prompt, aspect, signal, deadline, opts = {}) {
+  const model = opts.model || EDIT_MODEL;
   const attempts = [
-    { prompt, image_input: [imageUrl], aspect_ratio: aspect, output_format: 'jpg' },
+    { prompt, image_input: [imageUrl], aspect_ratio: aspect, output_format: 'jpg', ...(opts.extra || {}) },
     { prompt, image_input: [imageUrl] },
   ];
   let prediction = null;
   let lastStatus = 0;
   for (const input of attempts) {
-    const r = await fetch('https://api.replicate.com/v1/models/' + EDIT_MODEL + '/predictions', {
+    const r = await fetch('https://api.replicate.com/v1/models/' + model + '/predictions', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait=' + WAIT_SECONDS },
       signal,
@@ -267,7 +272,10 @@ export default async function handler(req, res) {
           return res.status(502).json({ error: 'تعذّر رفع الصورة لخدمة الرسم' });
         }
         const prompt = buildEditPrompt(shot, background, description);
-        const one = await runEdit(replicateToken, source, prompt, editAspectFor(shot), ctrl.signal, deadline);
+        const editOpts = shot === 'detail'
+          ? { model: DETAIL_MODEL, extra: DETAIL_RESOLUTION ? { resolution: DETAIL_RESOLUTION } : {} }
+          : {};
+        const one = await runEdit(replicateToken, source, prompt, editAspectFor(shot), ctrl.signal, deadline, editOpts);
         if (!one.url) return res.status(one.status || 502).json({ error: one.error });
         return res.status(200).json({ imageUrl: one.url, prompt });
       } catch (e) {
