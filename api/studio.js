@@ -21,11 +21,12 @@ const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
 // سطر واحد لتغيير نموذج الرسم بوجود صورة مرجعية (نفس نموذج تنويعات التصميم وتبديل القماش)
 const EDIT_MODEL = 'google/nano-banana-2-lite';
 // لقطة «تفاصيل» بس: نموذج ودقة مستقلين عن باقي اللقطات.
-// جُرّب 6 أكتوبر: 'google/nano-banana-2' + '2K' = نتيجة ممتازة بكلفة ≈10¢ (غالية).
-// الحالي: نفس نموذج باقي اللقطات (lite، ≈4¢) مع البرومبت الجديد، لنعرف إذا البرومبت لحاله يكفي.
-// للنسخة الأقوى: DETAIL_MODEL = 'google/nano-banana-2' و DETAIL_RESOLUTION = '2K' (أو '1K' لأرخص).
-export const DETAIL_MODEL = EDIT_MODEL;
-export const DETAIL_RESOLUTION = '';
+// نتائج التجارب (6 أكتوبر، نفس الفستان):
+//   lite + برومبت جديد (≈4¢): القماش ناعم لكن غيّر الألوان والإسوارة، ما بيحافظ على التصميم.
+//   'google/nano-banana-2' + '2K' (≈10¢): ممتاز وأمين للتصميم، لكن غالي.
+//   الحالي: 'google/nano-banana-2' + '1K' (لسا ما انقاست كلفته). لو ضعفت الدقة: '2K'.
+export const DETAIL_MODEL = 'google/nano-banana-2';
+export const DETAIL_RESOLUTION = '1K';
 
 const WAIT_SECONDS = 60;
 const POLL_MS = 2000;
