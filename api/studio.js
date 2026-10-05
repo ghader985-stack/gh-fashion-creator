@@ -63,7 +63,7 @@ const EDIT_SHOT_MAP = {
   catalog: 'ghost mannequin catalog shot: the garment shown on its own with its natural three-dimensional shape, no body and no model, the full garment clearly visible, professional e-commerce studio lighting',
   onmodel: 'the garment worn by a professional fashion model, full body, elegant natural pose, realistic studio fashion photography',
   flatlay: 'flat lay shot: the garment neatly laid flat, seen from directly above, soft even studio lighting',
-  detail: 'extreme close-up macro detail of the most distinctive area of the garment (its embellishment, beading, lace, pleats or fabric texture), showing the real texture and stitching, shallow depth of field',
+  detail: 'a detail sheet: ONE image laid out as a clean 2x2 collage of four close-up photographs of this same garment, separated by thin cream borders. Each panel is a different close-up of the most distinctive areas of the garment (for example the neckline or chest area, a sleeve and its cuff, the hem or edge trim, and a macro of the fabric and embellishment), showing the real colours, embroidery, beading, trims, linings and stitching exactly as in image 1. Do not redesign or add anything: copy every sleeve, cuff, band, trim and embroidery exactly as it appears in image 1, in the same positions and colours. No text and no labels',
 };
 
 export function buildEditPrompt(shot, background, description) {
@@ -82,6 +82,11 @@ Photorealistic, realistic fabric texture, sharp focus.`;
 
 function aspectFor(shot) {
   return shot === 'flatlay' ? '1:1' : shot === 'onmodel' ? '2:3' : '3:4';
+}
+
+// مع صورة مرجعية: لقطة التفاصيل لوحة مربّعة (شبكة 2×2)
+function editAspectFor(shot) {
+  return shot === 'detail' ? '1:1' : aspectFor(shot);
 }
 
 async function pollReplicate(getUrl, apiToken, maxTries = 40) {
@@ -262,7 +267,7 @@ export default async function handler(req, res) {
           return res.status(502).json({ error: 'تعذّر رفع الصورة لخدمة الرسم' });
         }
         const prompt = buildEditPrompt(shot, background, description);
-        const one = await runEdit(replicateToken, source, prompt, aspect, ctrl.signal, deadline);
+        const one = await runEdit(replicateToken, source, prompt, editAspectFor(shot), ctrl.signal, deadline);
         if (!one.url) return res.status(one.status || 502).json({ error: one.error });
         return res.status(200).json({ imageUrl: one.url, prompt });
       } catch (e) {
