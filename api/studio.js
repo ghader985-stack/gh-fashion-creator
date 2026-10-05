@@ -20,10 +20,12 @@ const CLAUDE_MODEL = 'claude-sonnet-5';
 const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
 // سطر واحد لتغيير نموذج الرسم بوجود صورة مرجعية (نفس نموذج تنويعات التصميم وتبديل القماش)
 const EDIT_MODEL = 'google/nano-banana-2-lite';
-// لقطة «تفاصيل» بس: نموذج أقوى (نانو بنانا 2 العادي) بدقة أعلى، لأن لوحة 2×2 تحتاج أمانة ودقة أكتر.
-// لو بدك ترجعي للأرخص: خلي DETAIL_MODEL = EDIT_MODEL ومسحي DETAIL_RESOLUTION.
-const DETAIL_MODEL = 'google/nano-banana-2';
-const DETAIL_RESOLUTION = '2K';
+// لقطة «تفاصيل» بس: نموذج ودقة مستقلين عن باقي اللقطات.
+// جُرّب 6 أكتوبر: 'google/nano-banana-2' + '2K' = نتيجة ممتازة بكلفة ≈10¢ (غالية).
+// الحالي: نفس نموذج باقي اللقطات (lite، ≈4¢) مع البرومبت الجديد، لنعرف إذا البرومبت لحاله يكفي.
+// للنسخة الأقوى: DETAIL_MODEL = 'google/nano-banana-2' و DETAIL_RESOLUTION = '2K' (أو '1K' لأرخص).
+export const DETAIL_MODEL = EDIT_MODEL;
+export const DETAIL_RESOLUTION = '';
 
 const WAIT_SECONDS = 60;
 const POLL_MS = 2000;
