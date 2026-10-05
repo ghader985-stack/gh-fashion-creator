@@ -1,7 +1,12 @@
 // api/studio.js
 // استوديو AI: يحوّل التصميم/الكونسبت إلى صورة قطعة احترافية
 // يستقبل: وصف التصميم + (اختياري) صورة مرجعية + إعدادات (نوع اللقطة، الخلفية)
-// يبني برومبت احترافي عبر Claude، ثم يولّد الصورة عبر Replicate FLUX
+//
+// طريقتان:
+//   1) مع صورة مرجعية: الصورة نفسها تدخل لنموذج الرسم (نانو بنانا) مع تعليمة قصيرة
+//      «نفس القطعة بالضبط»، فتطلع النتيجة من تصميمها هي مو من وصف كلامي.
+//      استدعاء واحد لـ Replicate، بدون كلود. نفس شكل الاستدعاء الشغّال بـ variation.js.
+//   2) بدون صورة: متل ما كان: كلود يبني برومبت من الوصف ثم FLUX يرسم.
 
 import formidable from 'formidable';
 import fs from 'fs';
@@ -13,6 +18,12 @@ export const config = {
 
 const CLAUDE_MODEL = 'claude-sonnet-5';
 const FLUX_MODEL = 'black-forest-labs/flux-1.1-pro';
+// سطر واحد لتغيير نموذج الرسم بوجود صورة مرجعية (نفس نموذج تنويعات التصميم وتبديل القماش)
+const EDIT_MODEL = 'google/nano-banana-2-lite';
+
+const WAIT_SECONDS = 60;
+const POLL_MS = 2000;
+const TOTAL_TIMEOUT_MS = 270000;
 
 function extractText(content) {
   if (!Array.isArray(content)) return '';
@@ -33,7 +44,7 @@ function detectImageType(buffer) {
   return 'image/jpeg';
 }
 
-// خرائط الإعدادات إلى وصف احترافي
+// خرائط الإعدادات إلى وصف احترافي (المسار بدون صورة، كما كانت)
 const SHOT_MAP = {
   catalog: 'ghost mannequin invisible-body catalog product shot, garment displayed on its own with natural three-dimensional shape as if worn but no visible body, full garment clearly visible, professional e-commerce studio lighting, realistic',
   onmodel: 'garment worn by a professional fashion model, full body, realistic studio fashion photography, elegant natural pose',
@@ -46,6 +57,32 @@ const BG_MAP = {
   white: 'clean pure white studio backdrop',
   dark: 'elegant dark charcoal studio backdrop with soft lighting',
 };
+
+// المسار مع صورة: سطر قصير بصيغة أمر لكل نوع لقطة
+const EDIT_SHOT_MAP = {
+  catalog: 'ghost mannequin catalog shot: the garment shown on its own with its natural three-dimensional shape, no body and no model, the full garment clearly visible, professional e-commerce studio lighting',
+  onmodel: 'the garment worn by a professional fashion model, full body, elegant natural pose, realistic studio fashion photography',
+  flatlay: 'flat lay shot: the garment neatly laid flat, seen from directly above, soft even studio lighting',
+  detail: 'extreme close-up macro detail of the most distinctive area of the garment (its embellishment, beading, lace, pleats or fabric texture), showing the real texture and stitching, shallow depth of field',
+};
+
+export function buildEditPrompt(shot, background, description) {
+  const shotLine = EDIT_SHOT_MAP[shot] || EDIT_SHOT_MAP.catalog;
+  const bgLine = BG_MAP[background] || BG_MAP.cream;
+  const notes = String(description || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 600);
+  return `Make a realistic professional product photo of the exact garment in image 1.
+
+Keep the design, silhouette, colours, fabric, embellishments and every detail identical to image 1. If image 1 is a drawing or sketch, render the same design as a real garment.
+
+Shot: ${shotLine}.
+Background: ${bgLine}.${notes ? `\nDesigner's notes: ${notes}` : ''}
+
+Photorealistic, realistic fabric texture, sharp focus.`;
+}
+
+function aspectFor(shot) {
+  return shot === 'flatlay' ? '1:1' : shot === 'onmodel' ? '2:3' : '3:4';
+}
 
 async function pollReplicate(getUrl, apiToken, maxTries = 40) {
   for (let i = 0; i < maxTries; i++) {
@@ -94,6 +131,88 @@ async function generateImage(prompt, apiToken, aspectRatio) {
   return Array.isArray(done.output) ? done.output[0] : done.output;
 }
 
+// ---------------------------------------------------------------------------
+// المسار مع صورة مرجعية (نفس دوال variation.js الشغّالة)
+// ---------------------------------------------------------------------------
+async function uploadToReplicate(buffer, mediaType, token, signal) {
+  const ext = ({ 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' })[mediaType] || 'jpg';
+  const boundary = '----gh' + Math.random().toString(36).slice(2);
+  const headPart = Buffer.from(
+    '--' + boundary + '\r\n' +
+    'Content-Disposition: form-data; name="content"; filename="source.' + ext + '"\r\n' +
+    'Content-Type: ' + mediaType + '\r\n\r\n', 'utf8');
+  const tail = Buffer.from('\r\n--' + boundary + '--\r\n', 'utf8');
+
+  const r = await fetch('https://api.replicate.com/v1/files', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'multipart/form-data; boundary=' + boundary },
+    signal,
+    body: Buffer.concat([headPart, buffer, tail]),
+  });
+  if (!r.ok) {
+    let detail = '';
+    try { detail = (await r.text()).slice(0, 200); } catch (e) { detail = ''; }
+    if (typeof console !== 'undefined') console.warn('[gh] studio upload', r.status, detail);
+    return null;
+  }
+  const data = await r.json();
+  return (data.urls && (data.urls.download || data.urls.get)) || null;
+}
+
+async function settle(token, prediction, signal, deadline) {
+  let p = prediction;
+  while (p && (p.status === 'starting' || p.status === 'processing')) {
+    if (Date.now() > deadline) return { timeout: true };
+    const url = p.urls && p.urls.get;
+    if (!url) return { failed: 'no poll url' };
+    await new Promise((r) => setTimeout(r, POLL_MS));
+    const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token }, signal });
+    if (!r.ok) return { failed: 'poll ' + r.status };
+    p = await r.json();
+  }
+  return { prediction: p };
+}
+
+async function runEdit(token, imageUrl, prompt, aspect, signal, deadline) {
+  const attempts = [
+    { prompt, image_input: [imageUrl], aspect_ratio: aspect, output_format: 'jpg' },
+    { prompt, image_input: [imageUrl] },
+  ];
+  let prediction = null;
+  let lastStatus = 0;
+  for (const input of attempts) {
+    const r = await fetch('https://api.replicate.com/v1/models/' + EDIT_MODEL + '/predictions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'wait=' + WAIT_SECONDS },
+      signal,
+      body: JSON.stringify({ input }),
+    });
+    if (r.ok) { prediction = await r.json(); break; }
+    lastStatus = r.status;
+    let detail = '';
+    try { detail = (await r.text()).slice(0, 300); } catch (e) { detail = ''; }
+    if (typeof console !== 'undefined') console.warn('[gh] studio status', r.status, detail);
+    if (r.status === 402) return { status: 402, error: 'رصيد Replicate خلص' };
+    if (r.status !== 400 && r.status !== 422) break;
+  }
+  if (!prediction) return { status: 502, error: 'تعذّر إنشاء النتيجة (' + (lastStatus || 502) + ')' };
+
+  const done = await settle(token, prediction, signal, deadline);
+  if (done.timeout) return { status: 504, error: 'انتهت مهلة الرسم' };
+  if (done.failed) {
+    if (typeof console !== 'undefined') console.warn('[gh] studio poll', done.failed);
+    return { status: 502, error: 'تعذّر إنشاء النتيجة' };
+  }
+  const p = done.prediction;
+  if (!p || p.status !== 'succeeded') {
+    if (typeof console !== 'undefined') console.warn('[gh] studio end', p && p.status, p && p.error);
+    return { status: 502, error: 'تعذّر إنشاء النتيجة' };
+  }
+  const out = Array.isArray(p.output) ? p.output[0] : p.output;
+  if (!out || typeof out !== 'string') return { status: 502, error: 'النموذج ما رجّع صورة' };
+  return { url: out };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -101,7 +220,7 @@ export default async function handler(req, res) {
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const replicateToken = process.env.REPLICATE_API_TOKEN;
-  if (!anthropicKey || !replicateToken) {
+  if (!replicateToken) {
     return res.status(500).json({ error: 'المفاتيح غير مضبوطة على الخادم' });
   }
 
@@ -129,32 +248,45 @@ export default async function handler(req, res) {
         : files.image
       : null;
 
-    // بناء برومبت احترافي عبر Claude (مع تحليل الصورة المرجعية إن وُجدت)
+    const aspect = aspectFor(shot);
+
+    // ===== مع صورة مرجعية: الصورة تدخل لنموذج الرسم مباشرة =====
+    if (imageFile) {
+      const ctrl = new AbortController();
+      const deadline = Date.now() + TOTAL_TIMEOUT_MS;
+      const timer = setTimeout(() => ctrl.abort(), TOTAL_TIMEOUT_MS + 5000);
+      try {
+        const buf = fs.readFileSync(imageFile.filepath);
+        const source = await uploadToReplicate(buf, detectImageType(buf), replicateToken, ctrl.signal);
+        if (!source) {
+          return res.status(502).json({ error: 'تعذّر رفع الصورة لخدمة الرسم' });
+        }
+        const prompt = buildEditPrompt(shot, background, description);
+        const one = await runEdit(replicateToken, source, prompt, aspect, ctrl.signal, deadline);
+        if (!one.url) return res.status(one.status || 502).json({ error: one.error });
+        return res.status(200).json({ imageUrl: one.url, prompt });
+      } catch (e) {
+        const aborted = e && e.name === 'AbortError';
+        if (typeof console !== 'undefined') console.warn('[gh] studio call', e && e.message);
+        return res.status(504).json({ error: aborted ? 'انتهت مهلة الرسم' : 'تعذّر الاتصال بخدمة الرسم' });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // ===== بدون صورة: كلود يبني البرومبت من الوصف ثم FLUX يرسم (كما كان) =====
+    if (!anthropicKey) {
+      return res.status(500).json({ error: 'المفاتيح غير مضبوطة على الخادم' });
+    }
+
     const promptBuilderText = `أنتِ خبيرة في كتابة برومبتات توليد صور الأزياء الاحترافية بالإنجليزية.
 
 المطلوب: صورة منتج واقعية احترافية لقطعة أزياء.
 - وصف التصميم من المصممة: ${description}
 - نوع اللقطة المطلوب: ${SHOT_MAP[shot] || SHOT_MAP.catalog}
 - الخلفية: ${BG_MAP[background] || BG_MAP.cream}
-${imageFile ? '- يوجد صورة مرجعية مرفقة (قد تكون سكتش أو تصميم): حللي القطعة فيها بدقة (القصّة، الألوان، الخامة، التفاصيل) وحوّليها إلى وصف قطعة حقيقية واقعية مطابقة لها تماماً.' : ''}
 
 اكتبي برومبت إنجليزي واحد فقط (فقرة واحدة متصلة، بدون عناوين، بدون ترقيم، بدون شرح)، غني بالتفاصيل: نوع القطعة وقصّتها، القماش وملمسه الواقعي، الألوان، التفاصيل والزخارف، نوع اللقطة والإضاءة والخلفية. مهم جداً: يجب أن تكون النتيجة صورة فوتوغرافية واقعية 100% لقطعة حقيقية (photorealistic, realistic fabric, professional studio product photography, 8k, sharp focus) — وليست رسمة أو إليستريشن أو أسلوب خيالي. أرجعي البرومبت فقط.`;
-
-    const claudeContent = [];
-    if (imageFile) {
-      const imgBuffer = fs.readFileSync(imageFile.filepath);
-      const base64 = imgBuffer.toString('base64');
-      const detectedType = detectImageType(imgBuffer);
-      claudeContent.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: detectedType,
-          data: base64,
-        },
-      });
-    }
-    claudeContent.push({ type: 'text', text: promptBuilderText });
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -166,7 +298,7 @@ ${imageFile ? '- يوجد صورة مرجعية مرفقة (قد تكون سكت
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 600,
-        messages: [{ role: 'user', content: claudeContent }],
+        messages: [{ role: 'user', content: [{ type: 'text', text: promptBuilderText }] }],
       }),
     });
 
@@ -181,8 +313,6 @@ ${imageFile ? '- يوجد صورة مرجعية مرفقة (قد تكون سكت
     if (!imagePrompt) {
       return res.status(500).json({ error: 'تعذّر بناء برومبت الصورة' });
     }
-
-    const aspect = shot === 'flatlay' ? '1:1' : shot === 'onmodel' ? '2:3' : '3:4';
 
     const imageUrl = await generateImage(imagePrompt, replicateToken, aspect);
 
