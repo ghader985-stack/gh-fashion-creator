@@ -1328,7 +1328,7 @@ export default function Home() {
 
                 {studioResult && (
                   <div className="studio-result">
-                    <div className="studio-img" onClick={() => downloadImage(studioResult.imageUrl, 0)} title="اضغطي لحفظ الصورة">
+                    <div className="studio-img" onClick={() => downloadFlat(studioResult.imageUrl, 'studio-' + fsStamp(Date.now()))} title="اضغطي لحفظ الصورة">
                       <img src={studioResult.imageUrl} alt="design" />
                       <span className="save-badge">حفظ</span>
                     </div>
