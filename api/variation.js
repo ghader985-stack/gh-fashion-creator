@@ -13,6 +13,7 @@ import formidable from 'formidable';
 import { put } from '@vercel/blob';
 import fs from 'fs';
 
+import { guard } from './_guard';
 export const config = {
   api: { bodyParser: false },
   maxDuration: 300,
@@ -172,6 +173,10 @@ async function runOne(token, images, prompt, w, h, signal, deadline) {
 // ---------------------------------------------------------------------------
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // تحقق الحساب + خصم من كمية الأداة (api/_guard.js)
+  const g = await guard(req, res, 'variation');
+  if (!g) return;
 
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) return res.status(500).json({ error: 'مفتاح Replicate غير مضبوط على الخادم' });
