@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
+    "@clerk/backend": "^2.33.7",
     "@clerk/nextjs": "6.39.7",
     "@vercel/blob": "^2.8.0",
     "formidable": "^3.5.1",
