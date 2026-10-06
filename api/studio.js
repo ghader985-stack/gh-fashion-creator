@@ -63,28 +63,52 @@ const BG_MAP = {
   cream: 'clean warm cream and ivory studio backdrop',
   white: 'clean pure white studio backdrop',
   dark: 'elegant dark charcoal studio backdrop with soft lighting',
+  marble: 'polished pale marble studio backdrop with subtle soft veining, elegant and uncluttered',
+};
+
+// مسار الصورة المرجعية: لقطتا الكتالوج والموديل بمشهد استوديو حقيقي (خلفية منحنية تنزل لأرضية، ظل وانعكاس)
+// حتى ما تطلع القطعة طايرة بالهوا. لقطتا المسطّحة والتفاصيل بتضل على BG_MAP.
+const BG_SCENE_MAP = {
+  cream: 'a seamless warm cream and ivory studio backdrop that sweeps down into a smooth cream floor, with a soft realistic shadow on the floor',
+  white: 'a clean pure white seamless studio backdrop that sweeps down into a white floor, with a soft realistic shadow on the floor',
+  dark: 'an elegant dark charcoal seamless studio backdrop that sweeps down into a dark glossy floor with subtle reflections',
+  marble: 'a luxurious studio set with a polished pale marble floor with soft reflections and a softly lit pale marble wall behind',
+};
+
+// الإضاءة (تنطبق على كل اللقطات). soft هي الافتراضية.
+const LIGHT_MAP = {
+  soft: 'soft diffused light from a large soft-box, even and flattering, with gentle natural shadows',
+  bright: 'bright high-key lighting, very even and almost shadowless, crisp clean look with true-to-life colours',
+  golden: 'warm golden light, warm amber highlights and a soft golden glow across the whole scene',
+  dramatic: 'dramatic low-key lighting from one side, strong contrast with deep shadows and bright highlights on the fabric, moody luxury editorial look',
+  window: 'soft natural window light coming from one side, a gentle gradient from light to shadow across the scene',
 };
 
 // المسار مع صورة: سطر قصير بصيغة أمر لكل نوع لقطة
 const EDIT_SHOT_MAP = {
-  catalog: 'ghost mannequin catalog shot: the garment shown on its own with its natural three-dimensional shape, no body and no model, the full garment clearly visible, professional e-commerce studio lighting',
-  onmodel: 'the garment worn by a professional fashion model, full body, elegant natural pose, realistic studio fashion photography',
-  flatlay: 'flat lay shot: the garment neatly laid flat, seen from directly above, soft even studio lighting',
-  detail: 'a detail sheet: ONE image laid out as a clean 2x2 collage of four close-up photographs of this same garment, separated by thin cream borders, all four with the same soft even studio lighting. Choose the four most distinctive areas that are actually visible in image 1 (for example the neckline or chest area, a sleeve and its cuff, the hem or edge trim, and a macro of the fabric and embellishment). Do not invent or redesign anything: every sleeve, cuff, band, trim, lining and embroidery must be exactly as in image 1, with the same shape, length, width, positions and colours. The fabric looks smooth, crisp and neatly pressed, with no random wrinkles or crumpling (keep only the pleats and gathers that are part of the design). No text and no labels',
+  catalog: 'catalog display shot: the garment shown on an elegant neutral headless dress form on a slim stand, standing on the studio floor with a soft realistic shadow beneath it, the full garment clearly visible, not floating',
+  onmodel: 'the garment worn by a professional fashion model, full body, elegant natural pose, standing on the studio floor, realistic studio fashion photography',
+  flatlay: 'flat lay shot: the garment neatly laid flat, seen from directly above',
+  detail: 'a detail sheet: ONE image laid out as a clean 2x2 collage of four close-up photographs of this same garment, separated by thin cream borders, all four with the same lighting. Choose the four most distinctive areas that are actually visible in image 1 (for example the neckline or chest area, a sleeve and its cuff, the hem or edge trim, and a macro of the fabric and embellishment). Do not invent or redesign anything: every sleeve, cuff, band, trim, lining and embroidery must be exactly as in image 1, with the same shape, length, width, positions and colours. The fabric looks smooth, crisp and neatly pressed, with no random wrinkles or crumpling (keep only the pleats and gathers that are part of the design). No text and no labels',
 };
 
-export function buildEditPrompt(shot, background, description) {
+export function buildEditPrompt(shot, background, description, lighting) {
   const shotLine = EDIT_SHOT_MAP[shot] || EDIT_SHOT_MAP.catalog;
-  const bgLine = BG_MAP[background] || BG_MAP.cream;
+  const sceneShot = shot === 'onmodel' || !EDIT_SHOT_MAP[shot] || shot === 'catalog';
+  const bgLine = sceneShot
+    ? (BG_SCENE_MAP[background] || BG_SCENE_MAP.cream)
+    : (BG_MAP[background] || BG_MAP.cream);
+  const lightLine = LIGHT_MAP[lighting] || LIGHT_MAP.soft;
   const notes = String(description || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 600);
   return `Make a realistic professional product photo of the exact garment in image 1.
 
 Keep the design, silhouette, colours, fabric, embellishments and every detail identical to image 1. If image 1 is a drawing or sketch, render the same design as a real garment.
 
 Shot: ${shotLine}.
-Background: ${bgLine}.${notes ? `\nDesigner's notes: ${notes}` : ''}
+Background: ${bgLine}.
+Lighting: ${lightLine}.${notes ? `\nDesigner's notes: ${notes}` : ''}
 
-Photorealistic, realistic fabric texture, sharp focus.`;
+Photorealistic high-end luxury fashion studio photography, realistic fabric texture, sharp focus.`;
 }
 
 function aspectFor(shot) {
@@ -250,6 +274,7 @@ export default async function handler(req, res) {
     const description = getField(fields.description);
     const shot = getField(fields.shot) || 'catalog';
     const background = getField(fields.background) || 'cream';
+    const lighting = getField(fields.lighting) || 'soft';
 
     if (!description.trim()) {
       return res.status(400).json({ error: 'اكتبي وصف التصميم أولاً' });
@@ -274,7 +299,7 @@ export default async function handler(req, res) {
         if (!source) {
           return res.status(502).json({ error: 'تعذّر رفع الصورة لخدمة الرسم' });
         }
-        const prompt = buildEditPrompt(shot, background, description);
+        const prompt = buildEditPrompt(shot, background, description, lighting);
         const editOpts = shot === 'detail'
           ? { model: DETAIL_MODEL, extra: DETAIL_RESOLUTION ? { resolution: DETAIL_RESOLUTION } : {} }
           : {};
@@ -301,6 +326,7 @@ export default async function handler(req, res) {
 - وصف التصميم من المصممة: ${description}
 - نوع اللقطة المطلوب: ${SHOT_MAP[shot] || SHOT_MAP.catalog}
 - الخلفية: ${BG_MAP[background] || BG_MAP.cream}
+- الإضاءة: ${LIGHT_MAP[lighting] || LIGHT_MAP.soft}
 
 اكتبي برومبت إنجليزي واحد فقط (فقرة واحدة متصلة، بدون عناوين، بدون ترقيم، بدون شرح)، غني بالتفاصيل: نوع القطعة وقصّتها، القماش وملمسه الواقعي، الألوان، التفاصيل والزخارف، نوع اللقطة والإضاءة والخلفية. مهم جداً: يجب أن تكون النتيجة صورة فوتوغرافية واقعية 100% لقطعة حقيقية (photorealistic, realistic fabric, professional studio product photography, 8k, sharp focus) — وليست رسمة أو إليستريشن أو أسلوب خيالي. أرجعي البرومبت فقط.`;
 
