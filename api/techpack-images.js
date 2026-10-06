@@ -12,6 +12,7 @@ import formidable from 'formidable';
 import { put } from '@vercel/blob';
 import fs from 'fs';
 
+import { guard } from './_guard';
 export const config = {
   api: { bodyParser: false },
   maxDuration: 300,
@@ -215,6 +216,10 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // تحقق الحساب + خصم من كمية الأداة (api/_guard.js)
+  const g = await guard(req, res, 'flat');
+  if (!g) return;
 
   const replicateToken = process.env.REPLICATE_API_TOKEN;
   const apiKey = process.env.ANTHROPIC_API_KEY;
