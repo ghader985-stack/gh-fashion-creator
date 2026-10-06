@@ -74,6 +74,7 @@ export default function Home() {
   const [studioPreview, setStudioPreview] = useState('');
   const [studioShot, setStudioShot] = useState('catalog');
   const [studioBg, setStudioBg] = useState('cream');
+  const [studioLight, setStudioLight] = useState('soft');
   const [studioLoading, setStudioLoading] = useState(false);
   const [studioResult, setStudioResult] = useState(null);
   const [studioError, setStudioError] = useState('');
@@ -377,6 +378,7 @@ export default function Home() {
       fd.append('description', studioDesc);
       fd.append('shot', studioShot);
       fd.append('background', studioBg);
+      fd.append('lighting', studioLight);
       if (studioImage) fd.append('image', studioImage);
       const r = await fetch('/api/studio', { method: 'POST', body: fd });
       const d = await r.json();
@@ -1312,8 +1314,16 @@ export default function Home() {
                   <div className="field">
                     <label>الخلفية</label>
                     <div className="chips">
-                      {[{ id: 'cream', n: 'كريمي' }, { id: 'white', n: 'أبيض' }, { id: 'dark', n: 'داكن' }].map((b) => (
+                      {[{ id: 'cream', n: 'كريمي' }, { id: 'white', n: 'أبيض' }, { id: 'dark', n: 'داكن' }, { id: 'marble', n: 'رخام' }].map((b) => (
                         <button key={b.id} onClick={() => setStudioBg(b.id)} className={`chip ${studioBg === b.id ? 'active' : ''}`}>{b.n}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>الإضاءة</label>
+                    <div className="chips">
+                      {[{ id: 'soft', n: 'ناعمة (سوفت بوكس)' }, { id: 'bright', n: 'ساطعة نظيفة' }, { id: 'golden', n: 'ذهبية دافئة' }, { id: 'dramatic', n: 'درامية' }, { id: 'window', n: 'ضوء نافذة' }].map((l) => (
+                        <button key={l.id} onClick={() => setStudioLight(l.id)} className={`chip ${studioLight === l.id ? 'active' : ''}`}>{l.n}</button>
                       ))}
                     </div>
                   </div>
