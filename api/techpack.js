@@ -17,6 +17,7 @@
 import formidable from 'formidable';
 import fs from 'fs';
 
+import { guard } from './_guard';
 export const config = {
   api: { bodyParser: false },
   maxDuration: 300,
@@ -272,6 +273,10 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // تحقق الحساب + خصم من كمية الأداة (api/_guard.js)
+  const g = await guard(req, res, 'techpack');
+  if (!g) return;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
