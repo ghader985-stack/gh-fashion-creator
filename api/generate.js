@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import formidable from "formidable";
 import fs from "fs";
+import { guard } from './_guard';
 export const config = {
   api: {
     bodyParser: false,
@@ -10,6 +11,10 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  // تحقق الحساب + خصم من كمية الأداة (api/_guard.js)
+  const g = await guard(req, res, (String(req.headers['x-gh-tool'] || '') === 'video' ? 'video' : 'marketing'));
+  if (!g) return;
   try {
     const form = formidable({
       maxFileSize: 10 * 1024 * 1024,
