@@ -53,13 +53,11 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('moodboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
-  const [user, setUser] = useState(null);
+  // حالة الحساب والرصيد من الخادم (/api/me): الاشتراك والكميات المتبقية لكل أداة
+  const [me, setMe] = useState(null);
   // تسجيل الدخول عبر Clerk: isLoaded = المكتبة خلصت تحميل، isSignedIn = في حساب مسجّل
-  const { isLoaded: authLoaded, isSignedIn } = useAuth();
+  const { isLoaded: authLoaded, isSignedIn, getToken } = useAuth();
   const clerk = useClerk();
-  const [usageCount, setUsageCount] = useState(0);
-  const [adminCode, setAdminCode] = useState('');
-  const [showAdminInput, setShowAdminInput] = useState(false);
 
   // ===== المود بورد =====
   const [moodDescription, setMoodDescription] = useState('');
@@ -187,21 +185,50 @@ export default function Home() {
   const [vidLoading, setVidLoading] = useState(false);
   const [vidResult, setVidResult] = useState('');
 
-  const plans = {
-    admin: { name: 'Admin', limit: 999999, price: 0 },
-    basic: { name: 'Basic', limit: 200, price: 15 },
-    pro: { name: 'Pro', limit: 400, price: 35 },
-    enterprise: { name: 'Enterprise', limit: 700, price: 70 },
+  // ===== الحساب والرصيد (من الخادم، مو من المتصفح) =====
+  // الخطط والكميات والخصم كلها على الخادم (api/_guard.js وapi/me.js).
+  // المتصفح بيعرض بس، وما بيقدر يغيّر شي.
+  const TAB_TOOL = {
+    moodboard: 'moodboard', studio: 'studio', color: 'color', fabric: 'fabric',
+    variations: 'variation', flat: 'flat', techpack: 'techpack', marketing: 'marketing', video: 'video',
+  };
+
+  // طلب بتوكن الحساب (Clerk): الخادم هو اللي بيتحقق منه
+  const authFetch = async (url, opts = {}) => {
+    const headers = new Headers(opts.headers || {});
+    try {
+      const t = await getToken();
+      if (t) headers.set('Authorization', 'Bearer ' + t);
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] token', e && e.message);
+    }
+    return fetch(url, { ...opts, headers });
+  };
+
+  const refreshMe = async () => {
+    try {
+      const r = await authFetch('/api/me');
+      if (!r.ok) throw new Error('me ' + r.status);
+      setMe(await r.json());
+    } catch (e) {
+      if (typeof console !== 'undefined') console.warn('[gh] me', e && e.message);
+    }
   };
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('gh_user');
-    // قراءة التخزين محميّة: قيمة تالفة كانت تُنتج NaN فينكسر العدّاد بصمت
-    try { if (savedUser) setUser(JSON.parse(savedUser)); }
-    catch (e) { if (typeof console !== 'undefined') console.warn('[gh] user', e && e.message); }
-    const savedUsage = parseInt(localStorage.getItem('gh_usage'), 10);
-    if (Number.isFinite(savedUsage) && savedUsage >= 0) setUsageCount(savedUsage);
+    // تنظيف مفاتيح النظام القديم (خطط وعدّاد كانوا محفوظين بالمتصفح)
+    try { localStorage.removeItem('gh_user'); localStorage.removeItem('gh_usage'); }
+    catch (e) { if (typeof console !== 'undefined') console.warn('[gh] storage', e && e.message); }
   }, []);
+
+  useEffect(() => {
+    if (!authLoaded) return;
+    refreshMe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoaded, isSignedIn]);
+
+  const toolNow = TAB_TOOL[activeTab];
+  const statNow = me && me.tools && toolNow ? me.tools[toolNow] : null;
 
   // مجموعات السايدبار — مرتبة مثل المنصات الاحترافية
   const navGroups = [
@@ -239,23 +266,30 @@ export default function Home() {
   const videoMoods = ['cinematic', 'dramatic', 'soft', 'energetic'];
 
   // ===== helpers =====
-  const checkUsageLimit = () => {
-    if (!user) return false;
-    if (user.plan === 'admin') return true;
-    return usageCount < plans[user.plan]?.limit;
+  const remainingOf = (tool) => {
+    if (!me || !me.signedIn) return 0;
+    if (me.owner) return 99;
+    const t = me.tools && me.tools[tool];
+    return t ? Math.max(0, t.limit - t.used) : 0;
   };
-  const incrementUsage = () => {
-    if (user?.plan === 'admin') return;
-    const n = usageCount + 1;
-    setUsageCount(n);
-    localStorage.setItem('gh_usage', n.toString());
-  };
-  const gate = () => {
+  // بعد كل نجاح: نقرأ الرصيد الجديد من الخادم (هو اللي خصم)
+  const incrementUsage = () => { refreshMe(); };
+  const gate = (tool) => {
     // لازم حساب مسجّل أول: بدونه يظهر نافذة تسجيل الدخول وما ينفّذ شي
     if (!authLoaded) return false;
     if (!isSignedIn) { clerk.openSignIn(); return false; }
-    if (!user) { setShowPricing(true); return false; }
-    if (!checkUsageLimit()) { alert('انتهت توليداتك! جددي اشتراكك'); setShowPricing(true); return false; }
+    if (!me || !me.signedIn) {
+      refreshMe();
+      alert('جارٍ التحقق من حسابك — حاولي بعد لحظة، وإذا تكرر حدّثي الصفحة');
+      return false;
+    }
+    if (me.owner) return true;
+    if (!me.plan) { setShowPricing(true); return false; }
+    if (tool && tool !== 'analysis' && remainingOf(tool) < 1) {
+      alert('خلصت حصتك من هالأداة لهالفترة');
+      setShowPricing(true);
+      return false;
+    }
     return true;
   };
 
@@ -269,53 +303,19 @@ export default function Home() {
     }
   };
 
-  const handleAdminLogin = () => {
-    fetch('/api/admin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: adminCode }),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.ok) {
-          const adminUser = { plan: 'admin', subscribedAt: new Date().toISOString() };
-          setUser(adminUser);
-          localStorage.setItem('gh_user', JSON.stringify(adminUser));
-          setShowAdminInput(false);
-          setAdminCode('');
-          alert('مرحباً بكِ يا مالكة الأداة');
-        } else {
-          alert('كلمة السر غير صحيحة');
-        }
-      })
-      .catch(() => alert('خطأ في الاتصال'));
-  };
-
-  const handleSubscribe = (plan) => {
-    setUser({ plan, subscribedAt: new Date().toISOString() });
-    localStorage.setItem('gh_user', JSON.stringify({ plan }));
-    setUsageCount(0);
-    localStorage.setItem('gh_usage', '0');
-    setShowPricing(false);
-    alert(`تم الاشتراك في ${plans[plan].name}`);
-  };
-
   const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('gh_user');
-    localStorage.removeItem('gh_usage');
-    setUsageCount(0);
-    // يطلّع من حساب Clerk كمان (لو كانت مسجّلة دخول)
+    setMe(null);
+    // يطلّع من حساب Clerk
     if (isSignedIn) clerk.signOut();
   };
 
   // ===== المود بورد =====
   const handleMoodboard = async () => {
-    if (!gate()) return;
+    if (!gate('moodboard')) return;
     if (!moodDescription.trim()) { alert('اكتبي وصف الكونسبت أولاً'); return; }
     setMoodLoading(true); setMoodBoard(null); setMoodError('');
     try {
-      const r = await fetch('/api/moodboard', {
+      const r = await authFetch('/api/moodboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: moodDescription }),
@@ -370,7 +370,7 @@ export default function Home() {
 
   // ===== استوديو AI =====
   const handleStudio = async () => {
-    if (!gate()) return;
+    if (!gate('studio')) return;
     if (!studioDesc.trim()) { alert('اكتبي وصف التصميم أولاً'); return; }
     setStudioLoading(true); setStudioResult(null); setStudioError('');
     try {
@@ -380,7 +380,7 @@ export default function Home() {
       fd.append('background', studioBg);
       fd.append('lighting', studioLight);
       if (studioImage) fd.append('image', studioImage);
-      const r = await fetch('/api/studio', { method: 'POST', body: fd });
+      const r = await authFetch('/api/studio', { method: 'POST', body: fd });
       const d = await r.json();
       if (d.error) setStudioError(d.error);
       else { setStudioResult(d); incrementUsage(); }
@@ -392,7 +392,7 @@ export default function Home() {
 
   // ===== توليد الفلات سكتش =====
   const handleFlat = async () => {
-    if (!gate()) return;
+    if (!gate('flat')) return;
     if (!flatImage) { setFlatError('ارفعي صورة التصميم أولاً'); return; }
     setFlatLoading(true); setFlatError('');
     setFlatFront(''); setFlatBack(''); setFlatColorFront(''); setFlatColorBack('');
@@ -405,7 +405,7 @@ export default function Home() {
         flatSketchBrief: flatDesc,
         pieceCount: 1,
       }));
-      const r = await fetch('/api/techpack-images', { method: 'POST', body: fd });
+      const r = await authFetch('/api/techpack-images', { method: 'POST', body: fd });
       const d = await r.json();
       if (d.error) { setFlatError(d.error); setFlatLoading(false); return; }
       if (!d.lineFrontImage && !d.coloredFrontImage) {
@@ -415,6 +415,7 @@ export default function Home() {
       setFlatBack(d.lineBackImage || '');
       setFlatColorFront(d.coloredFrontImage || '');
       setFlatColorBack(d.coloredBackImage || '');
+      incrementUsage();
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh]', e && e.message);
       setFlatError('خطأ في الاتصال، حاولي مرة ثانية');
@@ -429,7 +430,7 @@ export default function Home() {
   // اللون والبانتون المعروضان يُقرآن من بكسلات الصورة، لا من كلام النموذج.
   const handleCcImage = async (file) => {
     if (!file) return;
-    if (!gate()) return;
+    if (!gate('analysis')) return;
     setCcError('');
     setCcNote('');
     setCcZones([]);
@@ -449,7 +450,7 @@ export default function Home() {
       setCcStage('جارٍ كشف ألوان القطعة…');
       const fd = new FormData();
       fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
-      const r = await fetch('/api/colorzones', { method: 'POST', body: fd });
+      const r = await authFetch('/api/colorzones', { method: 'POST', body: fd });
       let body = null;
       try { body = await r.json(); } catch (e) { body = null; }
       if (!r.ok || !body || !Array.isArray(body.zones) || !body.zones.length) {
@@ -533,21 +534,10 @@ export default function Home() {
     return out;
   })();
 
-  const ccSpend = (k) => {
-    if (!k || user?.plan === 'admin') return;
-    setUsageCount((c) => {
-      const n = c + k;
-      localStorage.setItem('gh_usage', n.toString());
-      return n;
-    });
-  };
+  // الخصم صار على الخادم؛ هون بس نقرأ الرصيد الجديد
+  const ccSpend = () => { refreshMe(); };
 
-  const ccAffordable = () => {
-    if (!user) return 0;
-    if (user.plan === 'admin') return 99;
-    const limit = plans[user.plan]?.limit || 0;
-    return Math.max(0, Math.floor((limit - usageCount) / CC_CREDITS_PER_IMAGE));
-  };
+  const ccAffordable = () => remainingOf('color');
 
   // الاستدعاء المدفوع الوحيد: الصورة الأصلية + وصف نصّي لكل تغيير.
   const ccGenerate = async () => {
@@ -555,7 +545,7 @@ export default function Home() {
       setCcError('اختاري لون جديد لمنطقة وحدة عالأقل');
       return;
     }
-    if (!gate()) return;
+    if (!gate('color')) return;
     if (ccAffordable() < 1) {
       setCcError('رصيدك ما بيكفي لصورة وحدة — جدّدي الاشتراك');
       setShowPricing(true);
@@ -609,7 +599,7 @@ export default function Home() {
         fd.append('refParts', JSON.stringify(smallRefs.map((g) => g.zones.map((z) => z.parts).join(' and '))));
       }
 
-      const r = await fetch('/api/recolor', { method: 'POST', body: fd });
+      const r = await authFetch('/api/recolor', { method: 'POST', body: fd });
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || !d.url) {
@@ -635,7 +625,7 @@ export default function Home() {
               fdd.append('detail', '1');
               fdd.append('w', String(g.r.w));
               fdd.append('h', String(g.r.h));
-              const rd = await fetch('/api/recolor', { method: 'POST', body: fdd });
+              const rd = await authFetch('/api/recolor', { method: 'POST', body: fdd, headers: { 'x-gh-detail': '1' } });
               let dd = null;
               try { dd = await rd.json(); } catch (e) { dd = null; }
               if (!rd.ok || !dd || !dd.url) continue;
@@ -677,7 +667,7 @@ export default function Home() {
   //   2) رسم: استدعاء واحد مهما كان عدد المناطق — FS_CREDITS نقطة
   const handleFsImage = async (file) => {
     if (!file) return;
-    if (!gate()) return;
+    if (!gate('analysis')) return;
     setFsError('');
     setFsZones([]);
     setFsData(null);
@@ -696,7 +686,7 @@ export default function Home() {
       setFsStage('جارٍ تحليل أقمشة القطعة…');
       const fd = new FormData();
       fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
-      const r = await fetch('/api/fabriczones', { method: 'POST', body: fd });
+      const r = await authFetch('/api/fabriczones', { method: 'POST', body: fd });
       let body = null;
       try { body = await r.json(); } catch (e) { body = null; }
       if (!r.ok || !body || !Array.isArray(body.zones) || !body.zones.length) {
@@ -766,12 +756,7 @@ export default function Home() {
     setFsPicker(null);
   };
 
-  const fsAffordable = () => {
-    if (!user) return 0;
-    if (user.plan === 'admin') return 99;
-    const limit = plans[user.plan]?.limit || 0;
-    return Math.max(0, Math.floor((limit - usageCount) / FS_CREDITS));
-  };
+  const fsAffordable = () => remainingOf('fabric');
 
   // الاستدعاء المدفوع الوحيد
   const fsGenerate = async () => {
@@ -779,7 +764,7 @@ export default function Home() {
       setFsError('اختاري قماش لمنطقة وحدة عالأقل');
       return;
     }
-    if (!gate()) return;
+    if (!gate('fabric')) return;
     if (fsAffordable() < 1) {
       setFsError('رصيدك ما بيكفي لصورة وحدة — جدّدي الاشتراك');
       setShowPricing(true);
@@ -816,7 +801,7 @@ export default function Home() {
       fd.append('w', String(send.width));
       fd.append('h', String(send.height));
 
-      const r = await fetch('/api/fabricswap', { method: 'POST', body: fd });
+      const r = await authFetch('/api/fabricswap', { method: 'POST', body: fd });
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || !d.url) {
@@ -859,7 +844,7 @@ export default function Home() {
 
   const dvAnalyse = async () => {
     if (!dvFront) { setDvError('ارفعي الصورة الأمامية أولاً'); return; }
-    if (!gate()) return;
+    if (!gate('analysis')) return;
     setDvError('');
     setDvCats([]);
     setDvPick({});
@@ -874,7 +859,7 @@ export default function Home() {
       setDvStage('جارٍ تحليل التصميم…');
       const fd = new FormData();
       fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'design.jpg');
-      const r = await fetch('/api/variationoptions', { method: 'POST', body: fd });
+      const r = await authFetch('/api/variationoptions', { method: 'POST', body: fd });
       let body = null;
       try { body = await r.json(); } catch (e) { body = null; }
       if (!r.ok || !body || !Array.isArray(body.categories) || !body.categories.length) {
@@ -911,12 +896,7 @@ export default function Home() {
     .filter(Boolean);
   const dvReady = dvChosen.length > 0 || dvNotes.trim().length > 0;
 
-  const dvAffordable = () => {
-    if (!user) return 0;
-    if (user.plan === 'admin') return 99;
-    const limit = plans[user.plan]?.limit || 0;
-    return Math.max(0, Math.floor((limit - usageCount) / DV_CREDITS));
-  };
+  const dvAffordable = () => remainingOf('variation');
 
   // الاستدعاء المدفوع الوحيد
   const dvGenerate = async () => {
@@ -924,7 +904,7 @@ export default function Home() {
       setDvError('اختاري تعديل واحد عالأقل أو اكتبي تعليماتك');
       return;
     }
-    if (!gate()) return;
+    if (!gate('variation')) return;
     if (dvAffordable() < 1) {
       setDvError('رصيدك ما بيكفي لتنويع واحد — جدّدي الاشتراك');
       setShowPricing(true);
@@ -946,7 +926,7 @@ export default function Home() {
       fd.append('w', String(send.width));
       fd.append('h', String(send.height));
 
-      const r = await fetch('/api/variation', { method: 'POST', body: fd });
+      const r = await authFetch('/api/variation', { method: 'POST', body: fd });
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || !d.url) {
@@ -967,7 +947,7 @@ export default function Home() {
   // الترتيب: تجهيز الصور وأداة الـ PDF محلياً أولاً (بلا أي كلفة)، ثم استدعاء
   // تحليل واحد، ثم بناء الورقة في المتصفح. أي فشل قبل التحليل لا يستهلك رصيداً.
   const handleTechpack = async () => {
-    if (!gate()) return;
+    if (!gate('techpack')) return;
     if (!tpImage) { setTpError('ارفعي صورة التصميم أولاً'); return; }
     if (!flatsReady) { setTpError('ارفعي الرسمات الأربع أولاً'); return; }
     setTpLoading(true); setTpError(''); setTechpack(null); setTpAssets(null); setTpEditOpen(false);
@@ -1011,7 +991,7 @@ export default function Home() {
       fd.append('fabricInfo', tpFabric);
       fd.append('season', tpSeason);
       fd.append('notes', tpNotes);
-      const r = await fetch('/api/techpack', { method: 'POST', body: fd });
+      const r = await authFetch('/api/techpack', { method: 'POST', body: fd });
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || d.error) {
@@ -1050,7 +1030,7 @@ export default function Home() {
 
   // ===== المحتوى التسويقي =====
   const handleMarketing = async () => {
-    if (!gate()) return;
+    if (!gate('marketing')) return;
     setMkLoading(true); setMkResult('');
     const prompt = buildMarketingPrompt(mkPlatform, mkTone, mkText, !!mkImage);
     try {
@@ -1058,7 +1038,7 @@ export default function Home() {
       fd.append('prompt', prompt);
       fd.append('tab', 'marketing');
       if (mkImage) fd.append('image', mkImage);
-      const r = await fetch('/api/generate', { method: 'POST', body: fd });
+      const r = await authFetch('/api/generate', { method: 'POST', body: fd, headers: { 'x-gh-tool': 'marketing' } });
       const d = await r.json();
       if (d.error) setMkResult('خطأ: ' + d.error);
       else { setMkResult(d.result); incrementUsage(); }
@@ -1068,7 +1048,7 @@ export default function Home() {
 
   // ===== الفيديو =====
   const handleVideo = async () => {
-    if (!gate()) return;
+    if (!gate('video')) return;
     setVidLoading(true); setVidResult('');
     const prompt = buildVideoPrompt(vidType, vidMood, vidText, !!vidImage);
     try {
@@ -1076,7 +1056,7 @@ export default function Home() {
       fd.append('prompt', prompt);
       fd.append('tab', 'video');
       if (vidImage) fd.append('image', vidImage);
-      const r = await fetch('/api/generate', { method: 'POST', body: fd });
+      const r = await authFetch('/api/generate', { method: 'POST', body: fd, headers: { 'x-gh-tool': 'video' } });
       const d = await r.json();
       if (d.error) setVidResult('خطأ: ' + d.error);
       else { setVidResult(d.result); incrementUsage(); }
@@ -1141,23 +1121,30 @@ export default function Home() {
             {authLoaded && !isSignedIn && (
               <button onClick={() => clerk.openSignIn()} className="sb-btn primary full" style={{ marginBottom: '0.6rem' }}>تسجيل الدخول</button>
             )}
-            {user ? (
+            {me && me.signedIn ? (
               <div className="sb-user">
-                {user.plan === 'admin' ? (
+                {me.owner ? (
                   <div className="sb-plan admin">وضع المالكة — بلا حدود</div>
-                ) : (
+                ) : me.plan ? (
                   <>
-                    <div className="sb-plan">
-                      باقة {plans[user.plan]?.name} · {usageCount}/{plans[user.plan]?.limit}
-                    </div>
-                    <div className="sb-usage-bar">
-                      <div className="sb-usage-fill" style={{ width: `${(usageCount / (plans[user.plan]?.limit || 1)) * 100}%` }}></div>
-                    </div>
+                    <div className="sb-plan">{me.plan.name}</div>
+                    {statNow && (
+                      <>
+                        <div className="sb-plan">
+                          {(me.labels && me.labels[toolNow]) || ''} · {statNow.used}/{statNow.limit}
+                        </div>
+                        <div className="sb-usage-bar">
+                          <div className="sb-usage-fill" style={{ width: `${(statNow.used / (statNow.limit || 1)) * 100}%` }}></div>
+                        </div>
+                      </>
+                    )}
                   </>
+                ) : (
+                  <div className="sb-plan">{me.reason === 'expired' ? 'انتهى اشتراكك' : 'ما عندك اشتراك فعّال'}</div>
                 )}
                 <div className="sb-user-actions">
-                  {user.plan !== 'admin' && (
-                    <button onClick={() => setShowPricing(true)} className="sb-btn primary">ترقية</button>
+                  {!me.owner && (
+                    <button onClick={() => setShowPricing(true)} className="sb-btn primary">{me.plan ? 'الباقات' : 'اشتركي'}</button>
                   )}
                   <button onClick={handleLogout} className="sb-btn ghost">خروج</button>
                 </div>
@@ -1165,7 +1152,7 @@ export default function Home() {
             ) : (
               <button onClick={() => setShowPricing(true)} className="sb-btn primary full">اشتركي الآن</button>
             )}
-            {authLoaded && isSignedIn && !user && (
+            {authLoaded && isSignedIn && !(me && me.signedIn) && (
               <button onClick={handleLogout} className="sb-btn ghost full" style={{ marginTop: '0.6rem' }}>خروج</button>
             )}
           </div>
@@ -1183,13 +1170,15 @@ export default function Home() {
               <h1 className="topbar-h1">{currentTab.name}</h1>
             </div>
             <div className="topbar-actions">
-              {user && user.plan !== 'admin' && (
+              {me && me.signedIn && !me.owner && me.plan && statNow && (
                 <div className="topbar-usage">
-                  <span>{usageCount}/{plans[user.plan]?.limit}</span>
-                  <div className="topbar-usage-bar"><div style={{ width: `${(usageCount / (plans[user.plan]?.limit || 1)) * 100}%` }}></div></div>
+                  <span>{statNow.used}/{statNow.limit}</span>
+                  <div className="topbar-usage-bar"><div style={{ width: `${(statNow.used / (statNow.limit || 1)) * 100}%` }}></div></div>
                 </div>
               )}
-              {!user && <button onClick={() => setShowPricing(true)} className="topbar-cta">اشتركي</button>}
+              {(!me || !me.signedIn || (!me.owner && !me.plan)) && (
+                <button onClick={() => setShowPricing(true)} className="topbar-cta">اشتركي</button>
+              )}
             </div>
           </header>
 
@@ -1492,7 +1481,7 @@ export default function Home() {
                           {ccData.descriptionAr && <div className="cc-desc" dir="auto">{ccData.descriptionAr}</div>}
                         </div>
                         {ccChangedZones.length > 0 && (
-                          <span className="cc-credits">{CC_CREDITS_PER_IMAGE} نقطة</span>
+                          <span className="cc-credits">استخدام واحد</span>
                         )}
                       </div>
 
@@ -1560,7 +1549,7 @@ export default function Home() {
                       <button className="cta" onClick={ccGenerate}
                         disabled={ccBusy || !ccChangedZones.length || ccAffordable() < 1}>
                         {ccBusy ? <><span className="spinner"></span> {ccProgress || 'جارٍ الرسم…'}</>
-                          : 'ارسمي النتيجة النهائية · ' + CC_CREDITS_PER_IMAGE + ' نقطة'}
+                          : 'ارسمي النتيجة النهائية · استخدام واحد'}
                       </button>
                     </div>
                   </div>
@@ -1652,7 +1641,7 @@ export default function Home() {
                           <div className="cc-panel-head">اختاري الأقمشة الجديدة</div>
                           <div className="cc-desc">اختاري قماش لكل منطقة بدك تغيّريها — الباقي بيضل متل ما هو</div>
                         </div>
-                        <span className="cc-credits">{FS_CREDITS} نقطة</span>
+                        <span className="cc-credits">استخدام واحد</span>
                       </div>
 
                       {fsZones.map((z, i) => (
@@ -1714,7 +1703,7 @@ export default function Home() {
                       <button className="cta" onClick={fsGenerate}
                         disabled={fsBusy || !fsChanged.length || fsAffordable() < 1}>
                         {fsBusy ? <><span className="spinner"></span> جارٍ تبديل القماش…</>
-                          : 'بدّلي القماش · ' + FS_CREDITS + ' نقطة'}
+                          : 'بدّلي القماش · استخدام واحد'}
                       </button>
                       {!fsChanged.length && <div className="fs-hint">اختاري قماش لمنطقة وحدة عالأقل</div>}
                     </div>
@@ -1896,7 +1885,7 @@ export default function Home() {
                       <div className="dv-builder">
                         <div className="dv-builder-head">
                           <strong>التعديلات</strong>
-                          <span className="cc-credits">{DV_CREDITS} نقطة</span>
+                          <span className="cc-credits">استخدام واحد</span>
                         </div>
                         <div className="dv-builder-box">
                           {dvChosen.map((x, k) => (
@@ -1915,7 +1904,7 @@ export default function Home() {
                         {dvError && <div className="err">{dvError}</div>}
                         <button className="cta" onClick={dvGenerate} disabled={dvBusy || !dvReady || dvAffordable() < 1}>
                           {dvBusy ? <><span className="spinner"></span> جارٍ رسم التنويع…</>
-                            : 'ولّدي التنويع · ' + DV_CREDITS + ' نقطة'}
+                            : 'ولّدي التنويع · استخدام واحد'}
                         </button>
                       </div>
                     </div>
@@ -1953,7 +1942,7 @@ export default function Home() {
                     <div className="dv-result-bar">
                       <strong>التنويع</strong>
                       <button type="button" className="cc-btn" onClick={dvGenerate} disabled={dvBusy || !dvReady || dvAffordable() < 1}>
-                        {dvBusy ? 'جارٍ الرسم…' : '↻ ولّدي مرة تانية · ' + DV_CREDITS + ' نقطة'}
+                        {dvBusy ? 'جارٍ الرسم…' : '↻ ولّدي مرة تانية · استخدام واحد'}
                       </button>
                     </div>
                     <div className="fs-compare">
@@ -2218,45 +2207,31 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ===== نافذة الأسعار ===== */}
+      {/* ===== نافذة الباقات ===== */}
       {showPricing && (
         <div className="modal-overlay">
           <div className="modal">
             <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
-            <h2 className="modal-title">اختاري باقتك</h2>
-            <p className="modal-sub">اشتركي الآن وابدئي رحلة تصميم متكاملة</p>
-            <div className="admin-section">
-              {!showAdminInput ? (
-                <button onClick={() => setShowAdminInput(true)} className="admin-link">دخول المالكة</button>
-              ) : (
-                <div className="admin-input-group">
-                  <input type="password" value={adminCode} onChange={(e) => setAdminCode(e.target.value)} placeholder="كلمة السر" className="admin-input" />
-                  <button onClick={handleAdminLogin} className="admin-btn">دخول</button>
-                  <button onClick={() => { setShowAdminInput(false); setAdminCode(''); }} className="admin-cancel">إلغاء</button>
-                </div>
-              )}
-            </div>
-            <div className="pricing-grid">
-              <div className="pricing-card">
-                <h3>Basic</h3>
-                <div className="plan-price">$15<span>/شهر</span></div>
-                <ul><li>200 عملية</li><li>كل الأدوات</li><li>دعم بالإيميل</li></ul>
-                <button onClick={() => handleSubscribe('basic')} className="subscribe-btn">اشتركي</button>
+            <h2 className="modal-title">الباقات</h2>
+            <p className="modal-sub">كميات شهرية لكل أداة — الاشتراك الإلكتروني قريباً</p>
+            {!(me && me.catalog && me.catalog.length) ? (
+              <p className="modal-sub">جارٍ التحميل…</p>
+            ) : (
+              <div className="pricing-grid">
+                {me.catalog.map((pl) => (
+                  <div key={pl.id} className="pricing-card">
+                    <h3>{pl.name}</h3>
+                    <div className="plan-price">${pl.price}<span>/شهر</span></div>
+                    <ul>
+                      {Object.keys(pl.tools).map((t) => (
+                        <li key={t}>{pl.tools[t]} · {(me.labels && me.labels[t]) || t}</li>
+                      ))}
+                    </ul>
+                    <button disabled className="subscribe-btn" style={{ opacity: 0.55, cursor: 'not-allowed' }}>قريباً</button>
+                  </div>
+                ))}
               </div>
-              <div className="pricing-card featured">
-                <div className="popular-badge">الأكثر اختياراً</div>
-                <h3>Pro</h3>
-                <div className="plan-price">$35<span>/شهر</span></div>
-                <ul><li>400 عملية</li><li>أولوية الدعم</li><li>ميزات حصرية</li></ul>
-                <button onClick={() => handleSubscribe('pro')} className="subscribe-btn pro">اشتركي</button>
-              </div>
-              <div className="pricing-card">
-                <h3>Enterprise</h3>
-                <div className="plan-price">$70<span>/شهر</span></div>
-                <ul><li>700 عملية</li><li>مديرة حساب</li><li>دعم 24/7</li></ul>
-                <button onClick={() => handleSubscribe('enterprise')} className="subscribe-btn">اشتركي</button>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -2464,7 +2439,7 @@ const CC_SRC_MAX = 2400;         // دقّة الصورة الأصلية في ا
 const CC_VIEW_MAX = 1000;        // دقّة المعاينة وقراءة الألوان
 const CC_ANALYSIS_MAX = 1000;    // دقّة الصورة المرسَلة للتحليل
 const CC_SEND_MAX = 1800;        // دقّة الصورة المرسَلة لنموذج الرسم
-const CC_CREDITS_PER_IMAGE = 2;
+const CC_CREDITS_PER_IMAGE = 1;
 const CC_SAMPLE_R = 0.012;       // نصف قطر قراءة اللون، نسبة من أصغر ضلع
 const CC_CLASH_DE = 22;          // تحت هذا الفرق تظهر المنطقتان بلون واحد
 
@@ -2481,7 +2456,7 @@ const CC_DETAIL_FEATHER = 0.2;   // عرض الحافة الناعمة من ضل
 // ===========================================================================
 // نفس القائمة الموجودة بـ api/_fabrics.js (هناك رابط المصدر والوصف للنموذج).
 // الصور من Pexels — صور قماش حقيقية، مجانية تجارياً — وبتنحفظ بـ Blob من أول طلب.
-const FS_CREDITS = 2;
+const FS_CREDITS = 1;
 const FS_UPLOAD_MAX = 1024;      // دقّة قماش المصممة المرسَل للنموذج
 const FS_CATS = ['Cotton & Linen', 'Silk & Satin', 'Wool & Knits', 'Technical & Leather', 'Patterns & Prints'];
 const FS_FABRICS = [
@@ -2520,7 +2495,7 @@ const FS_FABRICS = [
   { id: 'red-tartan', cat: 'Patterns & Prints', name: 'Red Tartan' },
   { id: 'blue-floral', cat: 'Patterns & Prints', name: 'Blue Floral Print' },
 ];
-const DV_CREDITS = 2;
+const DV_CREDITS = 1;
 const DV_SECOND_MAX = 1024;      // دقّة الزاوية التانية المرسَلة كمرجع
 const fsSwatchUrl = (id) => '/api/fabricswatch?id=' + encodeURIComponent(id);
 
