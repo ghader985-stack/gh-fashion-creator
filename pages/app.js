@@ -3,6 +3,111 @@ import Head from 'next/head';
 import { useAuth, useClerk } from '@clerk/nextjs';
 import ToolBackdrop from '../components/ToolBackdrop';
 
+// ===== اللغة: عربي / إنجليزي (نفس إعداد الموقع gh_site_lang) =====
+// LANG متغير على مستوى الملف: المكوّن الرئيسي بيحدّثه عند كل رندر، فكل __t() بتعطي لغة الرندر الحالي.
+let LANG = 'en';
+const __t = (ar, en) => (LANG === 'ar' ? ar : (en === undefined ? ar : en));
+const pickLang = (ar, en) => (LANG === 'ar' ? (ar || en || '') : (en || ar || ''));
+
+function readSavedLang() {
+  try {
+    const s = localStorage.getItem('gh_site_lang');
+    if (s === 'ar' || s === 'en') return s;
+  } catch (e) { /* التخزين غير متاح */ }
+  try {
+    const a = navigator.languages || [navigator.language || ''];
+    for (let i = 0; i < a.length; i++) {
+      if (String(a[i]).toLowerCase().indexOf('ar') === 0) return 'ar';
+    }
+  } catch (e) { /* لا شيء */ }
+  return 'en';
+}
+
+function applyLangToPage(l) {
+  try {
+    const d = document.documentElement;
+    d.setAttribute('data-lang', l);
+    d.setAttribute('lang', l);
+    d.setAttribute('dir', l === 'ar' ? 'rtl' : 'ltr');
+  } catch (e) { /* لا شيء */ }
+}
+
+// رسائل الخادم (api) بالعربي: بتنعرّب للإنجليزي بالواجهة لما تكون اللغة إنجليزي.
+// أي رسالة عربية مو موجودة هون بتطلع رسالة عامة بدل نص عربي بصفحة إنجليزية.
+const SERVER_TOOL_NAMES = {
+  'المود بورد': 'Mood board', 'استوديو AI': 'AI Studio', 'تغيير الألوان': 'Colour change',
+  'تبديل القماش': 'Fabric swap', 'تنويعات التصميم': 'Design variations', 'فلات سكتش': 'Flat sketch',
+  'التيك باك': 'Tech pack', 'المحتوى التسويقي': 'Marketing content', 'الفيديو': 'Video',
+};
+const SERVER_TEXT = {
+  ...SERVER_TOOL_NAMES,
+  'سجّلي الدخول أولاً ثم حاولي مرة ثانية': 'Sign in first, then try again',
+  'تعذّر التحقق من اشتراكك الآن، حاولي بعد لحظات': "Couldn't verify your subscription right now, please try again in a moment",
+  'انتهى اشتراكك — جدّدي اشتراكك لتكملي': 'Your subscription has ended — renew it to continue',
+  'ما عندك اشتراك فعّال — اشتركي أولاً': "You don't have an active subscription — subscribe first",
+  'ما في تفاصيل إضافية متاحة لهالرسمة': 'No extra detail requests are available for this drawing',
+  'تعذّر التحقق من رصيدك الآن، حاولي بعد لحظات': "Couldn't check your balance right now, please try again in a moment",
+  'وصلتِ للحد اليومي من التحليلات — جرّبي بكرا': "You've reached today's analysis limit — try again tomorrow",
+  'تعذّر تحميل حسابك الآن، حاولي بعد لحظات': "Couldn't load your account right now, please try again in a moment",
+  'انتهت مهلة الرسم': 'Drawing timed out',
+  'تعذّر إنشاء النتيجة': "Couldn't create the result",
+  'تعذّر الاتصال بخدمة الرسم': "Couldn't reach the drawing service",
+  'النموذج ما رجّع صورة': 'The model returned no image',
+  'الخدمة مشغولة الآن، حاولي بعد لحظات': 'The service is busy right now, please try again in a moment',
+  'تعذّر رفع الصورة لخدمة الرسم': "Couldn't send the image to the drawing service",
+  'تعذّر رفع صورة القماش لخدمة الرسم': "Couldn't send the fabric image to the drawing service",
+  'الصورة مطلوبة': 'An image is required',
+  'الصورة الأمامية مطلوبة': 'The front image is required',
+  'اختاري تعديل واحد عالأقل أو اكتبي تعليماتك': 'Choose at least one change or write your instructions',
+  'اختاري قماش لمنطقة وحدة عالأقل': 'Choose a fabric for at least one area',
+  'ما في تغيير ألوان مطلوب': 'No colour change was requested',
+  'اكتبي وصف التصميم أولاً': 'Write the design description first',
+  'الوصف فارغ': 'The description is empty',
+  'تعذّر استلام الصورة': "Couldn't receive the image",
+  'تعذّر استلام الصور': "Couldn't receive the images",
+  'تعذّر استلام الصور — حجمها كبير أو الاتصال انقطع': "Couldn't receive the images — they're too large or the connection dropped",
+  'صورة التصميم والرسمات الأمامية والخلفية مطلوبة': 'The design image and the front and back sketches are required',
+  'انتهت مهلة التحليل — حاولي مرة ثانية': 'The analysis timed out — please try again',
+  'تعذّر الاتصال بخدمة التحليل': "Couldn't reach the analysis service",
+  'خدمة التحليل مشغولة الآن — انتظري دقيقة وحاولي مرة ثانية': 'The analysis service is busy right now — wait a minute and try again',
+  'استجابة غير صالحة من خدمة التحليل': 'Invalid response from the analysis service',
+  'فشل التحليل — حاولي مرة ثانية': 'Analysis failed — please try again',
+  'تعذّر تحليل هذه الصورة — جرّبي صورة أوضح للتصميم': "Couldn't analyse this image — try a clearer picture of the design",
+  'التحليل لم يكتمل — حاولي مرة ثانية': 'The analysis was incomplete — please try again',
+  'تعذّر قراءة ناتج التحليل — حاولي مرة ثانية': "Couldn't read the analysis result — please try again",
+  'التحليل ناقص — حاولي مرة ثانية': 'The analysis was incomplete — please try again',
+  'لم تُرفع صورة التصميم': 'No design image was uploaded',
+  'تعذّر رفع صورة التصميم — حاولي مرة ثانية': "Couldn't upload the design image — please try again",
+  'تعذّر توليد أي رسمة — حاولي مرة ثانية': "Couldn't generate any drawing — please try again",
+  'حدث خطأ في التوليد': 'A generation error occurred',
+  'حدث خطأ في توليد المود بورد': 'A mood board generation error occurred',
+  'انتهت المهلة': 'Timed out',
+  'انقطع الاتصال': 'Connection lost',
+  'تعذّر تحميل صورة القماش': "Couldn't load the fabric image",
+};
+const SERVER_RULES = [
+  [/^خلصت حصتك من «(.+)» لهالفترة — بتتجدد بتاريخ (.+)$/, (m) => "You've used up your quota for “" + (SERVER_TOOL_NAMES[m[1]] || m[1]) + "” in this period — it renews on " + m[2]],
+  [/^الخطة (\d+)$/, (m) => 'Plan ' + m[1]],
+  [/^تعذّر تحليل ألوان القطعة/, () => "Couldn't analyse the garment's colours — please try again"],
+  [/^تعذّر تحليل أقمشة القطعة/, () => "Couldn't analyse the garment's fabrics — please try again"],
+  [/^تعذّر تحليل التصميم/, () => "Couldn't analyse the design — please try again"],
+  [/^فشل التحليل/, () => 'Analysis failed — please try again'],
+  [/^فشل (توليد|رفع) الصورة/, () => 'Image generation failed — please try again'],
+  [/^فشل التوليد/, () => 'Generation failed — please try again'],
+  [/^تعذّر جلب الصورة/, () => "Couldn't fetch the image"],
+  [/^خطأ في توليد الصور/, () => 'Error generating the images'],
+  [/^تعذّر إنشاء النتيجة/, () => "Couldn't create the result — please try again"],
+];
+function trServer(msg) {
+  if (LANG === 'ar' || typeof msg !== 'string' || !/[؀-ۿ]/.test(msg)) return msg;
+  if (SERVER_TEXT[msg]) return SERVER_TEXT[msg];
+  for (let i = 0; i < SERVER_RULES.length; i++) {
+    const m = msg.match(SERVER_RULES[i][0]);
+    if (m) return SERVER_RULES[i][1](m);
+  }
+  return 'Something went wrong, please try again';
+}
+
 
 // استخراج اسم البراند من نص الملاحظات الحر.
 // تُقبل الصيغ الشائعة بالعربية والإنجليزية؛ وإن لم تُذكر صيغة صريحة
@@ -41,7 +146,7 @@ async function downloadFlat(url, baseName) {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   } catch (e) {
     if (typeof console !== 'undefined') console.warn('[gh]', e && e.message);
-    alert('تعذّر التنزيل، جرّبي مرة ثانية');
+    alert(__t("تعذّر التنزيل، جرّبي مرة ثانية", "Download failed, please try again"));
   }
 }
 
@@ -59,6 +164,21 @@ export default function Home() {
   // تسجيل الدخول عبر Clerk: isLoaded = المكتبة خلصت تحميل، isSignedIn = في حساب مسجّل
   const { isLoaded: authLoaded, isSignedIn, getToken } = useAuth();
   const clerk = useClerk();
+
+  // ===== اللغة (نفس إعداد الموقع: gh_site_lang) =====
+  const [lang, setLang] = useState('en');
+  LANG = lang;
+  useEffect(() => {
+    const l = readSavedLang();
+    applyLangToPage(l);
+    setLang(l);
+  }, []);
+  const switchLang = () => {
+    const n = lang === 'ar' ? 'en' : 'ar';
+    applyLangToPage(n);
+    try { localStorage.setItem('gh_site_lang', n); } catch (e) { /* التخزين غير متاح */ }
+    setLang(n);
+  };
 
   // ===== المود بورد =====
   const [moodDescription, setMoodDescription] = useState('');
@@ -139,10 +259,10 @@ export default function Home() {
   const flatsReady = Boolean(upLineFront && upLineBack && upColorFront && upColorBack);
   const revokeLater = (u) => { if (u) setTimeout(() => URL.revokeObjectURL(u), 60000); };
   const missingFlats = [
-    !upLineFront && 'الرسمة التقنية الأمامية',
-    !upLineBack && 'الرسمة التقنية الخلفية',
-    !upColorFront && 'الرسمة الملوّنة الأمامية',
-    !upColorBack && 'الرسمة الملوّنة الخلفية',
+    !upLineFront && __t("الرسمة التقنية الأمامية", "Front technical sketch"),
+    !upLineBack && __t("الرسمة التقنية الخلفية", "Back technical sketch"),
+    !upColorFront && __t("الرسمة الملوّنة الأمامية", "Front coloured sketch"),
+    !upColorBack && __t("الرسمة الملوّنة الخلفية", "Back coloured sketch"),
   ].filter(Boolean);
 
   // ===== فلات سكتش (الرسمة التقنية) =====
@@ -234,27 +354,27 @@ export default function Home() {
   // مجموعات السايدبار — مرتبة مثل المنصات الاحترافية
   const navGroups = [
     {
-      label: 'التصميم',
+      label: __t("التصميم", "Design"),
       items: [
-        { id: 'moodboard', name: 'المود بورد', num: '01', desc: 'لوحة الإلهام' },
-        { id: 'studio', name: 'استوديو AI', num: '02', desc: 'توليد صورة القطعة' },
-        { id: 'color', name: 'تغيير الألوان', num: '03', desc: 'ألوان جديدة لأي منطقة' },
-        { id: 'fabric', name: 'تبديل القماش', num: '08', desc: 'قماش جديد لأي منطقة' },
-        { id: 'variations', name: 'تنويعات التصميم', num: '09', desc: 'قصّات وأطوال جديدة لتصميمك' },
+        { id: 'moodboard', name: __t("المود بورد", "Mood board"), num: '01', desc: __t("لوحة الإلهام", "Inspiration board") },
+        { id: 'studio', name: __t("استوديو AI", "AI Studio"), num: '02', desc: __t("توليد صورة القطعة", "Generate a product image") },
+        { id: 'color', name: __t("تغيير الألوان", "Colour change"), num: '03', desc: __t("ألوان جديدة لأي منطقة", "New colours for any area") },
+        { id: 'fabric', name: __t("تبديل القماش", "Fabric swap"), num: '08', desc: __t("قماش جديد لأي منطقة", "New fabric for any area") },
+        { id: 'variations', name: __t("تنويعات التصميم", "Design variations"), num: '09', desc: __t("قصّات وأطوال جديدة لتصميمك", "New cuts and lengths for your design") },
       ],
     },
     {
-      label: 'الإنتاج',
+      label: __t("الإنتاج", "Production"),
       items: [
-        { id: 'flat', name: 'فلات سكتش (الرسمة التقنية)', num: '04', desc: 'رسمة تقنية بالأبيض والأسود' },
-        { id: 'techpack', name: 'التيك باك', num: '05', desc: 'الحزمة التقنية' },
+        { id: 'flat', name: __t("فلات سكتش (الرسمة التقنية)", "Flat sketch (technical drawing)"), num: '04', desc: __t("رسمة تقنية بالأبيض والأسود", "Black-and-white technical drawing") },
+        { id: 'techpack', name: __t("التيك باك", "Tech pack"), num: '05', desc: __t("الحزمة التقنية", "Technical package") },
       ],
     },
     {
-      label: 'التسويق',
+      label: __t("التسويق", "Marketing"),
       items: [
-        { id: 'marketing', name: 'المحتوى التسويقي', num: '06', desc: 'كابشنات وأفكار' },
-        { id: 'video', name: 'الفيديو', num: '07', desc: 'برومبتات سينمائية' },
+        { id: 'marketing', name: __t("المحتوى التسويقي", "Marketing content"), num: '06', desc: __t("كابشنات وأفكار", "Captions and ideas") },
+        { id: 'video', name: __t("الفيديو", "Video"), num: '07', desc: __t("برومبتات سينمائية", "Cinematic prompts") },
       ],
     },
   ];
@@ -281,13 +401,13 @@ export default function Home() {
     if (!isSignedIn) { clerk.openSignIn(); return false; }
     if (!me || !me.signedIn) {
       refreshMe();
-      alert('جارٍ التحقق من حسابك — حاولي بعد لحظة، وإذا تكرر حدّثي الصفحة');
+      alert(__t("جارٍ التحقق من حسابك — حاولي بعد لحظة، وإذا تكرر حدّثي الصفحة", "Verifying your account — try again in a moment, and refresh the page if it keeps happening"));
       return false;
     }
     if (me.owner) return true;
     if (!me.plan) { setShowPricing(true); return false; }
     if (tool && tool !== 'analysis' && remainingOf(tool) < 1) {
-      alert('خلصت حصتك من هالأداة لهالفترة');
+      alert(__t("خلصت حصتك من هالأداة لهالفترة", "You've used up your quota for this tool in this period"));
       setShowPricing(true);
       return false;
     }
@@ -313,7 +433,7 @@ export default function Home() {
   // ===== المود بورد =====
   const handleMoodboard = async () => {
     if (!gate('moodboard')) return;
-    if (!moodDescription.trim()) { alert('اكتبي وصف الكونسبت أولاً'); return; }
+    if (!moodDescription.trim()) { alert(__t("اكتبي وصف الكونسبت أولاً", "Write the concept description first")); return; }
     setMoodLoading(true); setMoodBoard(null); setMoodError('');
     try {
       const r = await authFetch('/api/moodboard', {
@@ -322,9 +442,9 @@ export default function Home() {
         body: JSON.stringify({ description: moodDescription }),
       });
       const d = await r.json();
-      if (d.error) setMoodError(d.error);
+      if (d.error) setMoodError(trServer(d.error));
       else { setMoodBoard(d); incrementUsage(); }
-    } catch { setMoodError('خطأ في الاتصال، حاولي مرة ثانية'); }
+    } catch { setMoodError(__t("خطأ في الاتصال، حاولي مرة ثانية", "Connection error, please try again")); }
     setMoodLoading(false);
   };
 
@@ -333,7 +453,7 @@ export default function Home() {
     const s = document.createElement('script');
     s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
     s.onload = () => resolve(window.html2canvas);
-    s.onerror = () => reject(new Error('فشل تحميل أداة الحفظ'));
+    s.onerror = () => reject(new Error(__t("فشل تحميل أداة الحفظ", "Failed to load the save tool")));
     document.body.appendChild(s);
   });
 
@@ -353,7 +473,7 @@ export default function Home() {
     setDownloading(true);
     try {
       await downloadNode('moodboard-canvas', (moodBoard?.title || 'moodboard').replace(/\s+/g, '-') + '.png', '#f6f1ea');
-    } catch { alert('تعذّر الحفظ، جرّبي مرة ثانية'); }
+    } catch { alert(__t("تعذّر الحفظ، جرّبي مرة ثانية", "Couldn't save, please try again")); }
     setDownloading(false);
   };
 
@@ -372,7 +492,7 @@ export default function Home() {
   // ===== استوديو AI =====
   const handleStudio = async () => {
     if (!gate('studio')) return;
-    if (!studioDesc.trim()) { alert('اكتبي وصف التصميم أولاً'); return; }
+    if (!studioDesc.trim()) { alert(__t("اكتبي وصف التصميم أولاً", "Write the design description first")); return; }
     setStudioLoading(true); setStudioResult(null); setStudioError('');
     try {
       const fd = new FormData();
@@ -383,9 +503,9 @@ export default function Home() {
       if (studioImage) fd.append('image', studioImage);
       const r = await authFetch('/api/studio', { method: 'POST', body: fd });
       const d = await r.json();
-      if (d.error) setStudioError(d.error);
+      if (d.error) setStudioError(trServer(d.error));
       else { setStudioResult(d); incrementUsage(); }
-    } catch { setStudioError('خطأ في الاتصال، حاولي مرة ثانية'); }
+    } catch { setStudioError(__t("خطأ في الاتصال، حاولي مرة ثانية", "Connection error, please try again")); }
     setStudioLoading(false);
   };
 
@@ -394,7 +514,7 @@ export default function Home() {
   // ===== توليد الفلات سكتش =====
   const handleFlat = async () => {
     if (!gate('flat')) return;
-    if (!flatImage) { setFlatError('ارفعي صورة التصميم أولاً'); return; }
+    if (!flatImage) { setFlatError(__t("ارفعي صورة التصميم أولاً", "Upload the design image first")); return; }
     setFlatLoading(true); setFlatError('');
     setFlatFront(''); setFlatBack(''); setFlatColorFront(''); setFlatColorBack('');
     try {
@@ -408,9 +528,9 @@ export default function Home() {
       }));
       const r = await authFetch('/api/techpack-images', { method: 'POST', body: fd });
       const d = await r.json();
-      if (d.error) { setFlatError(d.error); setFlatLoading(false); return; }
+      if (d.error) { setFlatError(trServer(d.error)); setFlatLoading(false); return; }
       if (!d.lineFrontImage && !d.coloredFrontImage) {
-        setFlatError('لم تُنتَج أي رسمة — حاولي مرة ثانية'); setFlatLoading(false); return;
+        setFlatError(__t("لم تُنتَج أي رسمة — حاولي مرة ثانية", "No sketch was produced — please try again")); setFlatLoading(false); return;
       }
       setFlatFront(d.lineFrontImage || '');
       setFlatBack(d.lineBackImage || '');
@@ -419,7 +539,7 @@ export default function Home() {
       incrementUsage();
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh]', e && e.message);
-      setFlatError('خطأ في الاتصال، حاولي مرة ثانية');
+      setFlatError(__t("خطأ في الاتصال، حاولي مرة ثانية", "Connection error, please try again"));
     }
     setFlatLoading(false);
   };
@@ -443,19 +563,19 @@ export default function Home() {
     setCcPreview(URL.createObjectURL(file));
     setCcLoading(true);
     try {
-      setCcStage('جارٍ قراءة الصورة…');
+      setCcStage(__t("جارٍ قراءة الصورة…", "Reading the image…"));
       const full = await tpFileToCanvas(file, CC_SRC_MAX);
       const view = ccScaled(full, CC_VIEW_MAX);
       const probe = ccScaled(full, CC_ANALYSIS_MAX);
 
-      setCcStage('جارٍ كشف ألوان القطعة…');
+      setCcStage(__t("جارٍ كشف ألوان القطعة…", "Detecting the garment's colours…"));
       const fd = new FormData();
       fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
       const r = await authFetch('/api/colorzones', { method: 'POST', body: fd });
       let body = null;
       try { body = await r.json(); } catch (e) { body = null; }
       if (!r.ok || !body || !Array.isArray(body.zones) || !body.zones.length) {
-        throw tpUserError((body && body.error) || ('تعذّر تحليل ألوان القطعة (' + r.status + ')'));
+        throw tpUserError((body && body.error) || (__t("تعذّر تحليل ألوان القطعة (", "Couldn't analyse the garment's colours (") + r.status + ')'));
       }
 
       // اللون من النموذج، والبانتون من الجدول المحلي. ولا قراءة بكسلات:
@@ -481,7 +601,7 @@ export default function Home() {
         };
       });
       if (!zones.some((z) => z.point || z.box)) {
-        setCcNote('النموذج ما حدّد أماكن على الصورة، فالأرقام ما رح تظهر عليها — تغيير الألوان شغّال عادي');
+        setCcNote(__t("النموذج ما حدّد أماكن على الصورة، فالأرقام ما رح تظهر عليها — تغيير الألوان شغّال عادي", "The model didn't mark any areas on the image, so numbers won't appear on it — colour change still works normally"));
       }
 
       setCcData({
@@ -495,7 +615,7 @@ export default function Home() {
       setCcZones(zones);
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] colorchanger', e && e.message);
-      setCcError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
+      setCcError((e && e.userMessage) || __t("تعذّرت قراءة الصورة، جرّبي مرة ثانية", "Couldn't read the image, please try again"));
       setCcData(null);
     }
     setCcLoading(false);
@@ -543,19 +663,19 @@ export default function Home() {
   // الاستدعاء المدفوع الوحيد: الصورة الأصلية + وصف نصّي لكل تغيير.
   const ccGenerate = async () => {
     if (!ccData || !ccChangedZones.length) {
-      setCcError('اختاري لون جديد لمنطقة وحدة عالأقل');
+      setCcError(__t("اختاري لون جديد لمنطقة وحدة عالأقل", "Choose a new colour for at least one area"));
       return;
     }
     if (!gate('color')) return;
     if (ccAffordable() < 1) {
-      setCcError('رصيدك ما بيكفي لصورة وحدة — جدّدي الاشتراك');
+      setCcError(__t("رصيدك ما بيكفي لصورة وحدة — جدّدي الاشتراك", "Not enough credit for one image — renew your subscription"));
       setShowPricing(true);
       return;
     }
 
     setCcError('');
     setCcBusy(true);
-    setCcProgress('جارٍ الرسم…');
+    setCcProgress(__t("جارٍ الرسم…", "Drawing…"));
 
     try {
       const send = ccScaled(ccData.full, CC_SEND_MAX);
@@ -604,7 +724,7 @@ export default function Home() {
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || !d.url) {
-        throw tpUserError((d && d.error) || ('تعذّر الرسم (' + r.status + ') — جرّبي مرة ثانية'));
+        throw tpUserError((d && d.error) || (__t("تعذّر الرسم (", "Drawing failed (") + r.status + __t(") — جرّبي مرة ثانية", ") — please try again")));
       }
 
       // مرور التفاصيل: كل جزء صغير اتغيّر بينقصّ وبينرسم لحاله، وبيرجع لمكانه.
@@ -612,7 +732,7 @@ export default function Home() {
       let finalUrl = d.url;
       const smalls = ccChangedZones.filter((z) => z.size === 'small' && (z.box || z.point));
       if (CC_DETAIL_PASS && smalls.length) {
-        setCcProgress('جارٍ رسم التفاصيل الصغيرة…');
+        setCcProgress(__t("جارٍ رسم التفاصيل الصغيرة…", "Drawing the small details…"));
         try {
           const base = await ccLoadCanvas(proxied(d.url));
           let done = 0;
@@ -651,7 +771,7 @@ export default function Home() {
       ccSpend(CC_CREDITS_PER_IMAGE);
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] cc generate', e && e.message);
-      setCcError((e && e.userMessage) || 'تعذّر إنشاء النتيجة، جرّبي مرة ثانية');
+      setCcError((e && e.userMessage) || __t("تعذّر إنشاء النتيجة، جرّبي مرة ثانية", "Couldn't create the result, please try again"));
     }
     setCcBusy(false);
     setCcProgress('');
@@ -679,19 +799,19 @@ export default function Home() {
     setFsPreview(URL.createObjectURL(file));
     setFsLoading(true);
     try {
-      setFsStage('جارٍ قراءة الصورة…');
+      setFsStage(__t("جارٍ قراءة الصورة…", "Reading the image…"));
       const full = await tpFileToCanvas(file, CC_SRC_MAX);
       const view = ccScaled(full, CC_VIEW_MAX);
       const probe = ccScaled(full, CC_ANALYSIS_MAX);
 
-      setFsStage('جارٍ تحليل أقمشة القطعة…');
+      setFsStage(__t("جارٍ تحليل أقمشة القطعة…", "Analysing the garment's fabrics…"));
       const fd = new FormData();
       fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'zones.jpg');
       const r = await authFetch('/api/fabriczones', { method: 'POST', body: fd });
       let body = null;
       try { body = await r.json(); } catch (e) { body = null; }
       if (!r.ok || !body || !Array.isArray(body.zones) || !body.zones.length) {
-        throw tpUserError((body && body.error) || ('تعذّر تحليل أقمشة القطعة (' + r.status + ')'));
+        throw tpUserError((body && body.error) || (__t("تعذّر تحليل أقمشة القطعة (", "Couldn't analyse the garment's fabrics (") + r.status + ')'));
       }
 
       setFsZones(body.zones.map((z, i) => ({
@@ -721,7 +841,7 @@ export default function Home() {
       });
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] fabricswap analyse', e && e.message);
-      setFsError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
+      setFsError((e && e.userMessage) || __t("تعذّرت قراءة الصورة، جرّبي مرة ثانية", "Couldn't read the image, please try again"));
       setFsData(null);
     }
     setFsLoading(false);
@@ -762,12 +882,12 @@ export default function Home() {
   // الاستدعاء المدفوع الوحيد
   const fsGenerate = async () => {
     if (!fsData || !fsChanged.length) {
-      setFsError('اختاري قماش لمنطقة وحدة عالأقل');
+      setFsError(__t("اختاري قماش لمنطقة وحدة عالأقل", "Choose a fabric for at least one area"));
       return;
     }
     if (!gate('fabric')) return;
     if (fsAffordable() < 1) {
-      setFsError('رصيدك ما بيكفي لصورة وحدة — جدّدي الاشتراك');
+      setFsError(__t("رصيدك ما بيكفي لصورة وحدة — جدّدي الاشتراك", "Not enough credit for one image — renew your subscription"));
       setShowPricing(true);
       return;
     }
@@ -806,20 +926,20 @@ export default function Home() {
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || !d.url) {
-        throw tpUserError((d && d.error) || ('تعذّر الرسم (' + r.status + ') — جرّبي مرة ثانية'));
+        throw tpUserError((d && d.error) || (__t("تعذّر الرسم (", "Drawing failed (") + r.status + __t(") — جرّبي مرة ثانية", ") — please try again")));
       }
 
       setFsResults((list) => [{
         id: 'fs' + Date.now(),
         createdAt: Date.now(),
         url: d.url,
-        applied: fsChanged.map((z) => ({ zone: z.nameAr || z.name, fabric: z.fabric.name, thumb: z.fabric.thumb || '' })),
+        applied: fsChanged.map((z) => ({ zone: z.nameAr || z.name, zoneEn: z.name || z.nameAr, fabric: z.fabric.name, thumb: z.fabric.thumb || '' })),
       }].concat(list));
       setFsShown(0);
       ccSpend(FS_CREDITS);
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] fabricswap generate', e && e.message);
-      setFsError((e && e.userMessage) || 'تعذّر إنشاء النتيجة، جرّبي مرة ثانية');
+      setFsError((e && e.userMessage) || __t("تعذّر إنشاء النتيجة، جرّبي مرة ثانية", "Couldn't create the result, please try again"));
     }
     setFsBusy(false);
   };
@@ -844,7 +964,7 @@ export default function Home() {
   };
 
   const dvAnalyse = async () => {
-    if (!dvFront) { setDvError('ارفعي الصورة الأمامية أولاً'); return; }
+    if (!dvFront) { setDvError(__t("ارفعي الصورة الأمامية أولاً", "Upload the front image first")); return; }
     if (!gate('analysis')) return;
     setDvError('');
     setDvCats([]);
@@ -853,18 +973,18 @@ export default function Home() {
     setDvShown(0);
     setDvLoading(true);
     try {
-      setDvStage('جارٍ قراءة الصورة…');
+      setDvStage(__t("جارٍ قراءة الصورة…", "Reading the image…"));
       const full = await tpFileToCanvas(dvFront, CC_SRC_MAX);
       const probe = ccScaled(full, CC_ANALYSIS_MAX);
 
-      setDvStage('جارٍ تحليل التصميم…');
+      setDvStage(__t("جارٍ تحليل التصميم…", "Analysing the design…"));
       const fd = new FormData();
       fd.append('image', await ccBlob(probe, 'image/jpeg', 0.92), 'design.jpg');
       const r = await authFetch('/api/variationoptions', { method: 'POST', body: fd });
       let body = null;
       try { body = await r.json(); } catch (e) { body = null; }
       if (!r.ok || !body || !Array.isArray(body.categories) || !body.categories.length) {
-        throw tpUserError((body && body.error) || ('تعذّر تحليل التصميم (' + r.status + ')'));
+        throw tpUserError((body && body.error) || (__t("تعذّر تحليل التصميم (", "Couldn't analyse the design (") + r.status + ')'));
       }
       setDvCats(body.categories);
       setDvData({
@@ -876,7 +996,7 @@ export default function Home() {
       });
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] variations analyse', e && e.message);
-      setDvError((e && e.userMessage) || 'تعذّرت قراءة الصورة، جرّبي مرة ثانية');
+      setDvError((e && e.userMessage) || __t("تعذّرت قراءة الصورة، جرّبي مرة ثانية", "Couldn't read the image, please try again"));
       setDvData(null);
     }
     setDvLoading(false);
@@ -902,12 +1022,12 @@ export default function Home() {
   // الاستدعاء المدفوع الوحيد
   const dvGenerate = async () => {
     if (!dvData || !dvReady) {
-      setDvError('اختاري تعديل واحد عالأقل أو اكتبي تعليماتك');
+      setDvError(__t("اختاري تعديل واحد عالأقل أو اكتبي تعليماتك", "Choose at least one change or write your instructions"));
       return;
     }
     if (!gate('variation')) return;
     if (dvAffordable() < 1) {
-      setDvError('رصيدك ما بيكفي لتنويع واحد — جدّدي الاشتراك');
+      setDvError(__t("رصيدك ما بيكفي لتنويع واحد — جدّدي الاشتراك", "Not enough credit for one variation — renew your subscription"));
       setShowPricing(true);
       return;
     }
@@ -931,15 +1051,15 @@ export default function Home() {
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || !d.url) {
-        throw tpUserError((d && d.error) || ('تعذّر الرسم (' + r.status + ') — جرّبي مرة ثانية'));
+        throw tpUserError((d && d.error) || (__t("تعذّر الرسم (", "Drawing failed (") + r.status + __t(") — جرّبي مرة ثانية", ") — please try again")));
       }
-      const title = dvChosen.map((x) => x.opt.en).concat(dvNotes.trim() ? ['تعليماتك'] : []).join(' + ');
+      const title = dvChosen.map((x) => x.opt.en).concat(dvNotes.trim() ? [__t("تعليماتك", "Your instructions")] : []).join(' + ');
       setDvResults((list) => [{ id: 'dv' + Date.now(), createdAt: Date.now(), url: d.url, title }].concat(list));
       setDvShown(0);
       ccSpend(DV_CREDITS);
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] variations generate', e && e.message);
-      setDvError((e && e.userMessage) || 'تعذّر إنشاء التنويع، جرّبي مرة ثانية');
+      setDvError((e && e.userMessage) || __t("تعذّر إنشاء التنويع، جرّبي مرة ثانية", "Couldn't create the variation, please try again"));
     }
     setDvBusy(false);
   };
@@ -949,13 +1069,13 @@ export default function Home() {
   // تحليل واحد، ثم بناء الورقة في المتصفح. أي فشل قبل التحليل لا يستهلك رصيداً.
   const handleTechpack = async () => {
     if (!gate('techpack')) return;
-    if (!tpImage) { setTpError('ارفعي صورة التصميم أولاً'); return; }
-    if (!flatsReady) { setTpError('ارفعي الرسمات الأربع أولاً'); return; }
+    if (!tpImage) { setTpError(__t("ارفعي صورة التصميم أولاً", "Upload the design image first")); return; }
+    if (!flatsReady) { setTpError(__t("ارفعي الرسمات الأربع أولاً", "Upload all four sketches first")); return; }
     setTpLoading(true); setTpError(''); setTechpack(null); setTpAssets(null); setTpEditOpen(false);
     try {
-      setTpStage('جارٍ تجهيز الصور…');
+      setTpStage(__t("جارٍ تجهيز الصور…", "Preparing the images…"));
       try { await tpEnsureEngine(); }
-      catch (e) { throw tpUserError('تعذّر تحميل أداة ملف PDF — حدّثي الصفحة وحاولي مرة ثانية'); }
+      catch (e) { throw tpUserError(__t("تعذّر تحميل أداة ملف PDF — حدّثي الصفحة وحاولي مرة ثانية", "Couldn't load the PDF tool — refresh the page and try again")); }
 
       const [design, colorFront, lineFront, lineBack, colorBack] = await Promise.all([
         tpFileToCanvas(tpImage, 2400),
@@ -982,7 +1102,7 @@ export default function Home() {
         tpGridBlob(imgs.lineBack, 1100),
       ]);
 
-      setTpStage('جارٍ تحليل التصميم… (حتى دقيقتين)');
+      setTpStage(__t("جارٍ تحليل التصميم… (حتى دقيقتين)", "Analysing the design… (up to two minutes)"));
       const fd = new FormData();
       fd.append('design', gDesign, 'design.jpg');
       fd.append('colorFront', gColorFront, 'color-front.jpg');
@@ -996,10 +1116,10 @@ export default function Home() {
       let d = null;
       try { d = await r.json(); } catch (e) { d = null; }
       if (!r.ok || !d || d.error) {
-        throw tpUserError((d && d.error) || ('تعذّر التحليل (' + r.status + ') — حاولي مرة ثانية'));
+        throw tpUserError((d && d.error) || (__t("تعذّر التحليل (", "Analysis failed (") + r.status + __t(") — حاولي مرة ثانية", ") — please try again")));
       }
 
-      setTpStage('جارٍ بناء الورقة…');
+      setTpStage(__t("جارٍ بناء الورقة…", "Building the sheet…"));
       const built = tpBuildSheet(d, imgs, {
         brand: extractBrandName(tpNotes),
         garmentName: tpName,
@@ -1010,7 +1130,7 @@ export default function Home() {
       incrementUsage();
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] techpack', e && e.message);
-      setTpError((e && e.userMessage) || 'خطأ في الاتصال، حاولي مرة ثانية');
+      setTpError((e && e.userMessage) || __t("خطأ في الاتصال، حاولي مرة ثانية", "Connection error, please try again"));
     }
     setTpLoading(false);
     setTpStage('');
@@ -1024,7 +1144,7 @@ export default function Home() {
       await tpSavePdf(techpack, tpAssets);
     } catch (e) {
       if (typeof console !== 'undefined') console.warn('[gh] pdf', e && e.message);
-      alert('تعذّر إنشاء ملف PDF، جرّبي مرة ثانية');
+      alert(__t("تعذّر إنشاء ملف PDF، جرّبي مرة ثانية", "Couldn't create the PDF, please try again"));
     }
     setTpDownloading(false);
   };
@@ -1041,9 +1161,9 @@ export default function Home() {
       if (mkImage) fd.append('image', mkImage);
       const r = await authFetch('/api/generate', { method: 'POST', body: fd, headers: { 'x-gh-tool': 'marketing' } });
       const d = await r.json();
-      if (d.error) setMkResult('خطأ: ' + d.error);
+      if (d.error) setMkResult(__t("خطأ: ", "Error: ") + trServer(d.error));
       else { setMkResult(d.result); incrementUsage(); }
-    } catch { setMkResult('خطأ في الاتصال'); }
+    } catch { setMkResult(__t("خطأ في الاتصال", "Connection error")); }
     setMkLoading(false);
   };
 
@@ -1059,21 +1179,21 @@ export default function Home() {
       if (vidImage) fd.append('image', vidImage);
       const r = await authFetch('/api/generate', { method: 'POST', body: fd, headers: { 'x-gh-tool': 'video' } });
       const d = await r.json();
-      if (d.error) setVidResult('خطأ: ' + d.error);
+      if (d.error) setVidResult(__t("خطأ: ", "Error: ") + trServer(d.error));
       else { setVidResult(d.result); incrementUsage(); }
-    } catch { setVidResult('خطأ في الاتصال'); }
+    } catch { setVidResult(__t("خطأ في الاتصال", "Connection error")); }
     setVidLoading(false);
   };
 
-  const copyText = (t) => { navigator.clipboard.writeText(t); alert('تم النسخ'); };
+  const copyText = (t) => { navigator.clipboard.writeText(t); alert(__t("تم النسخ", "Copied")); };
 
   const moodImgs = moodBoard?.moodImages || [];
 
   const videoPlatforms = [
-    { name: 'Kling AI', note: 'الأفضل للحركة الواقعية وسقوط القماش' },
-    { name: 'Runway Gen-3', note: 'تحكّم سينمائي عالٍ وجودة إخراج' },
-    { name: 'Google Veo', note: 'واقعية عالية ومشاهد متكاملة' },
-    { name: 'Higgsfield', note: 'حركات كاميرا درامية جاهزة' },
+    { name: 'Kling AI', note: __t("الأفضل للحركة الواقعية وسقوط القماش", "Best for realistic motion and fabric drape") },
+    { name: 'Runway Gen-3', note: __t("تحكّم سينمائي عالٍ وجودة إخراج", "Strong cinematic control and output quality") },
+    { name: 'Google Veo', note: __t("واقعية عالية ومشاهد متكاملة", "High realism and complete scenes") },
+    { name: 'Higgsfield', note: __t("حركات كاميرا درامية جاهزة", "Ready-made dramatic camera moves") },
   ];
   return (
     <>
@@ -1094,7 +1214,7 @@ export default function Home() {
             <div className="sb-logo">GH</div>
             <div>
               <div className="sb-title">GH Couture AI</div>
-              <div className="sb-sub">مصنع الأزياء الرقمي</div>
+              <div className="sb-sub">{__t("مصنع الأزياء الرقمي", "Digital fashion factory")}</div>
             </div>
           </div>
 
@@ -1121,19 +1241,19 @@ export default function Home() {
 
           <div className="sb-foot">
             {authLoaded && !isSignedIn && (
-              <button onClick={() => clerk.openSignIn()} className="sb-btn primary full" style={{ marginBottom: '0.6rem' }}>تسجيل الدخول</button>
+              <button onClick={() => clerk.openSignIn()} className="sb-btn primary full" style={{ marginBottom: '0.6rem' }}>{__t("تسجيل الدخول", "Sign in")}</button>
             )}
             {me && me.signedIn ? (
               <div className="sb-user">
                 {me.owner ? (
-                  <div className="sb-plan admin">وضع المالكة — بلا حدود</div>
+                  <div className="sb-plan admin">{__t("وضع المالكة — بلا حدود", "Owner mode — unlimited")}</div>
                 ) : me.plan ? (
                   <>
-                    <div className="sb-plan">{me.plan.name}</div>
+                    <div className="sb-plan">{trServer(me.plan.name)}</div>
                     {statNow && (
                       <>
                         <div className="sb-plan">
-                          {(me.labels && me.labels[toolNow]) || ''} · {statNow.used}/{statNow.limit}
+                          {trServer((me.labels && me.labels[toolNow]) || '')} · {statNow.used}/{statNow.limit}
                         </div>
                         <div className="sb-usage-bar">
                           <div className="sb-usage-fill" style={{ width: `${(statNow.used / (statNow.limit || 1)) * 100}%` }}></div>
@@ -1142,20 +1262,20 @@ export default function Home() {
                     )}
                   </>
                 ) : (
-                  <div className="sb-plan">{me.reason === 'expired' ? 'انتهى اشتراكك' : 'ما عندك اشتراك فعّال'}</div>
+                  <div className="sb-plan">{me.reason === 'expired' ? __t("انتهى اشتراكك", "Your subscription has ended") : __t("ما عندك اشتراك فعّال", "You don't have an active subscription")}</div>
                 )}
                 <div className="sb-user-actions">
                   {!me.owner && (
-                    <button onClick={() => setShowPricing(true)} className="sb-btn primary">{me.plan ? 'الباقات' : 'اشتركي'}</button>
+                    <button onClick={() => setShowPricing(true)} className="sb-btn primary">{me.plan ? __t("الباقات", "Plans") : __t("اشتركي", "Subscribe")}</button>
                   )}
-                  <button onClick={handleLogout} className="sb-btn ghost">خروج</button>
+                  <button onClick={handleLogout} className="sb-btn ghost">{__t("خروج", "Sign out")}</button>
                 </div>
               </div>
             ) : (
-              <button onClick={() => setShowPricing(true)} className="sb-btn primary full">اشتركي الآن</button>
+              <button onClick={() => setShowPricing(true)} className="sb-btn primary full">{__t("اشتركي الآن", "Subscribe now")}</button>
             )}
             {authLoaded && isSignedIn && !(me && me.signedIn) && (
-              <button onClick={handleLogout} className="sb-btn ghost full" style={{ marginTop: '0.6rem' }}>خروج</button>
+              <button onClick={handleLogout} className="sb-btn ghost full" style={{ marginTop: '0.6rem' }}>{__t("خروج", "Sign out")}</button>
             )}
           </div>
         </aside>
@@ -1168,10 +1288,11 @@ export default function Home() {
           <header className="topbar">
             <button className="menu-btn" onClick={() => setSidebarOpen(true)} aria-label="menu">☰</button>
             <div className="topbar-title">
-              <span className="topbar-eyebrow">المرحلة {currentTab.num}</span>
+              <span className="topbar-eyebrow">{__t("المرحلة", "Stage")} {currentTab.num}</span>
               <h1 className="topbar-h1">{currentTab.name}</h1>
             </div>
             <div className="topbar-actions">
+              <button type="button" className="topbar-lang" onClick={switchLang}>{lang === 'ar' ? 'English' : 'عربي'}</button>
               {me && me.signedIn && !me.owner && me.plan && statNow && (
                 <div className="topbar-usage">
                   <span>{statNow.used}/{statNow.limit}</span>
@@ -1179,7 +1300,7 @@ export default function Home() {
                 </div>
               )}
               {(!me || !me.signedIn || (!me.owner && !me.plan)) && (
-                <button onClick={() => setShowPricing(true)} className="topbar-cta">اشتركي</button>
+                <button onClick={() => setShowPricing(true)} className="topbar-cta">{__t("اشتركي", "Subscribe")}</button>
               )}
             </div>
           </header>
@@ -1190,28 +1311,28 @@ export default function Home() {
             {activeTab === 'moodboard' && (
               <div className="tool">
                 <section className="card">
-                  <p className="card-hint">اكتبي وصف الكونسبت، وتُبنى لكِ لوحة إلهام احترافية كاملة: رسمة، صور، باليت ألوان، وخامات.</p>
+                  <p className="card-hint">{__t("اكتبي وصف الكونسبت، وتُبنى لكِ لوحة إلهام احترافية كاملة: رسمة، صور، باليت ألوان، وخامات.", "Describe your concept and we'll build a complete professional inspiration board: a sketch, images, a colour palette and fabrics.")}</p>
                   <div className="field">
-                    <label>وصف الكونسبت</label>
+                    <label>{__t("وصف الكونسبت", "Concept description")}</label>
                     <textarea value={moodDescription} onChange={(e) => setMoodDescription(e.target.value)}
-                      placeholder="مثال: فستان سهرة مستوحى من أعماق البحر، ألوان زمردية وفيروزية، إحساس غامض وساحر..."></textarea>
+                      placeholder={__t("مثال: فستان سهرة مستوحى من أعماق البحر، ألوان زمردية وفيروزية، إحساس غامض وساحر...", "Example: an evening gown inspired by the deep sea, emerald and turquoise tones, a mysterious, enchanting feel...")}></textarea>
                   </div>
                   <button onClick={handleMoodboard} disabled={moodLoading} className="cta">
-                    {moodLoading ? <><span className="spinner"></span> جاري إنشاء اللوحة...</> : 'أنشئي المود بورد'}
+                    {moodLoading ? <><span className="spinner"></span> {__t("جاري إنشاء اللوحة...", "Creating the board...")}</> : __t("أنشئي المود بورد", "Create mood board")}
                   </button>
                   {moodError && <div className="err">{moodError}</div>}
                 </section>
 
-                {moodLoading && <div className="loading-block"><span className="spinner-lg"></span><p>يتم توليد الرسمة والصور والألوان...</p></div>}
-                {!moodLoading && !moodBoard && <p className="placeholder">لوحة الإلهام ستظهر هنا</p>}
+                {moodLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{__t("يتم توليد الرسمة والصور والألوان...", "Generating the sketch, images and colours...")}</p></div>}
+                {!moodLoading && !moodBoard && <p className="placeholder">{__t("لوحة الإلهام ستظهر هنا", "Your inspiration board will appear here")}</p>}
 
                 {moodBoard && (
                   <>
                     <div className="board-actions">
                       <button onClick={downloadBoard} disabled={downloading} className="download-btn">
-                        {downloading ? <><span className="spinner"></span> جاري الحفظ...</> : 'حفظ اللوحة كصورة'}
+                        {downloading ? <><span className="spinner"></span> {__t("جاري الحفظ...", "Saving...")}</> : __t("حفظ اللوحة كصورة", "Save board as image")}
                       </button>
-                      <span className="hint-inline">أو اضغطي على أي صورة لحفظها منفردة</span>
+                      <span className="hint-inline">{__t("أو اضغطي على أي صورة لحفظها منفردة", "or click any image to save it on its own")}</span>
                     </div>
                     <div id="moodboard-canvas" className="board">
                       <div className="board-header">
@@ -1222,15 +1343,15 @@ export default function Home() {
                         <p className="board-subtitle">{moodBoard.subtitle}</p>
                       </div>
                       <div className="board-collage">
-                        <div className="collage-hero" onClick={() => downloadImage(moodBoard.heroImage, 0)} title="اضغطي لحفظ الصورة">
+                        <div className="collage-hero" onClick={() => downloadImage(moodBoard.heroImage, 0)} title={__t("اضغطي لحفظ الصورة", "Click to save the image")}>
                           <img src={moodBoard.heroImage} alt="hero" />
-                          <span className="save-badge">حفظ</span>
+                          <span className="save-badge">{__t("حفظ", "Save")}</span>
                         </div>
                         <div className="collage-tiles">
                           {moodImgs.map((img, i) => (
-                            <div className="collage-tile" key={i} onClick={() => downloadImage(img, i + 1)} title="اضغطي لحفظ الصورة">
+                            <div className="collage-tile" key={i} onClick={() => downloadImage(img, i + 1)} title={__t("اضغطي لحفظ الصورة", "Click to save the image")}>
                               <img src={img} alt={`mood-${i}`} />
-                              <span className="save-badge">حفظ</span>
+                              <span className="save-badge">{__t("حفظ", "Save")}</span>
                             </div>
                           ))}
                         </div>
@@ -1272,14 +1393,14 @@ export default function Home() {
             {activeTab === 'studio' && (
               <div className="tool">
                 <section className="card">
-                  <p className="card-hint">حوّلي الكونسبت إلى صورة قطعة احترافية. صفي التصميم، وارفعي صورة مرجعية اختيارياً.</p>
+                  <p className="card-hint">{__t("حوّلي الكونسبت إلى صورة قطعة احترافية. صفي التصميم، وارفعي صورة مرجعية اختيارياً.", "Turn your concept into a professional product image. Describe the design and optionally upload a reference image.")}</p>
                   <div className="field">
-                    <label>وصف التصميم</label>
+                    <label>{__t("وصف التصميم", "Design description")}</label>
                     <textarea value={studioDesc} onChange={(e) => setStudioDesc(e.target.value)}
-                      placeholder="مثال: فستان طويل بقصّة حورية، حرير زمردي بطبقات شيفون متدرجة، تطريز لؤلؤي عند الصدر..."></textarea>
+                      placeholder={__t("مثال: فستان طويل بقصّة حورية، حرير زمردي بطبقات شيفون متدرجة، تطريز لؤلؤي عند الصدر...", "Example: a long mermaid-cut gown, emerald silk with layered graduated chiffon, pearl embroidery at the bust...")}></textarea>
                   </div>
                   <div className="field">
-                    <label>صورة مرجعية (اختياري)</label>
+                    <label>{__t("صورة مرجعية (اختياري)", "Reference image (optional)")}</label>
                     <div className="upload-area">
                       {studioPreview ? (
                         <div className="img-preview">
@@ -1289,54 +1410,54 @@ export default function Home() {
                       ) : (
                         <label className="upload-label">
                           <input type="file" accept="image/*" onChange={makeUploader(setStudioImage, setStudioPreview)} style={{ display: 'none' }} />
-                          <span>اضغطي لرفع صورة مرجعية</span>
+                          <span>{__t("اضغطي لرفع صورة مرجعية", "Click to upload a reference image")}</span>
                         </label>
                       )}
                     </div>
                   </div>
                   <div className="field">
-                    <label>نوع اللقطة</label>
+                    <label>{__t("نوع اللقطة", "Shot type")}</label>
                     <div className="chips">
-                      {[{ id: 'catalog', n: 'معلّقة (كتالوج)' }, { id: 'onmodel', n: 'على موديل' }, { id: 'flatlay', n: 'مسطّحة' }, { id: 'detail', n: 'تفاصيل' }].map((s) => (
+                      {[{ id: 'catalog', n: __t("معلّقة (كتالوج)", "Hanging (catalogue)") }, { id: 'onmodel', n: __t("على موديل", "On a model") }, { id: 'flatlay', n: __t("مسطّحة", "Flat lay") }, { id: 'detail', n: __t("تفاصيل", "Details") }].map((s) => (
                         <button key={s.id} onClick={() => setStudioShot(s.id)} className={`chip ${studioShot === s.id ? 'active' : ''}`}>{s.n}</button>
                       ))}
                     </div>
                   </div>
                   <div className="field">
-                    <label>الخلفية</label>
+                    <label>{__t("الخلفية", "Background")}</label>
                     <div className="chips">
-                      {[{ id: 'cream', n: 'كريمي' }, { id: 'white', n: 'أبيض' }, { id: 'dark', n: 'داكن' }, { id: 'marble', n: 'رخام' }].map((b) => (
+                      {[{ id: 'cream', n: __t("كريمي", "Cream") }, { id: 'white', n: __t("أبيض", "White") }, { id: 'dark', n: __t("داكن", "Dark") }, { id: 'marble', n: __t("رخام", "Marble") }].map((b) => (
                         <button key={b.id} onClick={() => setStudioBg(b.id)} className={`chip ${studioBg === b.id ? 'active' : ''}`}>{b.n}</button>
                       ))}
                     </div>
                   </div>
                   <div className="field">
-                    <label>الإضاءة</label>
+                    <label>{__t("الإضاءة", "Lighting")}</label>
                     <div className="chips">
-                      {[{ id: 'soft', n: 'ناعمة (سوفت بوكس)' }, { id: 'bright', n: 'ساطعة نظيفة' }, { id: 'golden', n: 'ذهبية دافئة' }, { id: 'dramatic', n: 'درامية' }, { id: 'window', n: 'ضوء نافذة' }].map((l) => (
+                      {[{ id: 'soft', n: __t("ناعمة (سوفت بوكس)", "Soft (softbox)") }, { id: 'bright', n: __t("ساطعة نظيفة", "Bright and clean") }, { id: 'golden', n: __t("ذهبية دافئة", "Warm golden") }, { id: 'dramatic', n: __t("درامية", "Dramatic") }, { id: 'window', n: __t("ضوء نافذة", "Window light") }].map((l) => (
                         <button key={l.id} onClick={() => setStudioLight(l.id)} className={`chip ${studioLight === l.id ? 'active' : ''}`}>{l.n}</button>
                       ))}
                     </div>
                   </div>
                   <button onClick={handleStudio} disabled={studioLoading} className="cta">
-                    {studioLoading ? <><span className="spinner"></span> جاري توليد الصورة...</> : 'ولّدي صورة القطعة'}
+                    {studioLoading ? <><span className="spinner"></span> {__t("جاري توليد الصورة...", "Generating the image...")}</> : __t("ولّدي صورة القطعة", "Generate product image")}
                   </button>
                   {studioError && <div className="err">{studioError}</div>}
                 </section>
 
-                {studioLoading && <div className="loading-block"><span className="spinner-lg"></span><p>يتم بناء البرومبت وتوليد الصورة...</p></div>}
-                {!studioLoading && !studioResult && <p className="placeholder">صورة القطعة ستظهر هنا</p>}
+                {studioLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{__t("يتم بناء البرومبت وتوليد الصورة...", "Building the prompt and generating the image...")}</p></div>}
+                {!studioLoading && !studioResult && <p className="placeholder">{__t("صورة القطعة ستظهر هنا", "Your product image will appear here")}</p>}
 
                 {studioResult && (
                   <div className="studio-result">
-                    <div className="studio-img" onClick={() => downloadFlat(studioResult.imageUrl, 'studio-' + fsStamp(Date.now()))} title="اضغطي لحفظ الصورة">
+                    <div className="studio-img" onClick={() => downloadFlat(studioResult.imageUrl, 'studio-' + fsStamp(Date.now()))} title={__t("اضغطي لحفظ الصورة", "Click to save the image")}>
                       <img src={studioResult.imageUrl} alt="design" />
-                      <span className="save-badge">حفظ</span>
+                      <span className="save-badge">{__t("حفظ", "Save")}</span>
                     </div>
                     <div className="studio-prompt">
                       <div className="detail-label">PROMPT</div>
                       <p>{studioResult.prompt}</p>
-                      <button onClick={() => copyText(studioResult.prompt)} className="mini-btn">نسخ البرومبت</button>
+                      <button onClick={() => copyText(studioResult.prompt)} className="mini-btn">{__t("نسخ البرومبت", "Copy prompt")}</button>
                     </div>
                   </div>
                 )}
@@ -1347,12 +1468,12 @@ export default function Home() {
             {activeTab === 'flat' && (
               <div className="panel">
                 <div className="panel-head">
-                  <h2>فلات سكتش (الرسمة التقنية)</h2>
-                  <p>ارفعي تصميمك واحصلي على رسمة تقنية بالأبيض والأسود — أمامية وخلفية. اعتمديها ثم انتقلي للتيك باك.</p>
+                  <h2>{__t("فلات سكتش (الرسمة التقنية)", "Flat sketch (technical drawing)")}</h2>
+                  <p>{__t("ارفعي تصميمك واحصلي على رسمة تقنية بالأبيض والأسود — أمامية وخلفية. اعتمديها ثم انتقلي للتيك باك.", "Upload your design and get a black-and-white technical drawing — front and back. Approve it, then move on to the tech pack.")}</p>
                 </div>
 
                 <div className="field">
-                  <label>صورة التصميم</label>
+                  <label>{__t("صورة التصميم", "Design image")}</label>
                   <input type="file" accept="image/*" onChange={(e) => {
                     const f = e.target.files && e.target.files[0];
                     if (!f) return;
@@ -1364,77 +1485,75 @@ export default function Home() {
                 </div>
 
                 <div className="field">
-                  <label>تفاصيل تُثبَّت في الرسمة (اختياري)</label>
+                  <label>{__t("تفاصيل تُثبَّت في الرسمة (اختياري)", "Details to lock into the drawing (optional)")}</label>
                   <textarea value={flatDesc} onChange={(e) => setFlatDesc(e.target.value)}
-                    placeholder="مثال: ياقة فانل عالية، أكمام بيشوب، بلا حزام، سحاب خلفي مخفي. اكتبي ما يجب ألّا يتغيّر."></textarea>
+                    placeholder={__t("مثال: ياقة فانل عالية، أكمام بيشوب، بلا حزام، سحاب خلفي مخفي. اكتبي ما يجب ألّا يتغيّر.", "Example: high funnel neck, puff sleeves, no belt, hidden back zip. Write what must not change.")}></textarea>
                 </div>
 
                 <button onClick={handleFlat} disabled={flatLoading} className="primary-btn">
-                  {flatLoading ? <><span className="spinner"></span> جاري التوليد...</> : 'توليد الرسمة التقنية'}
+                  {flatLoading ? <><span className="spinner"></span> {__t("جاري التوليد...", "Generating...")}</> : __t("توليد الرسمة التقنية", "Generate technical drawing")}
                 </button>
                 {flatError && <div className="err">{flatError}</div>}
 
                 {(flatFront || flatColorFront) && (
                   <div className="flat-result" id="flat-result-area">
 
-                    <div className="flat-group-title">الرسمة الملوّنة</div>
+                    <div className="flat-group-title">{__t("الرسمة الملوّنة", "Coloured sketch")}</div>
                     <div className="flat-pair">
                       <div className="flat-view">
                         {flatColorFront
                           ? <img src={flatColorFront} alt="colored front" />
-                          : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
+                          : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>{__t("تعذّر التوليد", "Generation failed")}</span></div>}
                         <div className="flat-cap">FRONT</div>
                         {flatColorFront && (
                           <button className="download-btn secondary flat-dl"
-                            onClick={() => downloadFlat(flatColorFront, 'ملونة-امامية')}>تنزيل</button>
+                            onClick={() => downloadFlat(flatColorFront, __t("ملونة-امامية", "coloured-front"))}>{__t("تنزيل", "Download")}</button>
                         )}
                       </div>
                       <div className="flat-view">
                         {flatColorBack
                           ? <img src={flatColorBack} alt="colored back" />
-                          : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
+                          : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>{__t("تعذّر التوليد", "Generation failed")}</span></div>}
                         <div className="flat-cap">BACK</div>
                         {flatColorBack && (
                           <button className="download-btn secondary flat-dl"
-                            onClick={() => downloadFlat(flatColorBack, 'ملونة-خلفية')}>تنزيل</button>
+                            onClick={() => downloadFlat(flatColorBack, __t("ملونة-خلفية", "coloured-back"))}>{__t("تنزيل", "Download")}</button>
                         )}
                       </div>
                     </div>
 
-                    <div className="flat-group-title">الرسمة التقنية — أبيض وأسود</div>
+                    <div className="flat-group-title">{__t("الرسمة التقنية — أبيض وأسود", "Technical drawing — black and white")}</div>
                     <div className="flat-pair">
                       <div className="flat-view">
                         {flatFront
                           ? <img src={flatFront} alt="line front" />
-                          : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
+                          : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>{__t("تعذّر التوليد", "Generation failed")}</span></div>}
                         <div className="flat-cap">FRONT</div>
                         {flatFront && (
                           <button className="download-btn secondary flat-dl"
-                            onClick={() => downloadFlat(flatFront, 'تقنية-امامية')}>تنزيل</button>
+                            onClick={() => downloadFlat(flatFront, __t("تقنية-امامية", "technical-front"))}>{__t("تنزيل", "Download")}</button>
                         )}
                       </div>
                       <div className="flat-view">
                         {flatBack
                           ? <img src={flatBack} alt="line back" />
-                          : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>تعذّر التوليد</span></div>}
+                          : <div className="tp-img-ph tp-img-miss" style={{ aspectRatio: '2/3' }}><span>{__t("تعذّر التوليد", "Generation failed")}</span></div>}
                         <div className="flat-cap">BACK</div>
                         {flatBack && (
                           <button className="download-btn secondary flat-dl"
-                            onClick={() => downloadFlat(flatBack, 'تقنية-خلفية')}>تنزيل</button>
+                            onClick={() => downloadFlat(flatBack, __t("تقنية-خلفية", "technical-back"))}>{__t("تنزيل", "Download")}</button>
                         )}
                       </div>
                     </div>
 
                     <div className="flat-actions">
                       <button onClick={handleFlat} disabled={flatLoading} className="download-btn secondary">
-                        إعادة التوليد
+                        {__t("إعادة التوليد", "Regenerate")}
                       </button>
 
                     </div>
                     <div className="tp-save-hint">
-                      نزّلي الرسمات الأربع، ثم ارفعيها في خاناتها بقسم <strong>التيك باك</strong>:
-                      التقنية تظهر في خانة TECHNICAL FLAT وتُرسم عليها تسميات البناء،
-                      والملوّنة تظهر في خانة LOOK وتُقتطع منها لقطات التفاصيل والكولورواي.
+                      {__t("نزّلي الرسمات الأربع، ثم ارفعيها في خاناتها بقسم", "Download the four drawings, then upload them into their slots in the")} <strong>{__t("التيك باك", "Tech pack")}</strong>{__t(": التقنية تظهر في خانة TECHNICAL FLAT وتُرسم عليها تسميات البناء، والملوّنة تظهر في خانة LOOK وتُقتطع منها لقطات التفاصيل والكولورواي.", "section: the technical drawing goes in the TECHNICAL FLAT slot and gets the construction labels, and the coloured one goes in the LOOK slot, where the detail shots and colourways are cropped from it.")}
                     </div>
                   </div>
                 )}
@@ -1444,9 +1563,9 @@ export default function Home() {
             {activeTab === 'color' && (
               <div className="tool">
                 <section className="card">
-                  <p className="card-hint">ارفعي صورة التصميم أو صورة القطعة المخيطة، وغيّري لون أي منطقة.</p>
+                  <p className="card-hint">{__t("ارفعي صورة التصميم أو صورة القطعة المخيطة، وغيّري لون أي منطقة.", "Upload the design image or a photo of the sewn garment, and change the colour of any area.")}</p>
                   <div className="field">
-                    <label>الصورة</label>
+                    <label>{__t("الصورة", "Image")}</label>
                     <div className="upload-area">
                       {ccPreview ? (
                         <div className="img-preview">
@@ -1457,7 +1576,7 @@ export default function Home() {
                         <label className="upload-label">
                           <input type="file" accept="image/*" style={{ display: 'none' }}
                             onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) handleCcImage(f); }} />
-                          <span>اضغطي لرفع الصورة</span>
+                          <span>{__t("اضغطي لرفع الصورة", "Click to upload the image")}</span>
                         </label>
                       )}
                     </div>
@@ -1466,24 +1585,24 @@ export default function Home() {
                   {ccNote && !ccError && <div className="cc-note">{ccNote}</div>}
                 </section>
 
-                {ccLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{ccStage || 'جارٍ التحضير…'}</p></div>}
-                {!ccLoading && !ccData && !ccPreview && <p className="placeholder">النتيجة رح تظهر هنا</p>}
+                {ccLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{ccStage || __t("جارٍ التحضير…", "Preparing…")}</p></div>}
+                {!ccLoading && !ccData && !ccPreview && <p className="placeholder">{__t("النتيجة رح تظهر هنا", "Your result will appear here")}</p>}
 
                 {ccData && ccZones.length > 0 && (
                   <div className="cc-work">
                     <div className="cc-stage">
                       <CcPreview data={ccData} zones={ccZones} hover={ccHover} />
-                      <div className="cc-stage-note">مرّري ع أي منطقة تحت لتشوفيها ع الصورة</div>
+                      <div className="cc-stage-note">{__t("مرّري ع أي منطقة تحت لتشوفيها ع الصورة", "Hover over any area below to see it on the image")}</div>
                     </div>
 
                     <div className="cc-panel">
                       <div className="cc-panel-top">
                         <div className="cc-panel-titles">
-                          <div className="cc-panel-head">مناطق الألوان — {ccZones.length}</div>
-                          {ccData.descriptionAr && <div className="cc-desc" dir="auto">{ccData.descriptionAr}</div>}
+                          <div className="cc-panel-head">{__t("مناطق الألوان —", "Colour areas —")} {ccZones.length}</div>
+                          {LANG === 'ar' && ccData.descriptionAr && <div className="cc-desc" dir="auto">{ccData.descriptionAr}</div>}
                         </div>
                         {ccChangedZones.length > 0 && (
-                          <span className="cc-credits">استخدام واحد</span>
+                          <span className="cc-credits">{__t("استخدام واحد", "1 use")}</span>
                         )}
                       </div>
 
@@ -1502,14 +1621,14 @@ export default function Home() {
                                   {z.pantone && <span className="cc-zone-pt" dir="ltr">PANTONE {z.pantone}</span>}
                                 </div>
                                 <div className="cc-zone-where" dir="auto">
-                                  {z.partsAr || 'منطقة لونية على التصميم'}{z.material ? ' · ' + z.material : ''}
+                                  {pickLang(z.partsAr, z.parts) || __t("منطقة لونية على التصميم", "Colour area on the design")}{z.material ? ' · ' + z.material : ''}
                                 </div>
                               </div>
                               <div className="cc-zone-actions">
                                 <button type="button" className={'cc-btn' + (z.mode === 'keep' ? ' active' : '')}
-                                  onClick={() => { ccSetZone(i, { mode: 'keep' }); setCcOpenZone(-1); }}>متل ما هي</button>
+                                  onClick={() => { ccSetZone(i, { mode: 'keep' }); setCcOpenZone(-1); }}>{__t("متل ما هي", "Keep as is")}</button>
                                 <button type="button" className={'cc-btn' + (z.mode === 'change' ? ' active' : '')}
-                                  onClick={() => { ccSetZone(i, { mode: 'change' }); setCcOpenZone(i); }}>غيّري اللون</button>
+                                  onClick={() => { ccSetZone(i, { mode: 'change' }); setCcOpenZone(i); }}>{__t("غيّري اللون", "Change colour")}</button>
                               </div>
                             </div>
 
@@ -1523,14 +1642,14 @@ export default function Home() {
                                 </span>
                                 <button type="button" className="cc-btn"
                                   onClick={() => setCcOpenZone(ccOpenZone === i ? -1 : i)}>
-                                  {ccOpenZone === i ? 'إخفاء' : 'تعديل'}
+                                  {ccOpenZone === i ? __t("إخفاء", "Hide") : __t("تعديل", "Edit")}
                                 </button>
                               </div>
                             )}
 
                             {ccOpenZone === i && z.mode === 'change' && (
                               <>
-                                <div className="cc-pick-label" dir="auto">اختاري لون جديد لـ {z.partsAr || z.name}</div>
+                                <div className="cc-pick-label" dir="auto">{__t("اختاري لون جديد لـ", "Choose a new colour for")} {pickLang(z.partsAr, z.parts) || z.name}</div>
                                 <CcPicker value={z.target} onPick={(hex) => ccSetZone(i, { target: hex, mode: 'change' })} />
                               </>
                             )}
@@ -1542,7 +1661,7 @@ export default function Home() {
                         <div className="cc-clash">
                           {ccClashes.map((c, i) => (
                             <div key={'c' + i}>
-                              المنطقتان {c.a} و{c.b} {c.same ? 'واخدين نفس اللون بالضبط' : 'لونيهن متقاربين'} — رح يطلعوا لون واحد بالنتيجة
+                              {__t("المنطقتان", "The areas")} {c.a} {__t("و", "and")}{c.b} {c.same ? __t("واخدين نفس اللون بالضبط", "have exactly the same colour") : __t("لونيهن متقاربين", "have very similar colours")} {__t("— رح يطلعوا لون واحد بالنتيجة", "— they'll come out as a single colour in the result")}
                             </div>
                           ))}
                         </div>
@@ -1550,8 +1669,8 @@ export default function Home() {
 
                       <button className="cta" onClick={ccGenerate}
                         disabled={ccBusy || !ccChangedZones.length || ccAffordable() < 1}>
-                        {ccBusy ? <><span className="spinner"></span> {ccProgress || 'جارٍ الرسم…'}</>
-                          : 'ارسمي النتيجة النهائية · استخدام واحد'}
+                        {ccBusy ? <><span className="spinner"></span> {ccProgress || __t("جارٍ الرسم…", "Drawing…")}</>
+                          : __t("ارسمي النتيجة النهائية · استخدام واحد", "Draw final result · 1 use")}
                       </button>
                     </div>
                   </div>
@@ -1559,12 +1678,12 @@ export default function Home() {
 
                 {ccResults.length > 0 && (
                   <div className="cc-results">
-                    <div className="cc-results-head">النتائج — {ccResults.length}</div>
+                    <div className="cc-results-head">{__t("النتائج —", "Results —")} {ccResults.length}</div>
                     <div className="cc-results-grid">
                       {ccPreview && (
                         <div className="cc-result">
                           <img src={ccPreview} alt="original" />
-                          <div className="cc-result-cap">الأصل</div>
+                          <div className="cc-result-cap">{__t("الأصل", "Original")}</div>
                         </div>
                       )}
                       {ccResults.map((rec) => (
@@ -1575,7 +1694,7 @@ export default function Home() {
                               <span className="cc-chip sm" key={'d' + i} style={{ background: c }} />
                             ))}
                           </div>
-                          <button type="button" className="cc-btn" onClick={() => ccDownload(rec)}>نزّليها</button>
+                          <button type="button" className="cc-btn" onClick={() => ccDownload(rec)}>{__t("نزّليها", "Download")}</button>
                         </div>
                       ))}
                     </div>
@@ -1589,15 +1708,15 @@ export default function Home() {
               <div className="tool">
                 {!fsPreview && (
                   <section className="card">
-                    <p className="card-hint">بدّلي قماش أي منطقة بقطعتك بأي خامة، بملمس وانسدال حقيقيين. الموديل والوضعية والقصّة والخلفية بيضلّوا متل ما هنّ.</p>
+                    <p className="card-hint">{__t("بدّلي قماش أي منطقة بقطعتك بأي خامة، بملمس وانسدال حقيقيين. الموديل والوضعية والقصّة والخلفية بيضلّوا متل ما هنّ.", "Swap the fabric of any area of your piece for any material, with realistic texture and drape. The model, pose, cut and background stay exactly as they are.")}</p>
                     <div className="field">
-                      <label>صورة المنتج</label>
+                      <label>{__t("صورة المنتج", "Product image")}</label>
                       <div className="upload-area">
                         <label className="upload-label">
                           <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
                             onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) handleFsImage(f); }} />
-                          <span>اضغطي لرفع صورة منتج واحدة</span>
-                          <span className="fs-up-note">صورة واضحة · JPG أو PNG أو WEBP</span>
+                          <span>{__t("اضغطي لرفع صورة منتج واحدة", "Click to upload one product image")}</span>
+                          <span className="fs-up-note">{__t("صورة واضحة · JPG أو PNG أو WEBP", "Clear image · JPG, PNG or WEBP")}</span>
                         </label>
                       </div>
                     </div>
@@ -1608,11 +1727,11 @@ export default function Home() {
                 {fsLoading && (
                   <div className="cc-work">
                     <div className="cc-stage">
-                      <div className="fs-stage-head"><strong>منتجك</strong></div>
+                      <div className="fs-stage-head"><strong>{__t("منتجك", "Your product")}</strong></div>
                       {fsPreview && <img src={fsPreview} alt="product" className="cc-canvas" />}
                     </div>
                     <div className="cc-panel">
-                      <div className="loading-block"><span className="spinner-lg"></span><p>{fsStage || 'جارٍ التحضير…'}</p></div>
+                      <div className="loading-block"><span className="spinner-lg"></span><p>{fsStage || __t("جارٍ التحضير…", "Preparing…")}</p></div>
                     </div>
                   </div>
                 )}
@@ -1620,7 +1739,7 @@ export default function Home() {
                 {fsPreview && !fsLoading && !fsData && (
                   <section className="card">
                     {fsError && <div className="err">{fsError}</div>}
-                    <button type="button" className="cc-btn" onClick={fsClear}>رفع صورة ثانية</button>
+                    <button type="button" className="cc-btn" onClick={fsClear}>{__t("رفع صورة ثانية", "Upload another image")}</button>
                   </section>
                 )}
 
@@ -1628,22 +1747,22 @@ export default function Home() {
                   <div className="cc-work">
                     <div className="cc-stage">
                       <div className="fs-stage-head">
-                        <strong>منتجك</strong>
-                        <button type="button" className="cc-btn" onClick={fsClear}>تغيير الصورة</button>
+                        <strong>{__t("منتجك", "Your product")}</strong>
+                        <button type="button" className="cc-btn" onClick={fsClear}>{__t("تغيير الصورة", "Change image")}</button>
                       </div>
                       <CcPreview data={fsData} zones={fsZones} hover={fsHover} />
                       {fsData.detectedAr && (
-                        <div className="fs-detected" dir="auto"><strong>القطعة:</strong> {fsData.detectedAr}</div>
+                        <div className="fs-detected" dir="auto"><strong>{__t("القطعة:", "Garment:")}</strong> {pickLang(fsData.detectedAr, fsData.detected)}</div>
                       )}
                     </div>
 
                     <div className="cc-panel">
                       <div className="cc-panel-top">
                         <div className="cc-panel-titles">
-                          <div className="cc-panel-head">اختاري الأقمشة الجديدة</div>
-                          <div className="cc-desc">اختاري قماش لكل منطقة بدك تغيّريها — الباقي بيضل متل ما هو</div>
+                          <div className="cc-panel-head">{__t("اختاري الأقمشة الجديدة", "Choose the new fabrics")}</div>
+                          <div className="cc-desc">{__t("اختاري قماش لكل منطقة بدك تغيّريها — الباقي بيضل متل ما هو", "Choose a fabric for each area you want to change — everything else stays as it is")}</div>
                         </div>
-                        <span className="cc-credits">استخدام واحد</span>
+                        <span className="cc-credits">{__t("استخدام واحد", "1 use")}</span>
                       </div>
 
                       {fsZones.map((z, i) => (
@@ -1654,11 +1773,11 @@ export default function Home() {
                               <div className="fs-zone-title">
                                 <span className="cc-zone-num">{z.n}</span>
                                 {z.hex && <span className="cc-chip" style={{ background: z.hex }} title={z.colour || z.hex} />}
-                                <strong dir="auto">{z.nameAr}</strong>
-                                {z.name && z.name !== z.nameAr && <span className="fs-zone-en" dir="ltr">{z.name}</span>}
+                                <strong dir="auto">{pickLang(z.nameAr, z.name)}</strong>
+                                {LANG === 'ar' && z.name && z.name !== z.nameAr && <span className="fs-zone-en" dir="ltr">{z.name}</span>}
                               </div>
-                              {z.partsAr && <div className="fs-zone-parts" dir="auto">{z.partsAr}</div>}
-                              {z.currentAr && <div className="fs-zone-cur" dir="auto">الحالي: {z.currentAr}</div>}
+                              {pickLang(z.partsAr, z.parts) && <div className="fs-zone-parts" dir="auto">{pickLang(z.partsAr, z.parts)}</div>}
+                              {pickLang(z.currentAr, z.current) && <div className="fs-zone-cur" dir="auto">{__t("الحالي:", "Current:")} {pickLang(z.currentAr, z.current)}</div>}
                             </div>
                             {z.fabric ? (
                               <div className="fs-picked">
@@ -1668,18 +1787,18 @@ export default function Home() {
                                     : <span className="fs-picked-sw fs-sw-text">Aa</span>}
                                   <span className="fs-picked-name" dir="auto">{z.fabric.name}</span>
                                 </button>
-                                <button type="button" className="fs-x" aria-label="إلغاء" onClick={() => fsSetFabric(i, null)}>✕</button>
+                                <button type="button" className="fs-x" aria-label={__t("إلغاء", "Cancel")} onClick={() => fsSetFabric(i, null)}>✕</button>
                               </div>
                             ) : (
-                              <button type="button" className="fs-change" onClick={() => fsOpenPicker(i)}>غيّري القماش</button>
+                              <button type="button" className="fs-change" onClick={() => fsOpenPicker(i)}>{__t("غيّري القماش", "Change fabric")}</button>
                             )}
                           </div>
                           {z.fabric && z.fabric.kind === 'text' && (
-                            <div className="fs-zone-note">بنفس لونها الحالي</div>
+                            <div className="fs-zone-note">{__t("بنفس لونها الحالي", "In its current colour")}</div>
                           )}
                           {!z.fabric && z.suggestions.length > 0 && (
                             <div className="fs-sugs">
-                              <span>مقترح:</span>
+                              <span>{__t("مقترح:", "Suggested:")}</span>
                               {z.suggestions.map((s, k) => (
                                 <button type="button" className="fs-sug" key={'s' + k} dir="ltr"
                                   onClick={() => fsSetFabric(i, { kind: 'text', name: s })}>{s}</button>
@@ -1691,10 +1810,10 @@ export default function Home() {
 
                       {fsChanged.length > 0 && (
                         <div className="fs-selected">
-                          <div className="fs-selected-head">التغييرات المختارة:</div>
+                          <div className="fs-selected-head">{__t("التغييرات المختارة:", "Selected changes:")}</div>
                           <div className="fs-selected-list">
                             {fsChanged.map((z) => (
-                              <span className="fs-selected-chip" key={'c' + z.n} dir="auto">{z.nameAr}: {z.fabric.name}</span>
+                              <span className="fs-selected-chip" key={'c' + z.n} dir="auto">{pickLang(z.nameAr, z.name)}: {z.fabric.name}</span>
                             ))}
                           </div>
                         </div>
@@ -1704,10 +1823,10 @@ export default function Home() {
 
                       <button className="cta" onClick={fsGenerate}
                         disabled={fsBusy || !fsChanged.length || fsAffordable() < 1}>
-                        {fsBusy ? <><span className="spinner"></span> جارٍ تبديل القماش…</>
-                          : 'بدّلي القماش · استخدام واحد'}
+                        {fsBusy ? <><span className="spinner"></span> {__t("جارٍ تبديل القماش…", "Swapping the fabric…")}</>
+                          : __t("بدّلي القماش · استخدام واحد", "Swap fabric · 1 use")}
                       </button>
-                      {!fsChanged.length && <div className="fs-hint">اختاري قماش لمنطقة وحدة عالأقل</div>}
+                      {!fsChanged.length && <div className="fs-hint">{__t("اختاري قماش لمنطقة وحدة عالأقل", "Choose a fabric for at least one area")}</div>}
                     </div>
                   </div>
                 )}
@@ -1716,34 +1835,34 @@ export default function Home() {
                   <div className="fs-results">
                     <div className="fs-compare">
                       <div className="fs-col">
-                        <div className="fs-col-head">المنتج الأصلي</div>
+                        <div className="fs-col-head">{__t("المنتج الأصلي", "Original product")}</div>
                         <div className="fs-col-img"><img src={fsPreview} alt="original" /></div>
                         <div className="fs-col-foot">
-                          <button type="button" className="cc-btn" onClick={() => downloadFlat(fsPreview, 'original-' + fsStamp(fsResults[fsShown].createdAt))}>نزّليها</button>
+                          <button type="button" className="cc-btn" onClick={() => downloadFlat(fsPreview, 'original-' + fsStamp(fsResults[fsShown].createdAt))}>{__t("نزّليها", "Download")}</button>
                         </div>
                       </div>
                       <div className="fs-col">
-                        <div className="fs-col-head">النتيجة</div>
+                        <div className="fs-col-head">{__t("النتيجة", "Result")}</div>
                         <div className="fs-col-img"><img src={fsResults[fsShown].url} alt="result" /></div>
                         <div className="fs-applied">
-                          <span className="fs-applied-head">الأقمشة المطبّقة</span>
+                          <span className="fs-applied-head">{__t("الأقمشة المطبّقة", "Applied fabrics")}</span>
                           <div className="fs-applied-list">
                             {fsResults[fsShown].applied.map((a, k) => (
                               <span className="fs-applied-item" key={'a' + k}>
                                 {a.thumb ? <img src={a.thumb} alt="" /> : <span className="fs-sw-text">Aa</span>}
-                                <span><strong dir="auto">{a.zone}</strong><em dir="auto">{a.fabric}</em></span>
+                                <span><strong dir="auto">{pickLang(a.zone, a.zoneEn)}</strong><em dir="auto">{a.fabric}</em></span>
                               </span>
                             ))}
                           </div>
                         </div>
                         <div className="fs-col-foot">
-                          <button type="button" className="cc-btn" onClick={() => downloadFlat(fsResults[fsShown].url, 'fabric-' + fsStamp(fsResults[fsShown].createdAt))}>نزّليها</button>
+                          <button type="button" className="cc-btn" onClick={() => downloadFlat(fsResults[fsShown].url, 'fabric-' + fsStamp(fsResults[fsShown].createdAt))}>{__t("نزّليها", "Download")}</button>
                         </div>
                       </div>
                     </div>
                     {fsResults.length > 1 && (
                       <div className="fs-history">
-                        <div className="fs-history-head">كل النتائج — {fsResults.length}</div>
+                        <div className="fs-history-head">{__t("كل النتائج —", "All results —")} {fsResults.length}</div>
                         <div className="fs-history-row">
                           {fsResults.map((rec, k) => (
                             <button type="button" key={rec.id} className={'fs-history-item' + (k === fsShown ? ' on' : '')}
@@ -1762,10 +1881,10 @@ export default function Home() {
                     <div className="fs-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
                       <div className="fs-modal-head">
                         <div>
-                          <div className="fs-modal-title">اختاري القماش</div>
-                          <div className="fs-modal-sub" dir="auto">لـ {fsZones[fsPicker.zone].nameAr}</div>
+                          <div className="fs-modal-title">{__t("اختاري القماش", "Choose the fabric")}</div>
+                          <div className="fs-modal-sub" dir="auto">{__t("لـ", "for")} {pickLang(fsZones[fsPicker.zone].nameAr, fsZones[fsPicker.zone].name)}</div>
                         </div>
-                        <button type="button" className="fs-x lg" aria-label="إغلاق" onClick={() => setFsPicker(null)}>✕</button>
+                        <button type="button" className="fs-x lg" aria-label={__t("إغلاق", "Close")} onClick={() => setFsPicker(null)}>✕</button>
                       </div>
                       <div className="fs-tabs" dir="ltr">
                         {FS_CATS.map((c) => (
@@ -1780,15 +1899,15 @@ export default function Home() {
                               const f = e.target.files && e.target.files[0];
                               e.target.value = '';
                               if (!f) return;
-                              setFsPicker((p) => ({ ...p, pick: { kind: 'up', file: f, thumb: URL.createObjectURL(f), name: 'قماشك' } }));
+                              setFsPicker((p) => ({ ...p, pick: { kind: 'up', file: f, thumb: URL.createObjectURL(f), name: __t("قماشك", "Your fabric") } }));
                             }} />
                           {fsPicker.pick && fsPicker.pick.kind === 'up' ? (
                             <>
                               <img src={fsPicker.pick.thumb} alt="" className="fs-tile-img" />
-                              <span className="fs-tile-name">قماشك</span>
+                              <span className="fs-tile-name">{__t("قماشك", "Your fabric")}</span>
                             </>
                           ) : (
-                            <span className="fs-up-inner"><span className="fs-up-icon">⇪</span><span>ارفعي قماشك</span></span>
+                            <span className="fs-up-inner"><span className="fs-up-icon">⇪</span><span>{__t("ارفعي قماشك", "Upload your fabric")}</span></span>
                           )}
                         </label>
                         {FS_FABRICS.filter((f) => f.cat === fsPicker.cat).map((f) => (
@@ -1801,8 +1920,8 @@ export default function Home() {
                         ))}
                       </div>
                       <div className="fs-modal-foot">
-                        <span dir="auto">{fsPicker.pick ? 'المختار: ' + fsPicker.pick.name : 'اضغطي على عيّنة لتختاريها'}</span>
-                        <button type="button" className="fs-apply" disabled={!fsPicker.pick} onClick={fsApplyPick}>تطبيق</button>
+                        <span dir="auto">{fsPicker.pick ? __t("المختار: ", "Selected: ") + fsPicker.pick.name : __t("اضغطي على عيّنة لتختاريها", "Click a swatch to choose it")}</span>
+                        <button type="button" className="fs-apply" disabled={!fsPicker.pick} onClick={fsApplyPick}>{__t("تطبيق", "Apply")}</button>
                       </div>
                     </div>
                   </div>
@@ -1814,58 +1933,58 @@ export default function Home() {
               <div className="tool">
                 {!dvData && !dvLoading && (
                   <section className="card">
-                    <p className="card-hint">ولّدي تنويعات جديدة لتصميمك: قصّة، طول، أكمام، ياقة… بنفس القماش والتفاصيل.</p>
+                    <p className="card-hint">{__t("ولّدي تنويعات جديدة لتصميمك: قصّة، طول، أكمام، ياقة… بنفس القماش والتفاصيل.", "Generate new variations of your design: cut, length, sleeves, collar… with the same fabric and details.")}</p>
                     <div className="dv-slots">
                       <label className={'dv-slot' + (dvFrontPrev ? ' has' : '')}>
                         <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
                           onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; dvSetFile('front', f); }} />
-                        <span className="dv-badge req">مطلوبة</span>
+                        <span className="dv-badge req">{__t("مطلوبة", "Required")}</span>
                         {dvFrontPrev ? (
                           <span className="dv-slot-row">
                             <img src={dvFrontPrev} alt="" />
-                            <span><strong>الصورة الأمامية</strong><em>✓ انضافت</em></span>
+                            <span><strong>{__t("الصورة الأمامية", "Front image")}</strong><em>{__t("✓ انضافت", "✓ Added")}</em></span>
                           </span>
                         ) : (
                           <span className="dv-slot-empty">
                             <span className="fs-up-icon">⇪</span>
-                            <strong>الصورة الأمامية</strong>
-                            <em>اللقطة الأساسية اللي منغيّرها</em>
+                            <strong>{__t("الصورة الأمامية", "Front image")}</strong>
+                            <em>{__t("اللقطة الأساسية اللي منغيّرها", "The main shot we'll vary")}</em>
                           </span>
                         )}
                       </label>
                       <label className={'dv-slot' + (dvSecondPrev ? ' has' : '')}>
                         <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
                           onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; dvSetFile('second', f); }} />
-                        <span className="dv-badge">اختيارية</span>
+                        <span className="dv-badge">{__t("اختيارية", "Optional")}</span>
                         {dvSecondPrev ? (
                           <span className="dv-slot-row">
                             <img src={dvSecondPrev} alt="" />
-                            <span><strong>الزاوية التانية</strong><em>✓ انضافت</em></span>
-                            <button type="button" className="fs-x" aria-label="إزالة"
+                            <span><strong>{__t("الزاوية التانية", "Second angle")}</strong><em>{__t("✓ انضافت", "✓ Added")}</em></span>
+                            <button type="button" className="fs-x" aria-label={__t("إزالة", "Remove")}
                               onClick={(e) => { e.preventDefault(); setDvSecond(null); setDvSecondPrev(''); }}>✕</button>
                           </span>
                         ) : (
                           <span className="dv-slot-empty">
                             <span className="fs-up-icon">⇪</span>
-                            <strong>الزاوية التانية</strong>
-                            <em>من الخلف أو الجنب — اختيارية</em>
+                            <strong>{__t("الزاوية التانية", "Second angle")}</strong>
+                            <em>{__t("من الخلف أو الجنب — اختيارية", "Back or side view — optional")}</em>
                           </span>
                         )}
                       </label>
                     </div>
                     {dvError && <div className="err">{dvError}</div>}
-                    <button className="cta" onClick={dvAnalyse} disabled={!dvFront}>ابدئي التنويعات</button>
+                    <button className="cta" onClick={dvAnalyse} disabled={!dvFront}>{__t("ابدئي التنويعات", "Start variations")}</button>
                   </section>
                 )}
 
                 {dvLoading && (
                   <div className="cc-work">
                     <div className="cc-stage">
-                      <div className="fs-stage-head"><strong>تصميمك</strong></div>
+                      <div className="fs-stage-head"><strong>{__t("تصميمك", "Your design")}</strong></div>
                       {dvFrontPrev && <img src={dvFrontPrev} alt="design" className="cc-canvas" />}
                     </div>
                     <div className="cc-panel">
-                      <div className="loading-block"><span className="spinner-lg"></span><p>{dvStage || 'جارٍ التحضير…'}</p></div>
+                      <div className="loading-block"><span className="spinner-lg"></span><p>{dvStage || __t("جارٍ التحضير…", "Preparing…")}</p></div>
                     </div>
                   </div>
                 )}
@@ -1875,19 +1994,19 @@ export default function Home() {
                     <div className="dv-left">
                       <div className="cc-stage">
                         <div className="fs-stage-head">
-                          <strong>تصميمك</strong>
-                          <button type="button" className="cc-btn" onClick={dvReset}>تغيير الصورة</button>
+                          <strong>{__t("تصميمك", "Your design")}</strong>
+                          <button type="button" className="cc-btn" onClick={dvReset}>{__t("تغيير الصورة", "Change image")}</button>
                         </div>
                         <img src={dvFrontPrev} alt="design" className="cc-canvas" />
                         {dvData.detectedAr && (
-                          <div className="fs-detected" dir="auto"><strong>القطعة:</strong> {dvData.detectedAr}</div>
+                          <div className="fs-detected" dir="auto"><strong>{__t("القطعة:", "Garment:")}</strong> {pickLang(dvData.detectedAr, dvData.detected)}</div>
                         )}
                       </div>
 
                       <div className="dv-builder">
                         <div className="dv-builder-head">
-                          <strong>التعديلات</strong>
-                          <span className="cc-credits">استخدام واحد</span>
+                          <strong>{__t("التعديلات", "Changes")}</strong>
+                          <span className="cc-credits">{__t("استخدام واحد", "1 use")}</span>
                         </div>
                         <div className="dv-builder-box">
                           {dvChosen.map((x, k) => (
@@ -1895,18 +2014,18 @@ export default function Home() {
                               {k > 0 && <span className="dv-plus">+</span>}
                               <span className="dv-chip-body" dir="ltr">
                                 {x.opt.en}
-                                <button type="button" aria-label="إزالة" onClick={() => dvToggle(x.ci, dvPick[x.ci])}>✕</button>
+                                <button type="button" aria-label={__t("إزالة", "Remove")} onClick={() => dvToggle(x.ci, dvPick[x.ci])}>✕</button>
                               </span>
                             </span>
                           ))}
                           <input type="text" className="dv-notes" value={dvNotes} maxLength={400} dir="auto"
                             onChange={(e) => setDvNotes(e.target.value)}
-                            placeholder={dvChosen.length ? 'زيدي تعليماتك…' : 'اختاري من الخيارات أو اكتبي تعليماتك…'} />
+                            placeholder={dvChosen.length ? __t("زيدي تعليماتك…", "Add your instructions…") : __t("اختاري من الخيارات أو اكتبي تعليماتك…", "Pick from the options or write your instructions…")} />
                         </div>
                         {dvError && <div className="err">{dvError}</div>}
                         <button className="cta" onClick={dvGenerate} disabled={dvBusy || !dvReady || dvAffordable() < 1}>
-                          {dvBusy ? <><span className="spinner"></span> جارٍ رسم التنويع…</>
-                            : 'ولّدي التنويع · استخدام واحد'}
+                          {dvBusy ? <><span className="spinner"></span> {__t("جارٍ رسم التنويع…", "Drawing the variation…")}</>
+                            : __t("ولّدي التنويع · استخدام واحد", "Generate variation · 1 use")}
                         </button>
                       </div>
                     </div>
@@ -1914,22 +2033,22 @@ export default function Home() {
                     <div className="cc-panel">
                       <div className="cc-panel-top">
                         <div className="cc-panel-titles">
-                          <div className="cc-panel-head">خصّصي تصميمك</div>
-                          <div className="cc-desc">اختاري التعديلات اللي بدك ياها — خيار واحد من كل فئة</div>
+                          <div className="cc-panel-head">{__t("خصّصي تصميمك", "Customise your design")}</div>
+                          <div className="cc-desc">{__t("اختاري التعديلات اللي بدك ياها — خيار واحد من كل فئة", "Choose the changes you want — one option per category")}</div>
                         </div>
                       </div>
                       {dvCats.map((c, ci) => (
                         <div className="dv-cat" key={'cat' + ci}>
                           <div className="dv-cat-head">
-                            <strong dir="auto">{c.nameAr || c.name}</strong>
-                            <span dir="auto">الحالي: {c.currentAr || c.current}</span>
+                            <strong dir="auto">{pickLang(c.nameAr, c.name)}</strong>
+                            <span dir="auto">{__t("الحالي:", "Current:")} {pickLang(c.currentAr, c.current)}</span>
                           </div>
                           <div className="dv-opts">
                             {c.options.map((o, oi) => (
                               <button type="button" key={'o' + oi} className={'dv-opt' + (dvPick[ci] === oi ? ' on' : '')}
                                 onClick={() => dvToggle(ci, oi)}>
                                 <span dir="ltr">{o.en}</span>
-                                {o.ar && <em dir="auto">{o.ar}</em>}
+                                {LANG === 'ar' && o.ar && <em dir="auto">{o.ar}</em>}
                               </button>
                             ))}
                           </div>
@@ -1942,30 +2061,30 @@ export default function Home() {
                 {dvResults.length > 0 && dvResults[dvShown] && (
                   <div className="fs-results">
                     <div className="dv-result-bar">
-                      <strong>التنويع</strong>
+                      <strong>{__t("التنويع", "Variation")}</strong>
                       <button type="button" className="cc-btn" onClick={dvGenerate} disabled={dvBusy || !dvReady || dvAffordable() < 1}>
-                        {dvBusy ? 'جارٍ الرسم…' : '↻ ولّدي مرة تانية · استخدام واحد'}
+                        {dvBusy ? __t("جارٍ الرسم…", "Drawing…") : __t("↻ ولّدي مرة تانية · استخدام واحد", "↻ Generate again · 1 use")}
                       </button>
                     </div>
                     <div className="fs-compare">
                       <div className="fs-col">
-                        <div className="fs-col-head">الصورة الأصلية</div>
+                        <div className="fs-col-head">{__t("الصورة الأصلية", "Original image")}</div>
                         <div className="fs-col-img"><img src={dvFrontPrev} alt="original" /></div>
                         <div className="fs-col-foot">
-                          <button type="button" className="cc-btn" onClick={() => downloadFlat(dvFrontPrev, 'original-' + fsStamp(dvResults[dvShown].createdAt))}>نزّليها</button>
+                          <button type="button" className="cc-btn" onClick={() => downloadFlat(dvFrontPrev, 'original-' + fsStamp(dvResults[dvShown].createdAt))}>{__t("نزّليها", "Download")}</button>
                         </div>
                       </div>
                       <div className="fs-col">
                         <div className="fs-col-head" dir="auto">{dvResults[dvShown].title}</div>
                         <div className="fs-col-img"><img src={dvResults[dvShown].url} alt="variation" /></div>
                         <div className="fs-col-foot">
-                          <button type="button" className="cc-btn" onClick={() => downloadFlat(dvResults[dvShown].url, 'variation-' + fsStamp(dvResults[dvShown].createdAt))}>نزّليها</button>
+                          <button type="button" className="cc-btn" onClick={() => downloadFlat(dvResults[dvShown].url, 'variation-' + fsStamp(dvResults[dvShown].createdAt))}>{__t("نزّليها", "Download")}</button>
                         </div>
                       </div>
                     </div>
                     {dvResults.length > 1 && (
                       <div className="fs-history">
-                        <div className="fs-history-head">كل التنويعات — {dvResults.length}</div>
+                        <div className="fs-history-head">{__t("كل التنويعات —", "All variations —")} {dvResults.length}</div>
                         <div className="fs-history-row">
                           {dvResults.map((rec, k) => (
                             <button type="button" key={rec.id} className={'fs-history-item' + (k === dvShown ? ' on' : '')}
@@ -1984,9 +2103,9 @@ export default function Home() {
             {activeTab === 'techpack' && (
               <div className="tool">
                 <section className="card">
-                  <p className="card-hint">ارفعي صورة التصميم والرسمات الأربع ومواصفات القماش.</p>
+                  <p className="card-hint">{__t("ارفعي صورة التصميم والرسمات الأربع ومواصفات القماش.", "Upload the design image, the four sketches and the fabric specs.")}</p>
                   <div className="field">
-                    <label>صورة التصميم الملوّنة</label>
+                    <label>{__t("صورة التصميم الملوّنة", "Coloured design image")}</label>
                     <div className="upload-area">
                       {tpPreview ? (
                         <div className="img-preview">
@@ -1996,19 +2115,19 @@ export default function Home() {
                       ) : (
                         <label className="upload-label">
                           <input type="file" accept="image/*" onChange={makeUploader(setTpImage, setTpPreview)} style={{ display: 'none' }} />
-                          <span>اضغطي لرفع صورة التصميم</span>
+                          <span>{__t("اضغطي لرفع صورة التصميم", "Click to upload the design image")}</span>
                         </label>
                       )}
                     </div>
                   </div>
                   <div className="field">
-                    <label>الرسمات — مطلوبة</label>
+                    <label>{__t("الرسمات — مطلوبة", "Sketches — required")}</label>
                     <div className="flat-upload-grid">
                       {[
-                        ['الرسمة التقنية — أمامي', upLineFront, setUpLineFront, upLineFrontPrev, setUpLineFrontPrev],
-                        ['الرسمة التقنية — خلفي', upLineBack, setUpLineBack, upLineBackPrev, setUpLineBackPrev],
-                        ['الرسمة الملوّنة — أمامي', upColorFront, setUpColorFront, upColorFrontPrev, setUpColorFrontPrev],
-                        ['الرسمة الملوّنة — خلفي', upColorBack, setUpColorBack, upColorBackPrev, setUpColorBackPrev],
+                        [__t("الرسمة التقنية — أمامي", "Technical sketch — front"), upLineFront, setUpLineFront, upLineFrontPrev, setUpLineFrontPrev],
+                        [__t("الرسمة التقنية — خلفي", "Technical sketch — back"), upLineBack, setUpLineBack, upLineBackPrev, setUpLineBackPrev],
+                        [__t("الرسمة الملوّنة — أمامي", "Coloured sketch — front"), upColorFront, setUpColorFront, upColorFrontPrev, setUpColorFrontPrev],
+                        [__t("الرسمة الملوّنة — خلفي", "Coloured sketch — back"), upColorBack, setUpColorBack, upColorBackPrev, setUpColorBackPrev],
                       ].map(([cap, file, setFile, prev, setPrev], i) => (
                         <div className="flat-upload" key={'fu' + i}>
                           <div className="flat-upload-cap">{cap}</div>
@@ -2027,7 +2146,7 @@ export default function Home() {
                                   setFile(f);
                                   setPrev(URL.createObjectURL(f));
                                 }} />
-                              <span>اضغطي للرفع</span>
+                              <span>{__t("اضغطي للرفع", "Click to upload")}</span>
                             </label>
                           )}
                         </div>
@@ -2035,46 +2154,46 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="field">
-                    <label>اسم التصميم (اختياري)</label>
-                    <input type="text" value={tpName} onChange={(e) => setTpName(e.target.value)} placeholder="مثال: فستان أوشن فايبز" />
+                    <label>{__t("اسم التصميم (اختياري)", "Design name (optional)")}</label>
+                    <input type="text" value={tpName} onChange={(e) => setTpName(e.target.value)} placeholder={__t("مثال: فستان أوشن فايبز", "Example: Ocean Vibes dress")} />
                   </div>
                   <div className="field">
-                    <label>مواصفات القماش</label>
+                    <label>{__t("مواصفات القماش", "Fabric specs")}</label>
                     <textarea value={tpFabric} onChange={(e) => setTpFabric(e.target.value)}
-                      placeholder="مثال: ساتان 96% بوليستر 4% سباندكس، تول مطاطي نود، بطانة ساتان. إن تركتيها فارغة تُقترح خامات منطقية حسب التصميم."></textarea>
+                      placeholder={__t("مثال: ساتان 96% بوليستر 4% سباندكس، تول مطاطي نود، بطانة ساتان. إن تركتيها فارغة تُقترح خامات منطقية حسب التصميم.", "Example: satin 96% polyester 4% spandex, nude stretch tulle, satin lining. If left empty, sensible fabrics will be suggested based on the design.")}></textarea>
                   </div>
                   <div className="two-col">
                     <div className="field">
-                      <label>الموسم (اختياري)</label>
+                      <label>{__t("الموسم (اختياري)", "Season (optional)")}</label>
                       <input type="text" value={tpSeason} onChange={(e) => setTpSeason(e.target.value)} placeholder="FALL / WINTER 2026" />
                     </div>
                     <div className="field">
-                      <label>ملاحظات (اختياري)</label>
-                      <input type="text" value={tpNotes} onChange={(e) => setTpNotes(e.target.value)} placeholder="اسم البراند: ...، وأي تفاصيل خاصة" />
+                      <label>{__t("ملاحظات (اختياري)", "Notes (optional)")}</label>
+                      <input type="text" value={tpNotes} onChange={(e) => setTpNotes(e.target.value)} placeholder={__t("اسم البراند: ...، وأي تفاصيل خاصة", "Brand name: ..., and any special details")} />
                     </div>
                   </div>
                   <button onClick={handleTechpack} disabled={tpLoading || !flatsReady || !tpImage} className="cta">
-                    {tpLoading ? <><span className="spinner"></span> {tpStage || 'جارٍ بناء التيك باك…'}</> : 'أنشئي التيك باك'}
+                    {tpLoading ? <><span className="spinner"></span> {tpStage || __t("جارٍ بناء التيك باك…", "Building the tech pack…")}</> : __t("أنشئي التيك باك", "Create tech pack")}
                   </button>
                   {(!flatsReady || !tpImage) && !tpLoading && (
                     <div className="tp-audit" style={{ marginTop: '0.8rem' }}>
-                      لبناء التيك باك ارفعي: <strong>{[!tpImage && 'صورة التصميم'].concat(missingFlats).filter(Boolean).join(' · ')}</strong>
+                      {__t("لبناء التيك باك ارفعي:", "To build the tech pack, upload:")} <strong>{[!tpImage && __t("صورة التصميم", "Design image")].concat(missingFlats).filter(Boolean).join(' · ')}</strong>
                     </div>
                   )}
                   {tpError && <div className="err">{tpError}</div>}
                 </section>
 
-                {tpLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{tpStage || 'يتم بناء التيك باك…'}</p><p className="loading-note">الورقة ستظهر كاملة عند الانتهاء</p></div>}
-                {!tpLoading && !techpack && <p className="placeholder">التيك باك سيظهر هنا</p>}
+                {tpLoading && <div className="loading-block"><span className="spinner-lg"></span><p>{tpStage || __t("يتم بناء التيك باك…", "Building the tech pack…")}</p><p className="loading-note">{__t("الورقة ستظهر كاملة عند الانتهاء", "The full sheet will appear when it's done")}</p></div>}
+                {!tpLoading && !techpack && <p className="placeholder">{__t("التيك باك سيظهر هنا", "Your tech pack will appear here")}</p>}
 
                 {techpack && tpAssets && (
                   <>
                     <div className="board-actions">
                       <button onClick={downloadTechpack} disabled={tpDownloading} className="download-btn">
-                        {tpDownloading ? <><span className="spinner"></span> جارٍ التجهيز...</> : 'حفظ PDF'}
+                        {tpDownloading ? <><span className="spinner"></span> {__t("جارٍ التجهيز...", "Preparing...")}</> : __t("حفظ PDF", "Save PDF")}
                       </button>
                       <button onClick={() => setTpEditOpen((v) => !v)} className="download-btn secondary">
-                        {tpEditOpen ? 'إغلاق التعديل' : 'تعديل الورقة'}
+                        {tpEditOpen ? __t("إغلاق التعديل", "Close editing") : __t("تعديل الورقة", "Edit sheet")}
                       </button>
                     </div>
                     <div className={'tp-work' + (tpEditOpen ? ' editing' : '')}>
@@ -2091,27 +2210,27 @@ export default function Home() {
               <div className="tool split">
                 <section className="card">
                   <div className="field">
-                    <label>المنصة</label>
+                    <label>{__t("المنصة", "Platform")}</label>
                     <div className="chips">
                       {platforms.map((p) => (
                         <button key={p} onClick={() => setMkPlatform(p)} className={`chip ${mkPlatform === p ? 'active' : ''}`}>
-                          {p === 'story' ? 'قصة تسويقية' : p}
+                          {p === 'story' ? __t("قصة تسويقية", "marketing story") : p}
                         </button>
                       ))}
                     </div>
                   </div>
                   <div className="field">
-                    <label>النبرة</label>
+                    <label>{__t("النبرة", "Tone")}</label>
                     <div className="chips">
                       {tones.map((t) => (<button key={t} onClick={() => setMkTone(t)} className={`chip ${mkTone === t ? 'active' : ''}`}>{t}</button>))}
                     </div>
                   </div>
                   <div className="field">
-                    <label>وصف المنتج</label>
-                    <textarea value={mkText} onChange={(e) => setMkText(e.target.value)} placeholder="صفي المنتج أو الكولكشن..."></textarea>
+                    <label>{__t("وصف المنتج", "Product description")}</label>
+                    <textarea value={mkText} onChange={(e) => setMkText(e.target.value)} placeholder={__t("صفي المنتج أو الكولكشن...", "Describe the product or collection...")}></textarea>
                   </div>
                   <div className="field">
-                    <label>صورة (اختياري)</label>
+                    <label>{__t("صورة (اختياري)", "Image (optional)")}</label>
                     <div className="upload-area">
                       {mkPreview ? (
                         <div className="img-preview">
@@ -2121,22 +2240,22 @@ export default function Home() {
                       ) : (
                         <label className="upload-label">
                           <input type="file" accept="image/*" onChange={makeUploader(setMkImage, setMkPreview)} style={{ display: 'none' }} />
-                          <span>اضغطي لرفع صورة</span>
+                          <span>{__t("اضغطي لرفع صورة", "Click to upload an image")}</span>
                         </label>
                       )}
                     </div>
                   </div>
                   <button onClick={handleMarketing} disabled={mkLoading} className="cta">
-                    {mkLoading ? <><span className="spinner"></span> جاري التوليد...</> : 'أنشئي المحتوى'}
+                    {mkLoading ? <><span className="spinner"></span> {__t("جاري التوليد...", "Generating...")}</> : __t("أنشئي المحتوى", "Create content")}
                   </button>
                 </section>
                 <section className="card">
                   <div className="result-head">
-                    <h2 className="card-title">النتيجة</h2>
-                    {mkResult && <button onClick={() => copyText(mkResult)} className="mini-btn">نسخ</button>}
+                    <h2 className="card-title">{__t("النتيجة", "Result")}</h2>
+                    {mkResult && <button onClick={() => copyText(mkResult)} className="mini-btn">{__t("نسخ", "Copy")}</button>}
                   </div>
                   <div className="result-area">
-                    {mkResult ? <div className="result-content">{mkResult}</div> : <p className="placeholder">المحتوى سيظهر هنا</p>}
+                    {mkResult ? <div className="result-content">{mkResult}</div> : <p className="placeholder">{__t("المحتوى سيظهر هنا", "Your content will appear here")}</p>}
                   </div>
                 </section>
               </div>
@@ -2147,23 +2266,23 @@ export default function Home() {
               <div className="tool split">
                 <section className="card">
                   <div className="field">
-                    <label>نوع الفيديو</label>
+                    <label>{__t("نوع الفيديو", "Video type")}</label>
                     <div className="chips">
                       {videoTypes.map((v) => (<button key={v} onClick={() => setVidType(v)} className={`chip ${vidType === v ? 'active' : ''}`}>{v}</button>))}
                     </div>
                   </div>
                   <div className="field">
-                    <label>المود</label>
+                    <label>{__t("المود", "Mood")}</label>
                     <div className="chips">
                       {videoMoods.map((m) => (<button key={m} onClick={() => setVidMood(m)} className={`chip ${vidMood === m ? 'active' : ''}`}>{m}</button>))}
                     </div>
                   </div>
                   <div className="field">
-                    <label>وصف الفكرة</label>
-                    <textarea value={vidText} onChange={(e) => setVidText(e.target.value)} placeholder="صفي فكرة الفيديو أو القطعة..."></textarea>
+                    <label>{__t("وصف الفكرة", "Idea description")}</label>
+                    <textarea value={vidText} onChange={(e) => setVidText(e.target.value)} placeholder={__t("صفي فكرة الفيديو أو القطعة...", "Describe the video idea or the piece...")}></textarea>
                   </div>
                   <div className="field">
-                    <label>صورة (اختياري)</label>
+                    <label>{__t("صورة (اختياري)", "Image (optional)")}</label>
                     <div className="upload-area">
                       {vidPreview ? (
                         <div className="img-preview">
@@ -2173,16 +2292,16 @@ export default function Home() {
                       ) : (
                         <label className="upload-label">
                           <input type="file" accept="image/*" onChange={makeUploader(setVidImage, setVidPreview)} style={{ display: 'none' }} />
-                          <span>اضغطي لرفع صورة</span>
+                          <span>{__t("اضغطي لرفع صورة", "Click to upload an image")}</span>
                         </label>
                       )}
                     </div>
                   </div>
                   <button onClick={handleVideo} disabled={vidLoading} className="cta">
-                    {vidLoading ? <><span className="spinner"></span> جاري التوليد...</> : 'أنشئي برومبت الفيديو'}
+                    {vidLoading ? <><span className="spinner"></span> {__t("جاري التوليد...", "Generating...")}</> : __t("أنشئي برومبت الفيديو", "Create video prompt")}
                   </button>
                   <div className="platforms-box">
-                    <div className="detail-label">منصات توليد الفيديو المقترحة</div>
+                    <div className="detail-label">{__t("منصات توليد الفيديو المقترحة", "Suggested video generation platforms")}</div>
                     {videoPlatforms.map((p, i) => (
                       <div className="platform-row" key={i}>
                         <span className="platform-name">{p.name}</span>
@@ -2193,11 +2312,11 @@ export default function Home() {
                 </section>
                 <section className="card">
                   <div className="result-head">
-                    <h2 className="card-title">النتيجة</h2>
-                    {vidResult && <button onClick={() => copyText(vidResult)} className="mini-btn">نسخ</button>}
+                    <h2 className="card-title">{__t("النتيجة", "Result")}</h2>
+                    {vidResult && <button onClick={() => copyText(vidResult)} className="mini-btn">{__t("نسخ", "Copy")}</button>}
                   </div>
                   <div className="result-area">
-                    {vidResult ? <div className="result-content">{vidResult}</div> : <p className="placeholder">برومبت الفيديو سيظهر هنا</p>}
+                    {vidResult ? <div className="result-content">{vidResult}</div> : <p className="placeholder">{__t("برومبت الفيديو سيظهر هنا", "Your video prompt will appear here")}</p>}
                   </div>
                 </section>
               </div>
@@ -2214,21 +2333,21 @@ export default function Home() {
         <div className="modal-overlay">
           <div className="modal">
             <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
-            <h2 className="modal-title">الباقات</h2>
-            <p className="modal-sub">كميات شهرية لكل أداة. الأسعار وخيارات الاشتراك في صفحة الأسعار.</p>
+            <h2 className="modal-title">{__t("الباقات", "Plans")}</h2>
+            <p className="modal-sub">{__t("كميات شهرية لكل أداة. الأسعار وخيارات الاشتراك في صفحة الأسعار.", "Monthly quotas for each tool. Prices and subscription options are on the pricing page.")}</p>
             {!(me && me.catalog && me.catalog.length) ? (
-              <p className="modal-sub">جارٍ التحميل…</p>
+              <p className="modal-sub">{__t("جارٍ التحميل…", "Loading…")}</p>
             ) : (
               <div className="pricing-grid">
                 {me.catalog.map((pl) => (
                   <div key={pl.id} className="pricing-card">
-                    <h3>{pl.name}</h3>
+                    <h3>{trServer(pl.name)}</h3>
                     <ul>
                       {Object.keys(pl.tools).map((t) => (
-                        <li key={t}>{pl.tools[t]} · {(me.labels && me.labels[t]) || t}</li>
+                        <li key={t}>{pl.tools[t]} · {trServer((me.labels && me.labels[t]) || t)}</li>
                       ))}
                     </ul>
-                    <a href="/pricing" className="subscribe-btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>الأسعار والاشتراك</a>
+                    <a href="/pricing" className="subscribe-btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>{__t("الأسعار والاشتراك", "Pricing and subscription")}</a>
                   </div>
                 ))}
               </div>
@@ -2237,13 +2356,85 @@ export default function Home() {
         </div>
       )}
 
-      <StyleBlock />
+      <StyleBlock lang={lang} />
     </>
   );
 }
 // ===== بناء برومبتات المحتوى والفيديو =====
 
+// ===== نسخة الإنجليزي من البرومبتات (النتيجة بتطلع بالإنجليزي) =====
+function buildMarketingPromptEn(platform, tone, text, hasImage) {
+  const imageContext = hasImage ? '\n\nAttached image — analyse it carefully and use it as the main reference.' : '';
+  const textContext = text ? `\n\nProduct description: ${text}` : '';
+  if (platform === 'story') {
+    return `You are a luxury fashion marketing expert. Tone: ${tone}.${imageContext}${textContext}
+
+Write a complete, moving marketing story:
+
+Chapter 1: Inspiration and birth
+[Where this design's inspiration came from — two paragraphs]
+
+Chapter 2: Craftsmanship and details
+[The quality of the making, the materials and the attention to detail — two paragraphs]
+
+Chapter 3: The woman who wears it
+[The ideal woman's character and how she will feel — two paragraphs]
+
+Chapter 4: The moment
+[An imagined scenario of the moment she puts it on — two paragraphs]
+
+The short marketing message
+[One strong sentence]
+
+The advertising slogan
+[Three options]`;
+  }
+  return `You are a luxury fashion marketing expert. Platform: ${platform} | Tone: ${tone}.${imageContext}${textContext}
+
+Provide:
+
+Captions
+Short: [one line]
+Medium: [two lines]
+Long: [a paragraph]
+
+Five Reels ideas
+[For each: the title, the idea and the trend]
+
+Five Story ideas
+
+Hashtags
+[15 relevant hashtags]
+
+Calls to action
+[Five varied formulations]
+
+A short publishing strategy`;
+}
+
+function buildVideoPromptEn(videoType, mood, text, hasImage) {
+  const imageContext = hasImage ? '\n\nAttached image — analyse it carefully and use it as the main reference.' : '';
+  const textContext = text ? `\n\nIdea description: ${text}` : '';
+  return `You are a fashion video director. Type: ${videoType} | Mood: ${mood}.${imageContext}${textContext}
+
+Provide:
+
+Video prompt (English — ready to paste into video generation tools)
+[A complete prompt rich in cinematic detail]
+
+Detailed scene-by-scene script
+Scene 1 | Opening (0:00–0:03): [the shot, camera movement, lighting]
+Scene 2 | The reveal (0:03–0:08): [slow, the wow moment]
+Scene 3 | Details (0:08–0:15): [fabric and detail shots]
+Scene 4 | Lifestyle (0:15–0:22)
+Scene 5 | Closing and call to action (0:22–0:30)
+
+Music and rhythm suggestion`;
+}
+
+
 function buildMarketingPrompt(platform, tone, text, hasImage) {
+  if (LANG === 'en') return buildMarketingPromptEn(platform, tone, text, hasImage);
   const imageContext = hasImage ? '\n\nصورة مرفقة — حللها بدقة واستخدميها كمرجع أساسي.' : '';
   const textContext = text ? `\n\nوصف المنتج: ${text}` : '';
   if (platform === 'story') {
@@ -2294,6 +2485,7 @@ function buildMarketingPrompt(platform, tone, text, hasImage) {
 }
 
 function buildVideoPrompt(videoType, mood, text, hasImage) {
+  if (LANG === 'en') return buildVideoPromptEn(videoType, mood, text, hasImage);
   const imageContext = hasImage ? '\n\nصورة مرفقة — حللها بدقة واستخدميها كمرجع أساسي.' : '';
   const textContext = text ? `\n\nوصف الفكرة: ${text}` : '';
   return `أنتِ مخرجة فيديوهات أزياء. النوع: ${videoType} | المود: ${mood}.${imageContext}${textContext}
@@ -2639,7 +2831,7 @@ function ccLoadCanvas(src) {
       c.getContext('2d').drawImage(im, 0, 0);
       resolve(c);
     };
-    im.onerror = () => reject(new Error('تعذّر تحميل الصورة'));
+    im.onerror = () => reject(new Error(__t("تعذّر تحميل الصورة", "Couldn't load the image")));
     im.src = src;
   });
 }
@@ -2779,7 +2971,7 @@ function CcPicker({ value, onPick }) {
             </span>
           </div>
           <div className="cc-near">
-            <span>أقرب بانتون</span>
+            <span>{__t("أقرب بانتون", "Closest Pantone")}</span>
             <div className="cc-near-row">
               {near.map((p) => (
                 <button type="button" key={p.code} className="cc-near-item" onClick={() => pickHex(p.hex)}>
@@ -2895,10 +3087,10 @@ const TP_CARE = {
 const TP_CARE_KINDS = ['dryclean', 'handwash', 'wash30', 'nowash', 'nobleach', 'steamlow', 'ironlow', 'noiron', 'notumble', 'dryflat'];
 const TP_STORAGE_KINDS = ['hangbag', 'storefolded'];
 const TP_CARE_AR = {
-  dryclean: 'تنظيف جاف فقط', handwash: 'غسيل يدوي بارد', wash30: 'غسالة 30 درجة لطيف',
-  nowash: 'ممنوع الغسيل', nobleach: 'ممنوع المبيّض', steamlow: 'بخار منخفض', ironlow: 'كي منخفض',
-  noiron: 'ممنوع الكي', notumble: 'ممنوع النشّافة', dryflat: 'تجفيف مسطّح',
-  hangbag: 'تعليق داخل كيس', storefolded: 'تخزين مطوي',
+  get dryclean() { return __t("تنظيف جاف فقط", "Dry clean only"); }, get handwash() { return __t("غسيل يدوي بارد", "Cold hand wash"); }, get wash30() { return __t("غسالة 30 درجة لطيف", "Gentle machine wash at 30°"); },
+  get nowash() { return __t("ممنوع الغسيل", "Do not wash"); }, get nobleach() { return __t("ممنوع المبيّض", "Do not bleach"); }, get steamlow() { return __t("بخار منخفض", "Low steam"); }, get ironlow() { return __t("كي منخفض", "Low iron"); },
+  get noiron() { return __t("ممنوع الكي", "Do not iron"); }, get notumble() { return __t("ممنوع النشّافة", "Do not tumble dry"); }, get dryflat() { return __t("تجفيف مسطّح", "Dry flat"); },
+  get hangbag() { return __t("تعليق داخل كيس", "Hang in a bag"); }, get storefolded() { return __t("تخزين مطوي", "Store folded"); },
 };
 const TP_TRIM_KINDS = ['zipper', 'button', 'hook', 'snap', 'thread', 'label', 'elastic', 'boning',
   'bead', 'crystal', 'sequin', 'pearl', 'piping', 'lace', 'ribbon', 'embroidery', 'other'];
@@ -2951,7 +3143,7 @@ const tpHexRgb = (h) => {
 
 function tpUserError(msg) {
   const e = new Error(msg);
-  e.userMessage = msg;
+  e.userMessage = trServer(msg);
   return e;
 }
 
@@ -3042,7 +3234,7 @@ async function tpFileToCanvas(file, maxSide) {
     ctx.drawImage(im, 0, 0, c.width, c.height);
     return c;
   } catch (e) {
-    throw tpUserError('تعذّر قراءة إحدى الصور المرفوعة — ارفعيها بصيغة JPG أو PNG');
+    throw tpUserError(__t("تعذّر قراءة إحدى الصور المرفوعة — ارفعيها بصيغة JPG أو PNG", "Couldn't read one of the uploaded images — upload it as JPG or PNG"));
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -4397,7 +4589,7 @@ function TechpackPreview({ sheet, assets }) {
         setFail('');
       } catch (e) {
         if (typeof console !== 'undefined') console.warn('[gh] preview', e && e.message);
-        if (!cancelled) setFail('تعذّر عرض المعاينة — حدّثي الصفحة وحاولي مرة ثانية');
+        if (!cancelled) setFail(__t("تعذّر عرض المعاينة — حدّثي الصفحة وحاولي مرة ثانية", "Couldn't show the preview — refresh the page and try again"));
       }
     }, 80);
     return () => { cancelled = true; clearTimeout(t); };
@@ -4455,14 +4647,14 @@ function TechpackEditor({ sheet, onChange }) {
   };
   const delItem = (key, i) => set(key, (sheet[key] || []).filter((_, j) => j !== i));
   const addItem = (key, item) => set(key, (sheet[key] || []).concat([item]));
-  const Del = ({ k, i }) => <button type="button" className="tp-ed-del" onClick={() => delItem(k, i)}>حذف</button>;
+  const Del = ({ k, i }) => <button type="button" className="tp-ed-del" onClick={() => delItem(k, i)}>{__t("حذف", "Delete")}</button>;
 
   return (
     <div className="tp-editor">
-      <TpGroup title="الهيدر">
+      <TpGroup title={__t("الهيدر", "Header")}>
         <div className="tp-ed-grid">
-          <TpField label="اسم البراند" dir="auto" value={sheet.brand} onChange={(v) => set('brand', v)} />
-          <TpField label="السطر تحت البراند" value={sheet.subtitle} onChange={(v) => set('subtitle', v)} />
+          <TpField label={__t("اسم البراند", "Brand name")} dir="auto" value={sheet.brand} onChange={(v) => set('brand', v)} />
+          <TpField label={__t("السطر تحت البراند", "Line under the brand")} value={sheet.subtitle} onChange={(v) => set('subtitle', v)} />
           <TpField label="STYLE NO." value={sheet.styleNo} onChange={(v) => set('styleNo', v)} />
           <TpField label="STYLE NAME" value={sheet.styleName} onChange={(v) => set('styleName', v)} />
           <TpField label="SEASON" value={sheet.season} onChange={(v) => set('season', v)} />
@@ -4475,18 +4667,18 @@ function TechpackEditor({ sheet, onChange }) {
         {(sheet.designDetails || []).map((t, i) => (
           <div className="tp-ed-row" key={'dd' + i}>
             <TpField value={t} onChange={(v) => { const l = sheet.designDetails.slice(); l[i] = v; set('designDetails', l); }} />
-            <button type="button" className="tp-ed-del" onClick={() => set('designDetails', sheet.designDetails.filter((_, j) => j !== i))}>حذف</button>
+            <button type="button" className="tp-ed-del" onClick={() => set('designDetails', sheet.designDetails.filter((_, j) => j !== i))}>{__t("حذف", "Delete")}</button>
           </div>
         ))}
         {(sheet.designDetails || []).length < 8 && (
-          <button type="button" className="tp-ed-add" onClick={() => set('designDetails', (sheet.designDetails || []).concat(['']))}>+ إضافة نقطة</button>
+          <button type="button" className="tp-ed-add" onClick={() => set('designDetails', (sheet.designDetails || []).concat(['']))}>{__t("+ إضافة نقطة", "+ Add point")}</button>
         )}
       </TpGroup>
 
       <TpGroup title="DETAILS & CLOSE-UP">
         {(sheet.details || []).map((it, i) => (
           <div className="tp-ed-row" key={'dt' + i}>
-            <TpField label={'لقطة ' + (i + 1)} value={it.caption} onChange={(v) => setItem('details', i, { caption: v })} />
+            <TpField label={__t("لقطة ", "Shot ") + (i + 1)} value={it.caption} onChange={(v) => setItem('details', i, { caption: v })} />
           </div>
         ))}
       </TpGroup>
@@ -4495,13 +4687,13 @@ function TechpackEditor({ sheet, onChange }) {
         {(sheet.fabrics || []).map((f, i) => (
           <div className="tp-ed-card" key={'fb' + i}>
             <div className="tp-ed-grid">
-              <TpField label="الدور" value={f.role} onChange={(v) => setItem('fabrics', i, { role: v })} />
-              <TpField label="اسم القماش" value={f.name} onChange={(v) => setItem('fabrics', i, { name: v })} />
-              <TpField label="التركيب والوزن" value={f.comp} onChange={(v) => setItem('fabrics', i, { comp: v })} />
-              <TpField label="اللون" value={f.color} onChange={(v) => setItem('fabrics', i, { color: v })} />
+              <TpField label={__t("الدور", "Role")} value={f.role} onChange={(v) => setItem('fabrics', i, { role: v })} />
+              <TpField label={__t("اسم القماش", "Fabric name")} value={f.name} onChange={(v) => setItem('fabrics', i, { name: v })} />
+              <TpField label={__t("التركيب والوزن", "Composition and weight")} value={f.comp} onChange={(v) => setItem('fabrics', i, { comp: v })} />
+              <TpField label={__t("اللون", "Colour")} value={f.color} onChange={(v) => setItem('fabrics', i, { color: v })} />
             </div>
             {!f.asset && (
-              <label className="tp-ed-color">لون المربع
+              <label className="tp-ed-color">{__t("لون المربع", "Swatch colour")}
                 <input type="color" value={tpHexOk(f.hex) ? f.hex : '#cccccc'} onChange={(e) => setItem('fabrics', i, { hex: e.target.value.toUpperCase() })} />
               </label>
             )}
@@ -4510,7 +4702,7 @@ function TechpackEditor({ sheet, onChange }) {
         ))}
         {(sheet.fabrics || []).length < 4 && (
           <button type="button" className="tp-ed-add"
-            onClick={() => addItem('fabrics', { role: 'FABRIC', name: '', comp: '', color: '', hex: '#CCCCCC', asset: null })}>+ إضافة قماش</button>
+            onClick={() => addItem('fabrics', { role: 'FABRIC', name: '', comp: '', color: '', hex: '#CCCCCC', asset: null })}>{__t("+ إضافة قماش", "+ Add fabric")}</button>
         )}
       </TpGroup>
 
@@ -4518,11 +4710,11 @@ function TechpackEditor({ sheet, onChange }) {
         {(sheet.trims || []).map((t, i) => (
           <div className="tp-ed-card" key={'tr' + i}>
             <div className="tp-ed-grid">
-              <TpField label="الاسم" value={t.name} onChange={(v) => setItem('trims', i, { name: v })} />
-              <TpField label="الوصف" value={t.desc} onChange={(v) => setItem('trims', i, { desc: v })} />
+              <TpField label={__t("الاسم", "Name")} value={t.name} onChange={(v) => setItem('trims', i, { name: v })} />
+              <TpField label={__t("الوصف", "Description")} value={t.desc} onChange={(v) => setItem('trims', i, { desc: v })} />
             </div>
             {!t.asset && (
-              <label className="tp-ed-color">لون الأيقونة
+              <label className="tp-ed-color">{__t("لون الأيقونة", "Icon colour")}
                 <input type="color" value={tpHexOk(t.hex) ? t.hex : '#cccccc'} onChange={(e) => setItem('trims', i, { hex: e.target.value.toUpperCase() })} />
               </label>
             )}
@@ -4531,7 +4723,7 @@ function TechpackEditor({ sheet, onChange }) {
         ))}
         {(sheet.trims || []).length < 4 && (
           <button type="button" className="tp-ed-add"
-            onClick={() => addItem('trims', { name: '', desc: '', kind: 'other', hex: '#CCCCCC', asset: null })}>+ إضافة تريم</button>
+            onClick={() => addItem('trims', { name: '', desc: '', kind: 'other', hex: '#CCCCCC', asset: null })}>{__t("+ إضافة تريم", "+ Add trim")}</button>
         )}
       </TpGroup>
 
@@ -4546,19 +4738,19 @@ function TechpackEditor({ sheet, onChange }) {
           </div>
         ))}
         {(sheet.specs || []).length < 12 && (
-          <button type="button" className="tp-ed-add" onClick={() => addItem('specs', { component: '', spec: '' })}>+ إضافة صف</button>
+          <button type="button" className="tp-ed-add" onClick={() => addItem('specs', { component: '', spec: '' })}>{__t("+ إضافة صف", "+ Add row")}</button>
         )}
       </TpGroup>
 
       <TpGroup title="CONSTRUCTION DETAILS">
-        <div className="tp-ed-sub">الرسمة الأمامية</div>
+        <div className="tp-ed-sub">{__t("الرسمة الأمامية", "Front drawing")}</div>
         {(sheet.consF || []).map((c, i) => (
           <div className="tp-ed-row" key={'cf' + i}>
             <TpField value={c.label} onChange={(v) => setItem('consF', i, { label: v })} />
             <Del k="consF" i={i} />
           </div>
         ))}
-        <div className="tp-ed-sub">الرسمة الخلفية</div>
+        <div className="tp-ed-sub">{__t("الرسمة الخلفية", "Back drawing")}</div>
         {(sheet.consB || []).map((c, i) => (
           <div className="tp-ed-row" key={'cb' + i}>
             <TpField value={c.label} onChange={(v) => setItem('consB', i, { label: v })} />
@@ -4571,7 +4763,7 @@ function TechpackEditor({ sheet, onChange }) {
         <div className="tp-ed-grid">
           {[0, 1, 2, 3].map((i) => (
             <label className="tp-ed-field" key={'ca' + i}>
-              <span>{'رمز ' + (i + 1)}</span>
+              <span>{__t("رمز ", "Symbol ") + (i + 1)}</span>
               <select value={(sheet.care || [])[i] || ''} onChange={(e) => {
                 const l = (sheet.care || []).slice();
                 l[i] = e.target.value;
@@ -4583,7 +4775,7 @@ function TechpackEditor({ sheet, onChange }) {
             </label>
           ))}
           <label className="tp-ed-field">
-            <span>التخزين</span>
+            <span>{__t("التخزين", "Storage")}</span>
             <select value={sheet.storage || 'hangbag'} onChange={(e) => set('storage', e.target.value)}>
               {TP_STORAGE_KINDS.map((k) => <option key={k} value={k}>{TP_CARE_AR[k]}</option>)}
             </select>
@@ -4594,7 +4786,7 @@ function TechpackEditor({ sheet, onChange }) {
       <TpGroup title="SIZE CHART (CM)">
         <div className="tp-ed-size">
           <div className="tp-ed-size-row head">
-            <span>القياس</span>
+            <span>{__t("القياس", "Sizing")}</span>
             {TP_SIZE_COLS.map(([n]) => <span key={n}>{n}</span>)}
             <span />
           </div>
@@ -4609,16 +4801,16 @@ function TechpackEditor({ sheet, onChange }) {
                   setItem('sizeRows', i, { vals });
                 }} />
               ))}
-              <button type="button" className="tp-ed-del" onClick={() => delItem('sizeRows', i)}>حذف</button>
+              <button type="button" className="tp-ed-del" onClick={() => delItem('sizeRows', i)}>{__t("حذف", "Delete")}</button>
             </div>
           ))}
         </div>
         {(sheet.sizeRows || []).length < 5 && (
-          <button type="button" className="tp-ed-add" onClick={() => addItem('sizeRows', { label: '', vals: ['', '', '', '', '', ''] })}>+ إضافة صف</button>
+          <button type="button" className="tp-ed-add" onClick={() => addItem('sizeRows', { label: '', vals: ['', '', '', '', '', ''] })}>{__t("+ إضافة صف", "+ Add row")}</button>
         )}
         <div className="tp-ed-grid" style={{ marginTop: '0.6rem' }}>
-          <TpField label="الملاحظة الأولى" value={sheet.note1} onChange={(v) => set('note1', v)} />
-          <TpField label="الملاحظة الثانية" value={sheet.note2} onChange={(v) => set('note2', v)} />
+          <TpField label={__t("الملاحظة الأولى", "First note")} value={sheet.note1} onChange={(v) => set('note1', v)} />
+          <TpField label={__t("الملاحظة الثانية", "Second note")} value={sheet.note2} onChange={(v) => set('note2', v)} />
         </div>
       </TpGroup>
 
@@ -4627,8 +4819,8 @@ function TechpackEditor({ sheet, onChange }) {
           <div className="tp-ed-card" key={'cw' + i}>
             <span className="tp-ed-chip" style={{ background: c.hex }} />
             <div className="tp-ed-grid">
-              <TpField label="اسم اللون" value={c.name} onChange={(v) => setItem('colorway', i, { name: v })} />
-              <TpField label="كود بانتون" value={c.code} onChange={(v) => setItem('colorway', i, { code: v })} />
+              <TpField label={__t("اسم اللون", "Colour name")} value={c.name} onChange={(v) => setItem('colorway', i, { name: v })} />
+              <TpField label={__t("كود بانتون", "Pantone code")} value={c.code} onChange={(v) => setItem('colorway', i, { code: v })} />
             </div>
             <Del k="colorway" i={i} />
           </div>
@@ -4640,8 +4832,708 @@ function TechpackEditor({ sheet, onChange }) {
 
 
 // ===== الأنماط =====
-function StyleBlock() {
-  return (
+function StyleBlock({ lang }) {
+  return lang === 'en' ? (
+    <style jsx global>{`
+      :root {
+        --cream: #f7f2e9;
+        --cream-2: #efe7d6;
+        --ivory: #fdfaf3;
+        --white: #ffffff;
+        --ink: #2c2620;
+        --ink-soft: #6b5f4f;
+        --gold: #b08d57;
+        --gold-deep: #96723f;
+        --line: #e6ddcc;
+        --sidebar-w: 264px;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: 'Tajawal', sans-serif;
+        background: var(--cream);
+        color: var(--ink);
+        min-height: 100vh;
+        direction: ltr;
+      }
+
+      /* ===== التخطيط العام: سايدبار + منطقة رئيسية ===== */
+      .app { display: flex; min-height: 100vh; }
+
+      .sidebar {
+        width: var(--sidebar-w);
+        background: var(--ivory);
+        border-right: 1px solid var(--line);
+        display: flex; flex-direction: column;
+        position: fixed; top: 0; left: 0; bottom: 0;
+        z-index: 200;
+      }
+      .sb-brand {
+        display: flex; align-items: center; gap: 0.8rem;
+        padding: 1.5rem 1.4rem; border-bottom: 1px solid var(--line);
+      }
+      .sb-logo {
+        width: 46px; height: 46px; border: 1.5px solid var(--gold);
+        border-radius: 6px; display: flex; align-items: center; justify-content: center;
+        color: var(--gold-deep); font-weight: 800; font-size: 1.05rem;
+        font-family: 'Cormorant Garamond', serif; letter-spacing: 1px; flex-shrink: 0;
+      }
+      .sb-title { font-family: 'Cormorant Garamond', serif; font-size: 1.35rem; font-weight: 700; color: var(--ink); letter-spacing: 0.5px; direction: ltr; text-align: right; line-height: 1.1; }
+      .sb-sub { font-size: 0.72rem; color: var(--ink-soft); margin-top: 2px; }
+
+      .sb-nav { flex: 1; overflow-y: auto; padding: 1rem 0.8rem; }
+      .sb-group { margin-bottom: 1.4rem; }
+      .sb-group-label {
+        font-size: 0.68rem; letter-spacing: 2px; color: var(--gold-deep);
+        font-weight: 700; padding: 0 0.7rem; margin-bottom: 0.6rem; opacity: 0.85;
+      }
+      .sb-item {
+        width: 100%; display: flex; align-items: center; gap: 0.7rem;
+        padding: 0.7rem 0.7rem; border: none; background: transparent;
+        border-radius: 8px; cursor: pointer; text-align: left;
+        transition: background .18s; margin-bottom: 2px; font-family: 'Tajawal';
+      }
+      .sb-item:hover { background: var(--cream); }
+      .sb-item.active { background: var(--cream-2); }
+      .sb-item-num {
+        font-family: 'Cormorant Garamond', serif; font-size: 0.9rem; font-style: italic;
+        color: var(--gold); width: 22px; flex-shrink: 0; text-align: center;
+      }
+      .sb-item.active .sb-item-num { color: var(--gold-deep); }
+      .sb-item-body { display: flex; flex-direction: column; gap: 1px; }
+      .sb-item-name { font-size: 0.95rem; font-weight: 700; color: var(--ink); }
+      .sb-item-desc { font-size: 0.72rem; color: var(--ink-soft); }
+
+      .sb-foot { padding: 1rem 1.1rem; border-top: 1px solid var(--line); }
+      .sb-plan { font-size: 0.78rem; color: var(--ink-soft); margin-bottom: 0.4rem; }
+      .sb-plan.admin { color: var(--gold-deep); font-weight: 700; }
+      .sb-usage-bar { width: 100%; height: 4px; background: var(--cream-2); border-radius: 2px; margin-bottom: 0.7rem; }
+      .sb-usage-fill { height: 100%; background: var(--gold); border-radius: 2px; }
+      .sb-user-actions { display: flex; gap: 0.5rem; }
+      .sb-btn { flex: 1; padding: 0.6rem; border-radius: 6px; cursor: pointer; font-family: 'Tajawal'; font-weight: 700; font-size: 0.85rem; border: none; }
+      .sb-btn.primary { background: var(--ink); color: var(--ivory); }
+      .sb-btn.primary:hover { background: var(--gold-deep); }
+      .sb-btn.ghost { background: transparent; color: var(--ink-soft); border: 1px solid var(--line); }
+      .sb-btn.full { width: 100%; }
+
+      .sb-overlay { display: none; }
+
+      /* ===== المنطقة الرئيسية ===== */
+      .main-area {
+        flex: 1; margin-left: var(--sidebar-w);
+        display: flex; flex-direction: column; min-height: 100vh; min-width: 0;
+      }
+      .topbar {
+        background: var(--white); border-bottom: 1px solid var(--line);
+        padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem;
+        position: sticky; top: 0; z-index: 100;
+      }
+      .menu-btn {
+        display: none; background: transparent; border: 1px solid var(--line);
+        border-radius: 6px; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; color: var(--ink);
+      }
+      .topbar-title { flex: 1; }
+      .topbar-eyebrow { font-family: 'Cormorant Garamond', serif; font-style: italic; color: var(--gold-deep); font-size: 0.85rem; }
+      .topbar-h1 { font-family: 'Cormorant Garamond', serif; font-size: 1.7rem; font-weight: 700; color: var(--ink); line-height: 1.1; }
+      .topbar-actions { display: flex; align-items: center; gap: 1rem; }
+      .topbar-usage { display: flex; flex-direction: column; align-items: flex-end; font-size: 0.78rem; color: var(--ink-soft); gap: 3px; }
+      .topbar-usage-bar { width: 90px; height: 4px; background: var(--cream-2); border-radius: 2px; }
+      .topbar-usage-bar div { height: 100%; background: var(--gold); border-radius: 2px; }
+      .topbar-cta { background: var(--ink); color: var(--ivory); border: none; padding: 0.6rem 1.4rem; border-radius: 6px; font-weight: 700; cursor: pointer; font-family: 'Tajawal'; }
+      .topbar-cta:hover { background: var(--gold-deep); }
+      .topbar-lang { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); padding: 0.5rem 0.95rem; border-radius: 6px; font-weight: 700; font-size: 0.82rem; cursor: pointer; font-family: 'Tajawal'; }
+      .topbar-lang:hover { background: var(--cream); color: var(--ink); }
+
+      .content { flex: 1; padding: 2rem; max-width: 1200px; width: 100%; margin: 0 auto; }
+      .tool { display: flex; flex-direction: column; gap: 1.4rem; }
+      .tool.split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; }
+      @media (max-width: 950px) { .tool.split { grid-template-columns: 1fr; } }
+
+      .card { background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 1.8rem; }
+      .card-hint { color: var(--ink-soft); margin-bottom: 1.5rem; font-size: 0.92rem; line-height: 1.7; }
+      .card-title { font-family: 'Cormorant Garamond', serif; font-size: 1.4rem; font-weight: 700; color: var(--ink); }
+
+      .field { margin-bottom: 1.3rem; }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+      .field label { display: block; margin-bottom: 0.5rem; color: var(--ink); font-weight: 500; font-size: 0.9rem; }
+      .field textarea, .field input {
+        width: 100%; padding: 0.9rem 1rem; border: 1px solid var(--line); border-radius: 8px;
+        background: var(--cream); font-size: 1rem; font-family: 'Tajawal'; color: var(--ink);
+      }
+      .field textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
+      .field textarea:focus, .field input:focus { outline: none; border-color: var(--gold); }
+
+      .upload-area { border: 1.5px dashed var(--line); border-radius: 10px; padding: 1.8rem; text-align: center; background: var(--cream); }
+      .upload-label { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--gold-deep); font-size: 0.92rem; }
+      .img-preview { position: relative; display: inline-block; }
+      .img-preview img { max-width: 100%; max-height: 240px; border-radius: 8px; }
+      .remove-img { position: absolute; top: -10px; right: -10px; width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: #fff; border: none; cursor: pointer; }
+
+      .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+      .chip { padding: 0.55rem 1.1rem; border: 1px solid var(--line); border-radius: 6px; background: var(--cream); color: var(--ink-soft); cursor: pointer; font-weight: 500; font-family: 'Tajawal'; font-size: 0.88rem; transition: all .2s; }
+      .chip:hover { border-color: var(--gold); color: var(--ink); }
+      .chip.active { background: var(--ink); color: var(--ivory); border-color: var(--ink); }
+
+      .cta { width: 100%; padding: 1.05rem; background: var(--ink); color: var(--ivory); border: none; border-radius: 8px; font-size: 1.03rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-family: 'Tajawal'; transition: background .2s; }
+      .cta:hover:not(:disabled) { background: var(--gold-deep); }
+      .cta:disabled { opacity: 0.65; cursor: default; }
+
+      .mini-btn { padding: 0.5rem 1rem; background: var(--ink); color: var(--ivory); border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-family: 'Tajawal'; font-size: 0.85rem; }
+      .mini-btn:hover { background: var(--gold-deep); }
+
+      .spinner { width: 20px; height: 20px; border: 2.5px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; }
+      .spinner-lg { width: 46px; height: 46px; border: 3px solid var(--line); border-top-color: var(--gold); border-radius: 50%; animation: spin 1s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .err { margin-top: 1rem; padding: 0.9rem 1rem; background: #fdf0ed; color: #b04a35; border-radius: 8px; border: 1px solid #f0d5cd; font-size: 0.9rem; }
+      .loading-block { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 3.5rem; color: var(--gold-deep); }
+      .loading-note { font-size: 0.78rem; color: var(--ink-soft); margin: 0; }
+      .placeholder { color: var(--ink-soft); text-align: center; padding: 3rem; font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 1.2rem; opacity: 0.7; }
+
+      .result-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+      .result-area { background: var(--cream); border: 1px solid var(--line); border-radius: 8px; padding: 1.5rem; min-height: 420px; max-height: 640px; overflow-y: auto; }
+      .result-content { white-space: pre-wrap; line-height: 1.95; color: var(--ink); font-size: 0.95rem; }
+
+      .board-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+      .download-btn { padding: 0.85rem 1.8rem; background: var(--ink); color: var(--ivory); border: none; border-radius: 8px; font-weight: 700; font-size: 0.95rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; font-family: 'Tajawal'; }
+      .download-btn:hover:not(:disabled) { background: var(--gold-deep); }
+      .download-btn:disabled { opacity: 0.65; }
+      .hint-inline { color: var(--ink-soft); font-size: 0.85rem; }
+
+      /* المود بورد */
+      .board { background: #f6f1ea; background-image: radial-gradient(circle at 20% 10%, rgba(255,255,255,0.6), transparent 40%); border-radius: 8px; padding: 3.5rem 3rem; box-shadow: 0 20px 60px rgba(0,0,0,0.1); border: 1px solid var(--line); }
+      .board-header { text-align: center; position: relative; margin-bottom: 2.5rem; padding: 0 1rem; }
+      .board-corner { position: absolute; width: 26px; height: 26px; border: 1.5px solid var(--gold); }
+      .board-corner.tl { top: -12px; left: -6px; border-right: none; border-bottom: none; }
+      .board-corner.tr { top: -12px; right: -6px; border-left: none; border-bottom: none; }
+      .board-title { font-family: 'Cormorant Garamond', serif; font-size: 3.4rem; font-weight: 600; color: var(--ink); letter-spacing: 3px; line-height: 1.1; direction: ltr; }
+      .board-rule { width: 90px; height: 1px; background: var(--gold); margin: 0.9rem auto; }
+      .board-subtitle { font-family: 'Cormorant Garamond', serif; font-style: italic; font-size: 1.25rem; color: var(--ink-soft); direction: ltr; }
+      .board-collage { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; margin-bottom: 2.5rem; }
+      .collage-hero { position: relative; border-radius: 4px; overflow: hidden; cursor: pointer; box-shadow: 0 10px 30px rgba(0,0,0,0.16); min-height: 460px; }
+      .collage-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .collage-tiles { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; gap: 14px; }
+      .collage-tile { position: relative; border-radius: 4px; overflow: hidden; cursor: pointer; box-shadow: 0 8px 22px rgba(0,0,0,0.1); min-height: 145px; }
+      .collage-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .save-badge { position: absolute; top: 8px; right: 8px; padding: 3px 8px; background: rgba(44,38,32,0.7); color: #fff; border-radius: 3px; font-size: 11px; opacity: 0; transition: opacity 0.2s; }
+      .collage-hero:hover .save-badge, .collage-tile:hover .save-badge { opacity: 1; }
+      .board-inspiration { text-align: center; margin: 0 auto 2.5rem; max-width: 720px; }
+      .insp-divider { font-family: 'Cormorant Garamond', serif; letter-spacing: 5px; color: var(--gold); margin-bottom: 1rem; font-size: 1.05rem; }
+      .insp-text { font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; line-height: 1.75; color: var(--ink); direction: ltr; font-weight: 500; }
+      .board-details { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 2rem; padding-top: 2rem; border-top: 1px solid var(--line); }
+      .detail-col { min-width: 0; }
+      .palette-col { grid-column: auto; }
+      .detail-label { font-family: 'Cormorant Garamond', serif; letter-spacing: 3px; color: var(--gold-deep); font-size: 0.9rem; margin-bottom: 0.6rem; direction: ltr; }
+      .detail-value { color: var(--ink); direction: ltr; font-size: 0.92rem; line-height: 1.6; font-family: 'Cormorant Garamond', serif; }
+      .palette-row { display: flex; flex-wrap: wrap; gap: 0.7rem; }
+      .swatch-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; width: 58px; }
+      .swatch { width: 48px; height: 48px; border-radius: 4px; box-shadow: 0 3px 10px rgba(0,0,0,0.16); border: 1px solid rgba(0,0,0,0.05); }
+      .swatch-name { font-size: 0.62rem; color: var(--ink); direction: ltr; text-align: center; font-family: 'Cormorant Garamond', serif; }
+      .swatch-hex { font-size: 0.58rem; color: var(--ink-soft); direction: ltr; }
+      .board-footer { text-align: center; margin-top: 2.5rem; color: var(--gold); font-family: 'Cormorant Garamond', serif; letter-spacing: 3px; font-size: 1rem; }
+      @media (max-width: 760px) {
+        .board { padding: 2rem 1.2rem; }
+        .board-title { font-size: 2.3rem; }
+        .board-collage { grid-template-columns: 1fr; }
+        .collage-hero { min-height: 380px; }
+        .board-details { grid-template-columns: 1fr; gap: 1.5rem; }
+      }
+
+      /* استوديو */
+      .studio-result { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; }
+      @media (max-width: 800px) { .studio-result { grid-template-columns: 1fr; } }
+      .studio-img { position: relative; border-radius: 10px; overflow: hidden; cursor: pointer; box-shadow: 0 14px 40px rgba(0,0,0,0.12); border: 1px solid var(--line); }
+      .studio-img img { width: 100%; display: block; }
+      .studio-prompt { background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 1.5rem; }
+      .studio-prompt p { direction: ltr; text-align: left; color: var(--ink); line-height: 1.7; font-size: 0.9rem; margin: 0.6rem 0 1rem; }
+
+      /* منصات الفيديو */
+      .platforms-box { margin-top: 1.5rem; padding: 1.4rem; background: var(--cream); border: 1px solid var(--line); border-radius: 8px; }
+      .platform-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 0; border-bottom: 1px solid var(--line); }
+      .platform-row:last-child { border-bottom: none; }
+      .platform-name { font-weight: 700; color: var(--ink); direction: ltr; }
+      .platform-note { color: var(--ink-soft); font-size: 0.85rem; text-align: left; }
+
+      /* ===== التيك باك — ورقة واحدة ===== */
+      .tp { background: #e8e8ea; border-radius: 8px; padding: 1.4rem; box-shadow: 0 20px 60px rgba(0,0,0,0.08); }
+
+      /* صفحة مستقلة لكل قسم */
+
+
+      /* ===== تغيير الألوان ===== */
+      .cc-work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 460px); gap: 1.2rem; align-items: start; }
+      .cc-stage { background: #efedea; border-radius: 10px; padding: 0.9rem; position: sticky; top: 1rem; }
+      .cc-canvas { display: block; width: 100%; height: auto; border-radius: 6px; background: #fff; }
+      .cc-stage-note { text-align: center; font-size: 0.72rem; color: var(--ink-soft); margin-top: 0.5rem; }
+      .cc-panel { display: flex; flex-direction: column; gap: 0.6rem; }
+      .cc-panel-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem; }
+      .cc-panel-titles { min-width: 0; }
+      .cc-panel-head { font-size: 0.86rem; font-weight: 700; color: var(--ink); }
+      .cc-desc { font-size: 0.74rem; color: var(--ink-soft); margin-top: 0.2rem; line-height: 1.6; }
+      .cc-credits { flex: none; font-size: 0.7rem; font-weight: 700; color: var(--gold-deep);
+        border: 1px solid #e6dcc6; background: #fdf8ee; border-radius: 999px; padding: 0.25rem 0.6rem; white-space: nowrap; }
+      .cc-zone { border: 1px solid #ece9e4; border-radius: 8px; padding: 0.6rem; background: #fff; }
+      .cc-zone.on { border-color: #bcd8c6; background: #f7fbf8; }
+      .cc-zone-head { display: flex; align-items: flex-start; gap: 0.55rem; }
+      .cc-zone-num { width: 20px; height: 20px; border-radius: 50%; background: #1d1b1a; color: #fff;
+        font-size: 0.7rem; display: flex; align-items: center; justify-content: center; flex: none; }
+      .cc-chip { display: inline-block; width: 18px; height: 18px; border-radius: 4px; border: 1px solid #ddd8d1; flex: none; }
+      .cc-chip.lg { width: 34px; height: 34px; border-radius: 6px; }
+      .cc-chip.sm { width: 12px; height: 12px; border-radius: 3px; }
+      .cc-zone-info { flex: 1; min-width: 0; }
+      .cc-zone-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; font-size: 0.8rem; }
+      .cc-zone-hex, .cc-zone-pt, .cc-kind { font-size: 0.66rem; color: var(--ink-soft);
+        background: #f4f2ef; border-radius: 4px; padding: 0.1rem 0.35rem; }
+      .cc-kind { background: #f0ece3; color: var(--gold-deep); }
+      .cc-zone-where { font-size: 0.7rem; color: var(--ink-soft); margin-top: 0.2rem; line-height: 1.55; }
+      .cc-zone-actions { display: flex; flex-direction: row; gap: 0; flex: none; align-items: center;
+        border: 1px solid #e3dfd8; border-radius: 7px; overflow: hidden; background: #fff; }
+      .cc-zone-actions .cc-btn { border: none; border-radius: 0; white-space: nowrap; }
+      .cc-zone-actions .cc-btn + .cc-btn { border-left: 1px solid #e3dfd8; }
+      .cc-btn { border: 1px solid #e3dfd8; background: #fff; border-radius: 6px; font-size: 0.72rem;
+        padding: 0.35rem 0.6rem; cursor: pointer; font-family: inherit; white-space: nowrap; color: var(--ink); }
+      .cc-btn.active { background: #1d1b1a; color: #fff; border-color: #1d1b1a; }
+      .cc-target { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.55rem;
+        border-top: 1px solid #ece9e4; padding-top: 0.55rem; font-size: 0.74rem; }
+      .cc-target-name { flex: 1; min-width: 0; color: var(--ink-soft);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .cc-arrow { color: var(--ink-soft); }
+      .cc-pick-label { font-size: 0.72rem; color: var(--ink-soft); margin-top: 0.55rem; line-height: 1.55; }
+      .cc-note { margin-top: 0.8rem; padding: 0.5rem 0.7rem; border-radius: 6px;
+        background: #fdf6ec; border: 1px solid #e8d9bf; color: #8a6d3b; font-size: 0.74rem; line-height: 1.7; }
+      .cc-clash { padding: 0.5rem 0.6rem; border-radius: 6px;
+        background: #fdf6ec; border: 1px solid #e8d9bf; color: #8a6d3b; font-size: 0.72rem; line-height: 1.6; }
+      .cc-picker { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; }
+      .cc-search, .cc-hex { box-sizing: border-box; border: 1px solid #e3dfd8; border-radius: 6px;
+        padding: 0.4rem 0.55rem; font-size: 0.76rem; font-family: inherit; background: #fdfcfa; color: var(--ink); }
+      .cc-search { width: 100%; }
+      .cc-hex { width: 6.5rem; }
+      .cc-search-list { max-height: 160px; overflow-y: auto; border: 1px solid #ece9e4; border-radius: 6px; }
+      .cc-search-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; border: 0; background: #fff;
+        padding: 0.35rem 0.5rem; cursor: pointer; font-family: inherit; font-size: 0.74rem; text-align: left; }
+      .cc-search-row:hover { background: #f7f5f2; }
+      .cc-code { direction: ltr; font-weight: 700; }
+      .cc-name { direction: ltr; color: var(--ink-soft); }
+      .cc-picker-main { display: flex; flex-direction: column; gap: 0.55rem; }
+      .cc-sv { position: relative; height: 170px; border-radius: 6px; cursor: crosshair; touch-action: none; }
+      .cc-sv-dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff;
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.4); transform: translate(-50%, -50%); pointer-events: none; }
+      .cc-picker-side { display: flex; flex-direction: column; gap: 0.45rem; }
+      .cc-hue { width: 100%; direction: ltr; -webkit-appearance: none; appearance: none; height: 16px;
+        border-radius: 8px; border: 1px solid #e3dfd8; cursor: pointer;
+        background: linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%,
+          #0000ff 67%, #ff00ff 83%, #ff0000 100%); }
+      .cc-hue::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+        background: #fff; border: 2px solid #1d1b1a; box-shadow: 0 1px 3px rgba(0,0,0,0.3); cursor: pointer; }
+      .cc-hue::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff;
+        border: 2px solid #1d1b1a; cursor: pointer; }
+      .cc-hex-row { display: flex; align-items: center; gap: 0.45rem; }
+      .cc-hsb { font-size: 0.66rem; color: var(--ink-soft); white-space: nowrap; }
+      .cc-near { font-size: 0.68rem; color: var(--ink-soft); }
+      .cc-near-row { display: flex; gap: 0.35rem; margin-top: 0.25rem; }
+      .cc-near-item { flex: 1; min-width: 0; border: 1px solid #ece9e4; border-radius: 6px; background: #fff;
+        padding: 0.3rem; cursor: pointer; font-family: inherit; display: flex; flex-direction: column; gap: 0.15rem; }
+      .cc-near-sw { display: block; height: 22px; border-radius: 4px; }
+      .cc-near-item strong { font-size: 0.64rem; direction: ltr; }
+      .cc-near-item em { font-size: 0.6rem; font-style: normal; color: var(--ink-soft); direction: ltr;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .cc-results { margin-top: 1.2rem; }
+      .cc-results-head { font-size: 0.82rem; font-weight: 700; color: var(--ink); margin-bottom: 0.6rem; }
+      .cc-results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.9rem; }
+      .cc-result { background: #efedea; border-radius: 10px; padding: 0.6rem;
+        display: flex; flex-direction: column; gap: 0.5rem; }
+      .cc-result img { display: block; width: 100%; height: auto; border-radius: 6px; background: #fff; }
+      .cc-result-cap { display: flex; align-items: center; justify-content: center; gap: 0.3rem;
+        font-size: 0.72rem; color: var(--ink-soft); min-height: 1rem; }
+      .cc-result .cc-btn { width: 100%; padding: 0.45rem; }
+      .download-btn.sm { padding: 0.4rem 0.7rem; font-size: 0.74rem; }
+      @media (max-width: 980px) { .cc-work { grid-template-columns: 1fr; } .cc-stage { position: static; } }
+
+      /* ===== تنويعات التصميم ===== */
+      .dv-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; margin-bottom: 1rem; }
+      .dv-slot { position: relative; display: flex; align-items: center; justify-content: center; min-height: 170px;
+        border: 1.5px dashed var(--line); border-radius: 10px; background: var(--cream); cursor: pointer; padding: 1rem; }
+      .dv-slot.has { border-style: solid; border-color: var(--ink); background: #fff; }
+      .dv-badge { position: absolute; top: 0.6rem; left: 0.6rem; font-size: 0.68rem; border-radius: 999px;
+        padding: 0.2rem 0.55rem; background: #f0ece6; color: var(--ink-soft); }
+      .dv-badge.req { background: var(--ink); color: #fff; }
+      .dv-slot-empty { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; text-align: center; }
+      .dv-slot-empty strong { font-size: 0.92rem; color: var(--ink); }
+      .dv-slot-empty em, .dv-slot-row em { font-style: normal; font-size: 0.74rem; color: var(--ink-soft); }
+      .dv-slot-row { display: flex; align-items: center; gap: 0.7rem; width: 100%; }
+      .dv-slot-row img { width: 64px; height: 84px; object-fit: cover; border-radius: 6px; border: 1px solid #ece9e4; flex: none; }
+      .dv-slot-row > span { flex: 1; display: flex; flex-direction: column; gap: 0.2rem; }
+      .dv-slot-row strong { font-size: 0.88rem; }
+      .dv-slot-row em { color: #1d7a4c; }
+      .dv-left { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+      .dv-left .cc-stage { position: static; }
+      .dv-left .cc-canvas { max-height: 560px; width: auto; max-width: 100%; margin: 0 auto; object-fit: contain; }
+      .dv-builder { background: #fff; border: 1px solid #ece9e4; border-radius: 10px; padding: 0.9rem; display: flex; flex-direction: column; gap: 0.7rem; }
+      .dv-builder-head { display: flex; align-items: center; justify-content: space-between; font-size: 0.86rem; }
+      .dv-builder-box { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; border: 1px solid #d9d4cc;
+        border-radius: 8px; padding: 0.45rem; min-height: 46px; background: #fdfcfa; }
+      .dv-chip { display: inline-flex; align-items: center; gap: 0.35rem; }
+      .dv-plus { color: var(--ink-soft); font-size: 0.8rem; }
+      .dv-chip-body { display: inline-flex; align-items: center; gap: 0.35rem; background: #1d1b1a; color: #fff;
+        border-radius: 5px; padding: 0.3rem 0.5rem; font-size: 0.76rem; }
+      .dv-chip-body button { border: 0; background: transparent; color: #fff; cursor: pointer; font-size: 0.7rem; padding: 0; }
+      .dv-notes { flex: 1; min-width: 140px; border: 0; background: transparent; font-family: inherit; font-size: 0.8rem;
+        padding: 0.3rem; color: var(--ink); }
+      .dv-notes:focus { outline: none; }
+      .dv-cat { border-top: 1px solid #ece9e4; padding-top: 0.8rem; }
+      .dv-cat-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.55rem; }
+      .dv-cat-head strong { font-size: 0.88rem; }
+      .dv-cat-head span { font-size: 0.72rem; color: var(--ink-soft); }
+      .dv-opts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
+      .dv-opt { border: 1px solid #e3dfd8; background: #fff; border-radius: 7px; padding: 0.55rem 0.3rem; cursor: pointer;
+        font-family: inherit; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; color: var(--ink); }
+      .dv-opt span { font-size: 0.8rem; }
+      .dv-opt em { font-style: normal; font-size: 0.66rem; color: var(--ink-soft); }
+      .dv-opt:hover { border-color: var(--ink); }
+      .dv-opt.on { background: #1d1b1a; border-color: #1d1b1a; color: #fff; }
+      .dv-opt.on em { color: #d9d4cc; }
+      .dv-result-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.7rem; font-size: 0.9rem; }
+      @media (max-width: 760px) {
+        .dv-slots { grid-template-columns: 1fr; }
+        .dv-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+
+      /* ===== تبديل القماش ===== */
+      .fs-up-note { font-size: 0.74rem; color: var(--ink-soft); }
+      .fs-stage-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; font-size: 0.86rem; }
+      .fs-detected { margin-top: 0.7rem; background: #fff; border-radius: 6px; padding: 0.6rem 0.7rem;
+        font-size: 0.76rem; line-height: 1.7; color: var(--ink); }
+      .fs-zone { padding: 0.75rem; }
+      .fs-zone-row { display: flex; align-items: flex-start; gap: 0.6rem; }
+      .fs-zone-info { flex: 1; min-width: 0; }
+      .fs-zone-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.84rem; }
+      .fs-zone-en { font-size: 0.66rem; color: var(--ink-soft); background: #f4f2ef; border-radius: 4px; padding: 0.1rem 0.35rem; }
+      .fs-zone-parts { font-size: 0.72rem; color: var(--ink); margin-top: 0.3rem; line-height: 1.6; }
+      .fs-zone-cur { font-size: 0.7rem; color: var(--ink-soft); margin-top: 0.2rem; line-height: 1.6; }
+      .fs-zone-note { font-size: 0.68rem; color: #1d7a4c; margin-top: 0.4rem; }
+      .fs-change { flex: none; border: 1px solid #d9d4cc; background: #fff; border-radius: 7px; padding: 0.5rem 0.75rem;
+        font-family: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer; color: var(--ink); white-space: nowrap; }
+      .fs-change:hover { border-color: var(--ink); }
+      .fs-picked { flex: none; display: flex; align-items: center; gap: 0.3rem; max-width: 55%; }
+      .fs-picked-btn { display: flex; align-items: center; gap: 0.45rem; min-width: 0; border: 1px solid #bcd8c6;
+        background: #eef7f1; border-radius: 7px; padding: 0.3rem 0.3rem 0.3rem 0.55rem; cursor: pointer; font-family: inherit; }
+      .fs-picked-sw { width: 30px; height: 30px; border-radius: 5px; object-fit: cover; flex: none; border: 1px solid #d9d4cc; box-sizing: border-box; }
+      .fs-sw-text { display: inline-flex; align-items: center; justify-content: center; background: #f4f2ef;
+        font-size: 0.7rem; font-weight: 700; color: var(--ink-soft); }
+      .fs-picked-name { font-size: 0.74rem; font-weight: 700; color: #1d5c3a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .fs-x { flex: none; width: 24px; height: 24px; border: none; background: transparent; color: var(--ink-soft);
+        cursor: pointer; font-size: 0.8rem; border-radius: 50%; }
+      .fs-x:hover { background: #f0ece6; color: var(--ink); }
+      .fs-x.lg { width: 34px; height: 34px; font-size: 1rem; }
+      .fs-sugs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-top: 0.55rem; font-size: 0.7rem; color: var(--ink-soft); }
+      .fs-sug { border: 0; background: #f4f2ef; border-radius: 5px; padding: 0.25rem 0.5rem; font-size: 0.72rem;
+        font-family: inherit; color: var(--ink); cursor: pointer; }
+      .fs-sug:hover { background: #e9e4dc; }
+      .fs-selected { background: #f7f5f2; border-radius: 8px; padding: 0.6rem; }
+      .fs-selected-head { font-size: 0.72rem; color: var(--ink-soft); margin-bottom: 0.4rem; }
+      .fs-selected-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+      .fs-selected-chip { background: #1d1b1a; color: #fff; border-radius: 5px; padding: 0.3rem 0.55rem; font-size: 0.72rem; }
+      .fs-hint { text-align: center; font-size: 0.72rem; color: var(--ink-soft); }
+
+      .fs-results { margin-top: 1.4rem; }
+      .fs-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .fs-col { border: 1px solid #ece9e4; border-radius: 10px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
+      .fs-col-head { font-size: 0.84rem; font-weight: 700; padding: 0.7rem 0.9rem; border-bottom: 1px solid #ece9e4; background: #fbfaf8; }
+      .fs-col-img { padding: 0.9rem; display: flex; justify-content: center; background: #fff; }
+      .fs-col-img img { display: block; max-width: 100%; max-height: 520px; border-radius: 6px; }
+      .fs-col-foot { margin-top: auto; padding: 0.6rem 0.9rem; border-top: 1px solid #ece9e4; display: flex; justify-content: flex-end; }
+      .fs-applied { padding: 0.6rem 0.9rem; background: #fbfaf8; border-top: 1px solid #ece9e4; }
+      .fs-applied-head { display: block; font-size: 0.7rem; color: var(--ink-soft); margin-bottom: 0.4rem; }
+      .fs-applied-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+      .fs-applied-item { display: flex; align-items: center; gap: 0.4rem; border: 1px solid #ece9e4; background: #fff;
+        border-radius: 6px; padding: 0.3rem 0.3rem 0.3rem 0.5rem; }
+      .fs-applied-item img, .fs-applied-item .fs-sw-text { width: 26px; height: 26px; border-radius: 4px; object-fit: cover; flex: none; }
+      .fs-applied-item strong { display: block; font-size: 0.7rem; }
+      .fs-applied-item em { display: block; font-size: 0.66rem; font-style: normal; color: var(--ink-soft); }
+      .fs-history { margin-top: 0.9rem; }
+      .fs-history-head { font-size: 0.76rem; color: var(--ink-soft); margin-bottom: 0.45rem; }
+      .fs-history-row { display: flex; gap: 0.5rem; overflow-x: auto; }
+      .fs-history-item { flex: none; width: 76px; border: 2px solid transparent; border-radius: 7px; padding: 0; background: #fff; cursor: pointer; }
+      .fs-history-item.on { border-color: #1d1b1a; }
+      .fs-history-item img { display: block; width: 100%; border-radius: 5px; }
+
+      .fs-modal-bg { position: fixed; inset: 0; background: rgba(20,18,16,0.45); z-index: 1000;
+        display: flex; align-items: center; justify-content: center; padding: 1rem; }
+      .fs-modal { background: #fff; border-radius: 12px; width: min(860px, 100%); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; }
+      .fs-modal-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 1rem 1.2rem 0.8rem; }
+      .fs-modal-title { font-size: 1.05rem; font-weight: 800; color: var(--ink); }
+      .fs-modal-sub { font-size: 0.8rem; color: var(--ink-soft); margin-top: 0.15rem; }
+      .fs-tabs { display: flex; gap: 0.45rem; overflow-x: auto; padding: 0.6rem 1.2rem; border-top: 1px solid #ece9e4; border-bottom: 1px solid #ece9e4; }
+      .fs-tab { flex: none; border: 0; background: #f4f2ef; border-radius: 999px; padding: 0.5rem 0.95rem; font-size: 0.82rem;
+        font-family: inherit; color: var(--ink); cursor: pointer; white-space: nowrap; }
+      .fs-tab.on { background: #1d1b1a; color: #fff; }
+      .fs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-content: start; gap: 0.75rem; padding: 1rem 1.2rem; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+      .fs-tile { position: relative; height: 0; padding: 0 0 100%; border: 2px solid transparent; border-radius: 8px; overflow: hidden;
+        background: #efedea; cursor: pointer; font-family: inherit; display: block; width: 100%; box-sizing: border-box; }
+      .fs-tile.on { border-color: #1d1b1a; box-shadow: 0 0 0 2px #fff inset; }
+      .fs-tile-img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+      .fs-tile-miss { background: linear-gradient(135deg, #ece8e2, #dcd6ce); }
+      .fs-tile-name { position: absolute; right: 0; left: 0; bottom: 0; background: rgba(20,18,16,0.62); color: #fff;
+        font-size: 0.74rem; padding: 0.35rem 0.4rem; text-align: center; }
+      .fs-tile-up { border: 1.5px dashed #cfc9c0; background: #fff; }
+      .fs-tile-up.on { border-style: solid; border-color: #1d1b1a; }
+      .fs-up-inner { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 0.35rem; font-size: 0.8rem; color: var(--ink-soft); }
+      .fs-up-icon { font-size: 1.4rem; }
+      .fs-modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.8rem 1.2rem;
+        border-top: 1px solid #ece9e4; font-size: 0.78rem; color: var(--ink-soft); }
+      .fs-apply { border: 0; background: #1d1b1a; color: #fff; border-radius: 7px; padding: 0.6rem 1.4rem; font-family: inherit;
+        font-size: 0.86rem; font-weight: 700; cursor: pointer; }
+      .fs-apply:disabled { opacity: 0.4; cursor: default; }
+      @media (max-width: 760px) {
+        .fs-compare { grid-template-columns: 1fr; }
+        .fs-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+        .fs-picked { max-width: 60%; }
+      }
+
+      /* ===== ورقة التيك باك: معاينة كانفاس + لوحة تعديل ===== */
+      .tp-work { display: block; }
+      .tp-work.editing { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 1.2rem; align-items: start; }
+      .tp-sheet-wrap { background: #e9e7e3; border-radius: 8px; padding: 1rem; min-width: 0; }
+      .tp-sheet-canvas { display: block; width: 100%; max-width: 820px; height: auto; margin: 0 auto;
+        background: #fff; box-shadow: 0 12px 40px rgba(0,0,0,0.12); }
+      .tp-editor { background: #fff; border: 1px solid #eceae4; border-radius: 8px; padding: 0.3rem;
+        max-height: 88vh; overflow-y: auto; position: sticky; top: 1rem; min-width: 0; }
+      .tp-ed-group { border-bottom: 1px solid #f0ede7; }
+      .tp-ed-group:last-child { border-bottom: 0; }
+      .tp-ed-group summary { cursor: pointer; padding: 0.75rem 0.7rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.03em; }
+      .tp-ed-body { padding: 0 0.7rem 0.9rem; }
+      .tp-ed-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+      .tp-ed-field { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+      .tp-ed-field span { font-size: 0.68rem; color: #8a847e; }
+      .tp-ed-field input, .tp-ed-field textarea, .tp-ed-field select, .tp-ed-size-row input {
+        width: 100%; box-sizing: border-box; border: 1px solid #e3dfd8; border-radius: 5px;
+        padding: 0.4rem 0.5rem; font-size: 0.78rem; font-family: inherit; background: #fdfcfa; color: #1d1b1a; }
+      .tp-ed-field textarea { resize: vertical; min-height: 2.6rem; }
+      .tp-ed-row { display: flex; gap: 0.4rem; align-items: flex-end; margin-bottom: 0.45rem; }
+      .tp-ed-row .tp-ed-field { flex: 1; }
+      .tp-ed-card { border: 1px solid #f0ede7; border-radius: 6px; padding: 0.55rem; margin-bottom: 0.55rem;
+        display: flex; flex-direction: column; gap: 0.45rem; }
+      .tp-ed-del { align-self: flex-start; border: 1px solid #ecd6d6; background: #fff; color: #a0413c;
+        border-radius: 5px; font-size: 0.7rem; padding: 0.35rem 0.6rem; cursor: pointer; white-space: nowrap; font-family: inherit; }
+      .tp-ed-add { border: 1px dashed #d8d2c8; background: #fbfaf7; border-radius: 5px; font-size: 0.74rem;
+        padding: 0.45rem 0.7rem; cursor: pointer; width: 100%; font-family: inherit; }
+      .tp-ed-sub { font-size: 0.7rem; color: #8a847e; margin: 0.4rem 0 0.35rem; }
+      .tp-ed-color { display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; color: #8a847e; }
+      .tp-ed-color input { width: 42px; height: 26px; border: 1px solid #e3dfd8; border-radius: 4px; padding: 0; background: none; }
+      .tp-ed-chip { display: block; width: 100%; height: 14px; border-radius: 3px; border: 1px solid #eee; }
+      .tp-ed-size { display: flex; flex-direction: column; gap: 0.35rem; overflow-x: auto; }
+      .tp-ed-size-row { display: grid; grid-template-columns: minmax(120px, 1.8fr) repeat(6, minmax(48px, 1fr)) auto;
+        gap: 0.3rem; align-items: center; min-width: 540px; }
+      .tp-ed-size-row.head span { font-size: 0.66rem; color: #8a847e; text-align: center; }
+      .tp-ed-size-row input { padding: 0.35rem 0.3rem; text-align: center; }
+      .tp-ed-size-row input:first-child { text-align: left; }
+      @media (max-width: 980px) {
+        .tp-work.editing { grid-template-columns: 1fr; }
+        .tp-editor { position: static; max-height: none; }
+      }
+      .tp-img-miss { display: flex; align-items: center; justify-content: center; text-align: center;
+        padding: 1rem; font-size: 0.72rem; color: #9a6b2f; background: #fdf8ef;
+        border: 1px dashed #e0c9a0; line-height: 1.8; }
+      /* ليبل تعذّر حساب موقعه من جدول القياسات — موضعه تقريبي ويُعلَّم */
+      .tp-m-wrap.uncomputed .tp-m-label { color: #b8860b; }
+      .tp-m-wrap.uncomputed .tp-m-line { border-top-style: dotted; opacity: 0.55; }
+      .tp-audit { background: #fdf6e8; border: 1px solid #e6cfa3; border-radius: 6px;
+        padding: 0.9rem 1.1rem; margin-bottom: 1rem; font-size: 0.78rem; color: #7a5a14; line-height: 1.9; }
+      .tp-audit ul { margin: 0.4rem 0 0; padding-inline-start: 1.2rem; }
+      .flat-result { margin-top: 1.2rem; }
+      .flat-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      @media (max-width: 700px) { .flat-pair { grid-template-columns: 1fr; } }
+      .flat-view { background: #fff; border: 1px solid #eceae4; border-radius: 6px; padding: 0.6rem; }
+      .flat-view img { width: 100%; display: block; }
+      .flat-cap { text-align: center; font-size: 0.68rem; letter-spacing: 0.14em; color: #999; margin-top: 0.4rem; }
+      .flat-actions { display: flex; gap: 0.6rem; margin-top: 0.9rem; flex-wrap: wrap; }
+      .flat-upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
+      @media (max-width: 700px) { .flat-upload-grid { grid-template-columns: 1fr; } }
+      .flat-upload { background: #fff; border: 1px solid #eceae4; border-radius: 6px; padding: 0.5rem; }
+      .flat-upload-cap { font-size: 0.7rem; color: #777; margin-bottom: 0.4rem; text-align: center; }
+      .upload-label.sm { min-height: 84px; font-size: 0.74rem; }
+      .flat-dl { width: 100%; margin-top: 0.45rem; font-size: 0.72rem; padding: 0.35rem; }
+      .flat-group-title { font-size: 0.78rem; font-weight: 700; color: #555; margin: 1.1rem 0 0.5rem; }
+      .flat-group-title:first-child { margin-top: 0; }
+      .tp-save-hint { font-size: 0.72rem; color: #888; margin: 0.4rem 0 0.9rem; line-height: 1.7; }
+      .download-btn.secondary { background: transparent; border: 1px solid #d8d4cc; color: #555; }
+
+      /* هيدر الصفحة — تخطيط النموذج الحرفي */
+      .tp-hd { display: grid; grid-template-columns: 1.5fr 2fr 0.8fr; gap: 1rem; align-items: start; direction: ltr; }
+      .tp-hd-left { display: flex; gap: 0.6rem; align-items: flex-start; text-align: left; }
+      .tp-hd-thumb { width: 46px; height: 46px; object-fit: cover; border-radius: 4px; border: 1px solid #e5e5e5; flex-shrink: 0; }
+      .tp-hd-thumb.ph { background: #f0f0f0; }
+      .tp-hd-code { font-weight: 800; font-size: 0.8rem; color: #111; letter-spacing: 0.3px; }
+      .tp-hd-name { font-weight: 700; font-size: 0.7rem; color: #111; line-height: 1.3; margin-top: 1px; }
+      .tp-hd-sub { font-size: 0.62rem; color: #777; line-height: 1.5; }
+      .tp-hd-mid { text-align: center; }
+      .tp-hd-title { font-weight: 800; font-size: 1.05rem; letter-spacing: 1.6px; color: #111; font-family: Arial, sans-serif; }
+      .tp-hd-cols { display: flex; justify-content: center; align-items: flex-start; gap: 1.6rem; margin-top: 0.5rem; }
+      .tp-hd-col { font-size: 0.62rem; color: #555; max-width: 240px; text-align: center; line-height: 1.4; }
+      .tp-hd-col span { color: #999; }
+      .tp-hd-right { text-align: right; }
+      .tp-hd-ver { font-weight: 800; font-size: 0.74rem; color: #111; }
+      .tp-hd-page { font-weight: 700; font-size: 0.68rem; color: #111; }
+      .tp-hd-rule { height: 3px; background: #111; margin: 0.7rem 0 1.4rem; }
+      @media (max-width: 700px) {
+        .tp-hd { grid-template-columns: 1fr; gap: 0.5rem; }
+        .tp-hd-mid, .tp-hd-right { text-align: left; }
+        .tp-hd-cols { justify-content: flex-start; flex-wrap: wrap; gap: 0.8rem; }
+        .tp-hd-col { text-align: left; }
+      }
+
+      /* إطارات الصور */
+      .tp-ref-frame { border: 1px solid #e5e5e5; border-radius: 8px; background: #f6f2e9; padding: 1.2rem; display: flex; justify-content: center; }
+      .tp-ref-frame img { max-width: 560px; width: 100%; display: block; border-radius: 4px; }
+      .tp-img-frame { border: 1px solid #e5e5e5; border-radius: 8px; background: #fafafa; padding: 0.8rem; }
+      .tp-img-frame img { width: 100%; display: block; border-radius: 4px; }
+      .tp-img-ph { width: 100%; background: #f0f0f0; border-radius: 4px; }
+
+      /* طبقة الشرح المرسومة بالكود فوق الرسمة النظيفة */
+      .tp-anno { position: relative; direction: ltr; }
+      .tp-anno img { width: 100%; display: block; border-radius: 4px; }
+      .tp-anno-row { position: absolute; display: flex; align-items: center; gap: 4px; }
+      .tp-anno-row.left { left: 0.5%; }
+      .tp-anno-row.right { right: 0.5%; justify-content: flex-end; }
+      .tp-anno-line { flex: 1; border-top: 1px solid #222; position: relative; min-width: 18px; }
+      .tp-anno-line.red { border-top-color: #a3271c; }
+      .tp-anno-row.left .tp-anno-line:after,
+      .tp-anno-row.right .tp-anno-line:before {
+        content: ''; position: absolute; top: -2.5px; width: 5px; height: 5px; border-radius: 50%; background: #222;
+      }
+      .tp-anno-row.left .tp-anno-line:after { right: -2px; }
+      .tp-anno-row.right .tp-anno-line:before { left: -2px; }
+      .tp-anno-row .tp-anno-line.red:after, .tp-anno-row .tp-anno-line.red:before { background: #a3271c; }
+      .tp-anno-text { font-size: 0.55rem; font-weight: 600; color: #333; letter-spacing: 0.4px; text-transform: uppercase; background: rgba(255,255,255,0.92); padding: 1px 3px; line-height: 1.3; max-width: 130px; font-family: Arial, sans-serif; }
+      .tp-anno-text.red { color: #a3271c; }
+      .tp-anno-circle { width: 26px; height: 26px; border: 1px solid #111; border-radius: 50%; background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 600; color: #111; flex-shrink: 0; font-family: Arial, sans-serif; }
+      .tp-anno-vert { position: absolute; top: 12%; bottom: 10%; border-left: 1.5px dashed #a3271c; }
+      .tp-anno-vert .tp-anno-text.vert { position: absolute; top: 40%; white-space: nowrap; transform: rotate(-90deg); transform-origin: left top; }
+      .tp-anno-vert.left .tp-anno-text.vert { left: -4px; }
+      .tp-anno-vert.right .tp-anno-text.vert { left: 10px; }
+      .tp-anno-caption { text-align: center; font-size: 0.66rem; color: #999; margin-top: 0.55rem; direction: ltr; }
+      .tp-spec-frame { border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; padding: 1rem 0.9rem 1.2rem; }
+      .tp-spec-title { text-align: center; font-family: Arial, sans-serif; font-weight: 800; font-size: 1rem; letter-spacing: 0.6px; color: #111; direction: ltr; }
+      .tp-spec-key { text-align: center; font-family: Arial, sans-serif; font-size: 0.72rem; color: #111; margin: 0.2rem 0 0.9rem; direction: ltr; }
+      .tp-spec-key .red { color: #a3271c; font-weight: 700; }
+
+      /* زوج المنظرين + خطوط القياس العابرة لجسم القطعة */
+      .tp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; direction: ltr; }
+      @media (max-width: 600px) { .tp-pair { grid-template-columns: 1fr; } }
+      .tp-view { min-width: 0; }
+      .tp-view > img { width: 100%; display: block; border-radius: 4px; }
+      .tp-view-cap { text-align: center; font-size: 0.64rem; font-weight: 800; letter-spacing: 1.5px; color: #555; margin-top: 0.4rem; direction: ltr; }
+      .tp-m-wrap { position: absolute; display: flex; flex-direction: column; align-items: center; }
+      .tp-m-line { display: block; width: 100%; border-top: 2px solid #a3271c; position: relative; }
+      .tp-m-line:before, .tp-m-line:after { content: ''; position: absolute; top: -4px; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; }
+      .tp-m-line:before { left: 0; border-right: 6px solid #a3271c; }
+      .tp-m-line:after { right: 0; border-left: 6px solid #a3271c; }
+      .tp-m-label { font-size: 0.68rem; font-weight: 800; color: #a3271c; letter-spacing: 0.4px; text-transform: uppercase; background: rgba(255,255,255,0.9); padding: 0 4px; line-height: 1.15; margin-bottom: 2px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-family: Arial, sans-serif; }
+      .tp-m-label.vert { position: absolute; top: 45%; left: 4px; transform: rotate(-90deg); transform-origin: left top; margin: 0; }
+
+      /* لقطات التفاصيل المقصوصة من الصورة المرجعية */
+      .tp-crops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; direction: ltr; }
+      @media (max-width: 600px) { .tp-crops { grid-template-columns: repeat(2, 1fr); } }
+      .tp-crop { border: 1px solid #e5e5e5; border-radius: 6px; overflow: hidden; background: #fff; }
+      /* التكبير مضبوط للرسمة المسطّحة: القطعة فيها تشغل نحو ثلث العرض،
+         و340% كانت تُخرج بقعة قماش بلا سياق. 190% تُظهر التفصيل مع محيطه. */
+      .tp-crop-img { width: 100%; aspect-ratio: 1; background-size: 190%;
+        background-repeat: no-repeat; background-color: #fff; }
+      .tp-crop-cap { text-align: center; font-size: 0.62rem; font-weight: 700; color: #333; padding: 0.35rem 0.3rem; direction: ltr; border-top: 1px solid #eee; }
+
+      /* الجداول */
+      .tp-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; direction: ltr; }
+      .tp-table th { background: #f4f4f4; color: #111; padding: 0.55rem 0.6rem; text-align: center; font-weight: 700; border: 1px solid #e2e2e2; font-size: 0.7rem; letter-spacing: 0.5px; }
+      .tp-table th.left-h { text-align: left; }
+      .tp-table th.ltr, .tp-table td.ltr { direction: ltr; }
+      .tp-table td { padding: 0.5rem 0.6rem; text-align: center; border: 1px solid #e8e8e8; color: #222; }
+      .tp-table td.left { text-align: left; }
+      .tp-table td.sm { font-size: 0.74rem; color: #555; }
+      .tp-table .hl { background: #eef2f0; font-weight: 700; }
+      .ref-code { font-weight: 700; color: var(--gold-deep); background: #faf8f3; font-family: 'Cormorant Garamond', serif; }
+      .tp-grade td.left { line-height: 1.45; }
+      .tp-grade-note { text-align: center; font-size: 0.68rem; color: #999; margin-top: 0.6rem; direction: ltr; }
+      .tp-bom td { vertical-align: top; }
+
+      /* بطاقات الخامات — بطاقة لكل خامة كما في النموذج */
+      .tp-matcards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; direction: ltr; }
+      @media (max-width: 900px) { .tp-matcards { grid-template-columns: repeat(2, 1fr); } }
+      @media (max-width: 500px) { .tp-matcards { grid-template-columns: 1fr; } }
+      .tp-matcard { border: 1px solid #e5e5e5; border-radius: 6px; overflow: hidden; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+      .tp-matcard img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+      .tp-matcard-ph { width: 100%; aspect-ratio: 1; background: #f0f0f0; }
+      .tp-matcard-body { padding: 0.6rem; text-align: left; }
+      .tp-matcard-name { font-weight: 700; font-size: 0.74rem; color: #111; }
+      .tp-matcard-place { font-size: 0.63rem; color: #1a6fc4; margin: 2px 0 3px; line-height: 1.35; }
+      .tp-matcard-desc { font-size: 0.62rem; color: #777; line-height: 1.45; }
+
+      /* الألوان والبانتون */
+      .tp-colorways { display: grid; grid-template-columns: 1.1fr 1fr; gap: 1.5rem; align-items: start; }
+      @media (max-width: 700px) { .tp-colorways { grid-template-columns: 1fr; } }
+      .tp-pantone-title { font-weight: 700; font-size: 0.82rem; direction: ltr; text-align: left; margin-bottom: 0.6rem; color: #111; }
+      .tp-pantone-row { display: flex; gap: 0.7rem; align-items: center; padding: 0.55rem 0; border-bottom: 1px solid #eee; direction: ltr; }
+      .tp-pantone-row:last-child { border-bottom: none; }
+      .tp-pantone-sw { width: 36px; height: 36px; border-radius: 4px; border: 1px solid #e2e2e2; flex-shrink: 0; }
+      .tp-pantone-part { font-size: 0.76rem; font-weight: 700; color: #111; text-align: left; }
+      .tp-pantone-code { font-size: 0.66rem; color: #888; text-align: left; }
+      /* مطابقة بعيدة: اللون خارج مدى أصباغ الأقمشة، فتُعلَّم بدل إخفائها */
+      .tp-pantone-warn { color: #b8860b; }
+
+      /* دليل البناء */
+      .tp-count { float: right; font-weight: 400; font-size: 0.68rem; color: #999; }
+      .tp-gi-head { font-weight: 700; font-size: 0.82rem; color: #111; direction: ltr; text-align: left; padding-bottom: 0.4rem; border-bottom: 1px solid #eee; margin-bottom: 0.8rem; }
+      .tp-gi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; direction: ltr; text-align: left; margin-bottom: 1.6rem; }
+      @media (max-width: 700px) { .tp-gi { grid-template-columns: 1fr; } }
+      .tp-gi div { font-size: 0.74rem; color: #333; line-height: 1.55; }
+      .tp-gi b { color: #999; font-weight: 700; }
+
+      /* تعليمات الخياطة */
+      .tp-steps { padding-left: 0; list-style: none; counter-reset: step; direction: ltr; }
+      .tp-steps li { counter-increment: step; padding: 0.5rem 0; border-bottom: 1px solid #eee; color: #333; font-size: 0.8rem; text-align: left; position: relative; padding-left: 2rem; line-height: 1.55; }
+      .tp-steps li:before { content: counter(step); position: absolute; left: 0; color: var(--gold-deep); font-family: 'Cormorant Garamond', serif; font-weight: 700; }
+      .tp-foot { text-align: center; margin-top: 1rem; padding-top: 1.2rem; border-top: 1px solid #ddd; color: var(--gold); font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; }
+
+      /* النافذة */
+      .modal-overlay { position: fixed; inset: 0; background: rgba(44,38,32,0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
+      .modal { background: var(--ivory); border-radius: 12px; padding: 2.5rem; max-width: 900px; width: 100%; max-height: 92vh; overflow-y: auto; position: relative; }
+      .close-modal { position: absolute; top: 1rem; right: 1rem; background: var(--cream); border: 1px solid var(--line); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 1rem; color: var(--ink); }
+      .modal-title { text-align: center; font-family: 'Cormorant Garamond', serif; font-size: 2.2rem; color: var(--ink); margin-bottom: 0.4rem; }
+      .modal-sub { text-align: center; color: var(--ink-soft); margin-bottom: 1.4rem; }
+      .admin-section { text-align: center; margin-bottom: 1.8rem; padding: 1rem; background: var(--cream); border-radius: 8px; }
+      .admin-link { background: none; border: none; color: var(--gold-deep); cursor: pointer; font-size: 0.9rem; text-decoration: underline; font-family: 'Tajawal'; }
+      .admin-input-group { display: flex; gap: 0.5rem; justify-content: center; align-items: center; flex-wrap: wrap; }
+      .admin-input { padding: 0.5rem 1rem; border: 1px solid var(--line); border-radius: 6px; width: 160px; font-family: 'Tajawal'; }
+      .admin-btn { padding: 0.5rem 1.2rem; background: var(--ink); color: var(--ivory); border: none; border-radius: 6px; cursor: pointer; font-family: 'Tajawal'; }
+      .admin-cancel { padding: 0.5rem 1.2rem; background: var(--cream-2); color: var(--ink-soft); border: none; border-radius: 6px; cursor: pointer; font-family: 'Tajawal'; }
+      .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.3rem; }
+      @media (max-width: 800px) { .pricing-grid { grid-template-columns: 1fr; } }
+      .pricing-card { background: var(--ivory); border-radius: 10px; padding: 2rem; text-align: center; border: 1px solid var(--line); position: relative; }
+      .pricing-card.featured { border-color: var(--gold); box-shadow: 0 12px 40px rgba(176,141,87,0.18); }
+      .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--gold-deep); color: var(--ivory); padding: 0.35rem 1.1rem; border-radius: 4px; font-size: 0.78rem; font-weight: 700; }
+      .pricing-card h3 { font-family: 'Cormorant Garamond', serif; font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--ink); }
+      .plan-price { font-size: 2.4rem; font-weight: 800; color: var(--ink); margin-bottom: 1rem; font-family: 'Cormorant Garamond', serif; }
+      .plan-price span { font-size: 1rem; font-weight: 400; color: var(--ink-soft); }
+      .pricing-card ul { list-style: none; margin-bottom: 1.5rem; }
+      .pricing-card li { padding: 0.5rem 0; color: var(--ink-soft); border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+      .subscribe-btn { width: 100%; padding: 0.9rem; background: var(--ink); color: var(--ivory); border: none; border-radius: 6px; font-weight: 700; cursor: pointer; font-family: 'Tajawal'; }
+      .subscribe-btn:hover { background: var(--gold-deep); }
+      .subscribe-btn.pro { background: var(--gold-deep); }
+
+      .footer { text-align: center; padding: 2rem; color: var(--ink-soft); font-family: 'Cormorant Garamond', serif; letter-spacing: 2px; border-top: 1px solid var(--line); }
+
+      /* ===== موبايل: السايدبار ينزلق ===== */
+      @media (max-width: 900px) {
+        .sidebar { transform: translateX(-100%); transition: transform .25s ease; box-shadow: 8px 0 40px rgba(0,0,0,0.15); }
+        .sidebar.open { transform: translateX(0); }
+        .main-area { margin-left: 0; }
+        .menu-btn { display: block; }
+        .sb-overlay { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 150; }
+        .content { padding: 1.2rem; }
+        .tp { padding: 1.4rem; }
+      }
+    `}</style>
+  ) : (
     <style jsx global>{`
       :root {
         --cream: #f7f2e9;
@@ -4748,6 +5640,8 @@ function StyleBlock() {
       .topbar-usage-bar div { height: 100%; background: var(--gold); border-radius: 2px; }
       .topbar-cta { background: var(--ink); color: var(--ivory); border: none; padding: 0.6rem 1.4rem; border-radius: 6px; font-weight: 700; cursor: pointer; font-family: 'Tajawal'; }
       .topbar-cta:hover { background: var(--gold-deep); }
+      .topbar-lang { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); padding: 0.5rem 0.95rem; border-radius: 6px; font-weight: 700; font-size: 0.82rem; cursor: pointer; font-family: 'Tajawal'; }
+      .topbar-lang:hover { background: var(--cream); color: var(--ink); }
 
       .content { flex: 1; padding: 2rem; max-width: 1200px; width: 100%; margin: 0 auto; }
       .tool { display: flex; flex-direction: column; gap: 1.4rem; }
