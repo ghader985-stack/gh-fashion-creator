@@ -32,19 +32,24 @@ export function Bi({ ar, en, as: Tag = 'span' }) {
   );
 }
 
-// صورة المنتج: تجرّب png ثم jpg ثم webp من public/products/<slug>.<ext>، وإن ما لقيت بتعرض بطاقة بديلة.
+// صورة المنتج: غلاف لكل لغة. بتجرّب public/products/<slug>-ar و<slug>-en، وإن ما لقيت بتجرّب <slug> العادية،
+// وبعدها غلاف اللغة التانية. الامتدادات: png ثم jpg ثم webp. وإن ما لقيت شي بتعرض بطاقة بديلة.
+// اللغتان موجودتان بالـ HTML والمتصفح بيخفي وحدة منهم (نفس طريقة Bi). الصور بغير مجلد المنتجات (مثل about) صورة وحدة.
 const EXTS = ['png', 'jpg', 'webp'];
-export function ProductImage({ slug, alt, label, dir = 'products' }) {
+const withExts = (base) => EXTS.map((e) => `${base}.${e}`);
+
+function CoverImg({ srcs, alt, label, lang }) {
   const [i, setI] = useState(0);
   const ref = useRef(null);
   // لو فشل تحميل الصورة قبل ما React يركّب الصفحة (ما وصل حدث onError): نلتقطه عند التركيب مرة وحدة.
+  // currentSrc لازم يكون موجود: الصورة المؤجلة (lazy) اللي ما بدأ تحميلها ما بتُحسب فاشلة.
   useEffect(() => {
     const el = ref.current;
-    if (el && el.complete && el.naturalWidth === 0) setI((n) => (n === 0 ? 1 : n));
+    if (el && el.complete && el.currentSrc && el.naturalWidth === 0) setI((n) => (n === 0 ? 1 : n));
   }, []);
-  if (i >= EXTS.length) {
+  if (i >= srcs.length) {
     return (
-      <div className="s-ph" role="img" aria-label={alt}>
+      <div className={'s-ph' + (lang ? ' ' + lang : '')} role="img" aria-label={alt}>
         <span className="s-ph-mark">GH</span>
         <span className="s-ph-label">{label}</span>
       </div>
@@ -53,11 +58,29 @@ export function ProductImage({ slug, alt, label, dir = 'products' }) {
   return (
     <img
       ref={ref}
-      src={`/${dir}/${slug}.${EXTS[i]}`}
+      className={lang || undefined}
+      src={srcs[i]}
       alt={alt}
       loading="lazy"
       onError={() => setI((n) => (n === i ? n + 1 : n))}
     />
+  );
+}
+
+export function ProductImage({ slug, alt, label, dir = 'products' }) {
+  if (dir !== 'products') {
+    return <CoverImg srcs={withExts(`/${dir}/${slug}`)} alt={alt} label={label} />;
+  }
+  const chain = (lang, other) => [
+    ...withExts(`/${dir}/${slug}-${lang}`),
+    ...withExts(`/${dir}/${slug}`),
+    ...withExts(`/${dir}/${slug}-${other}`),
+  ];
+  return (
+    <>
+      <CoverImg srcs={chain('ar', 'en')} alt={alt} label={label} lang="ar" />
+      <CoverImg srcs={chain('en', 'ar')} alt={alt} label={label} lang="en" />
+    </>
   );
 }
 
