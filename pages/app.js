@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, createContext, useContext } from 'react';
 import Head from 'next/head';
 import { useAuth, useClerk } from '@clerk/nextjs';
+import ToolBackdrop from '../components/ToolBackdrop';
 
 
 // استخراج اسم البراند من نص الملاحظات الحر.
@@ -1086,6 +1087,7 @@ export default function Home() {
       </Head>
 
       <div className="app">
+        <ToolBackdrop />
         {/* ===== السايدبار ===== */}
         <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
           <div className="sb-brand">
@@ -2213,7 +2215,7 @@ export default function Home() {
           <div className="modal">
             <button onClick={() => setShowPricing(false)} className="close-modal">✕</button>
             <h2 className="modal-title">الباقات</h2>
-            <p className="modal-sub">كميات شهرية لكل أداة — الاشتراك الإلكتروني قريباً</p>
+            <p className="modal-sub">كميات شهرية لكل أداة. الأسعار وخيارات الاشتراك في صفحة الأسعار.</p>
             {!(me && me.catalog && me.catalog.length) ? (
               <p className="modal-sub">جارٍ التحميل…</p>
             ) : (
@@ -2221,13 +2223,12 @@ export default function Home() {
                 {me.catalog.map((pl) => (
                   <div key={pl.id} className="pricing-card">
                     <h3>{pl.name}</h3>
-                    <div className="plan-price">${pl.price}<span>/شهر</span></div>
                     <ul>
                       {Object.keys(pl.tools).map((t) => (
                         <li key={t}>{pl.tools[t]} · {(me.labels && me.labels[t]) || t}</li>
                       ))}
                     </ul>
-                    <button disabled className="subscribe-btn" style={{ opacity: 0.55, cursor: 'not-allowed' }}>قريباً</button>
+                    <a href="/pricing" className="subscribe-btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>الأسعار والاشتراك</a>
                   </div>
                 ))}
               </div>
