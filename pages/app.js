@@ -2363,6 +2363,9 @@ export default function Home() {
 // ===== بناء برومبتات المحتوى والفيديو =====
 
 // ===== نسخة الإنجليزي من البرومبتات (النتيجة بتطلع بالإنجليزي) =====
+const MK_RULES_EN = '\n\nRules: Write plain text only, with no markdown symbols (no #, *, or ---). Do not mention any material, fabric, embroidery, technique or detail unless it is visible in the attached image or stated in the product description.';
+const MK_RULES_AR = '\n\nقواعد: اكتبي نصاً عادياً بدون أي رموز ماركداون (لا # ولا * ولا ---). لا تذكري أي مادة أو خامة أو تطريز أو تقنية أو تفصيل إلا إذا كان ظاهراً في الصورة المرفقة أو مذكوراً في وصف المنتج.';
+
 function buildMarketingPromptEn(platform, tone, text, hasImage) {
   const imageContext = hasImage ? '\n\nAttached image — analyse it carefully and use it as the main reference.' : '';
   const textContext = text ? `\n\nProduct description: ${text}` : '';
@@ -2387,7 +2390,7 @@ The short marketing message
 [One strong sentence]
 
 The advertising slogan
-[Three options]`;
+[Three options]${MK_RULES_EN}`;
   }
   return `You are a luxury fashion marketing expert. Platform: ${platform} | Tone: ${tone}.${imageContext}${textContext}
 
@@ -2409,7 +2412,7 @@ Hashtags
 Calls to action
 [Five varied formulations]
 
-A short publishing strategy`;
+A short publishing strategy${MK_RULES_EN}`;
 }
 
 function buildVideoPromptEn(videoType, mood, text, hasImage) {
@@ -2458,7 +2461,7 @@ function buildMarketingPrompt(platform, tone, text, hasImage) {
 [جملة قوية واحدة]
 
 الشعار الإعلاني
-[ثلاثة خيارات]`;
+[ثلاثة خيارات]${MK_RULES_AR}`;
   }
   return `أنتِ خبيرة تسويق أزياء فاخرة. المنصة: ${platform} | النبرة: ${tone}.${imageContext}${textContext}
 
@@ -2481,7 +2484,7 @@ function buildMarketingPrompt(platform, tone, text, hasImage) {
 دعوات لاتخاذ إجراء
 [خمس صيغ متنوعة]
 
-استراتيجية النشر المختصرة`;
+استراتيجية النشر المختصرة${MK_RULES_AR}`;
 }
 
 function buildVideoPrompt(videoType, mood, text, hasImage) {
