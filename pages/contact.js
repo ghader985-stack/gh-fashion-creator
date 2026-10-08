@@ -1,5 +1,5 @@
 import SiteLayout, { Bi } from '../components/SiteLayout';
-import { SITE } from '../lib/site';
+import { SITE, waLink } from '../lib/site';
 
 export default function Contact() {
   return (
@@ -28,6 +28,7 @@ export default function Contact() {
           <p><bdi>{SITE.name}</bdi> تشغّلها <bdi>{SITE.operator}</bdi>، {SITE.location.ar}.</p>
           <h2>تابعنا</h2>
           <p><a href={SITE.instagram} rel="noopener noreferrer"><bdi>Instagram {SITE.instagramHandle}</bdi></a></p>
+          {SITE.whatsapp ? <p><a href={waLink()} rel="noopener noreferrer">واتساب <bdi>{SITE.whatsappDisplay}</bdi></a></p> : null}
         </div>
         <div className="en" lang="en">
           <p>When asking about a purchase, mention the email address you used at checkout and the product you bought.</p>
@@ -35,6 +36,7 @@ export default function Contact() {
           <p>{SITE.name} is operated by {SITE.operator}, {SITE.location.en}.</p>
           <h2>Follow us</h2>
           <p><a href={SITE.instagram} rel="noopener noreferrer">Instagram {SITE.instagramHandle}</a></p>
+          {SITE.whatsapp ? <p><a href={waLink()} rel="noopener noreferrer">WhatsApp <bdi>{SITE.whatsappDisplay}</bdi></a></p> : null}
         </div>
       </div>
     </SiteLayout>
