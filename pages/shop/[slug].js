@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import SiteLayout, { Bi, ProductImage } from '../../components/SiteLayout';
-import { PRODUCTS, getProduct } from '../../lib/site';
+import { PRODUCTS, getProduct, orderHref } from '../../lib/site';
 
 export async function getStaticPaths() {
   return { paths: PRODUCTS.map((p) => ({ params: { slug: p.slug } })), fallback: false };
@@ -13,7 +13,7 @@ export async function getStaticProps({ params }) {
 export default function ProductPage({ slug }) {
   const p = getProduct(slug);
   if (!p) return null;
-  const buy = p.checkoutUrl;
+  const buy = orderHref(`Order: ${p.name.en}`, p.checkoutUrl);
   return (
     <SiteLayout
       title={`${p.name.en} · ${p.name.ar}`}
@@ -32,15 +32,9 @@ export default function ProductPage({ slug }) {
             <p className="s-prod-tag"><Bi ar={p.tagline.ar} en={p.tagline.en} /></p>
             <div className="s-prod-price">${p.price} USD</div>
 
-            {buy ? (
-              <a className="s-btn primary full" href={buy} rel="noopener noreferrer">
-                <Bi ar="اشترِ الآن" en="Buy now" />
-              </a>
-            ) : (
-              <span className="s-btn primary full disabled" aria-disabled="true">
-                <Bi ar="قريباً" en="Coming soon" />
-              </span>
-            )}
+            <a className="s-btn primary full" href={buy} {...(p.checkoutUrl ? { rel: 'noopener noreferrer' } : {})}>
+              <Bi ar="اشترِ الآن" en="Buy now" />
+            </a>
 
             <div className="ar" lang="ar">
               {p.about.ar.map((t, i) => <p key={i} style={{ marginTop: i === 0 ? 22 : 0 }}>{t}</p>)}

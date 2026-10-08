@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { SITE, ltr } from '../lib/site';
+import { SITE, ltr, waLink } from '../lib/site';
 
 // يُنفَّذ بالـ <head> قبل رسم الصفحة: يحدد اللغة من اختيار الزائر المحفوظ، وإلا من لغة المتصفح.
 const LANG_SCRIPT = `(function(){var l='en';try{var s=localStorage.getItem('gh_site_lang');if(s==='ar'||s==='en'){l=s;}else{throw 0;}}catch(e){try{var a=navigator.languages||[navigator.language||''];for(var i=0;i<a.length;i++){if(String(a[i]).toLowerCase().indexOf('ar')===0){l='ar';break;}}}catch(e2){}}var d=document.documentElement;d.setAttribute('data-lang',l);d.setAttribute('lang',l);d.setAttribute('dir',l==='ar'?'rtl':'ltr');})();`;
@@ -34,7 +34,7 @@ export function Bi({ ar, en, as: Tag = 'span' }) {
 
 // صورة المنتج: تجرّب png ثم jpg ثم webp من public/products/<slug>.<ext>، وإن ما لقيت بتعرض بطاقة بديلة.
 const EXTS = ['png', 'jpg', 'webp'];
-export function ProductImage({ slug, alt, label }) {
+export function ProductImage({ slug, alt, label, dir = 'products' }) {
   const [i, setI] = useState(0);
   const ref = useRef(null);
   // لو فشل تحميل الصورة قبل ما React يركّب الصفحة (ما وصل حدث onError): نلتقطه عند التركيب مرة وحدة.
@@ -53,7 +53,7 @@ export function ProductImage({ slug, alt, label }) {
   return (
     <img
       ref={ref}
-      src={`/products/${slug}.${EXTS[i]}`}
+      src={`/${dir}/${slug}.${EXTS[i]}`}
       alt={alt}
       loading="lazy"
       onError={() => setI((n) => (n === i ? n + 1 : n))}
@@ -61,7 +61,7 @@ export function ProductImage({ slug, alt, label }) {
   );
 }
 
-export default function SiteLayout({ title, description, children }) {
+export default function SiteLayout({ title, description, children, dark = false }) {
   const fullTitle = title ? `${title} | ${SITE.name}` : `${SITE.name} | AI tools for fashion designers`;
   return (
     <>
@@ -73,13 +73,13 @@ export default function SiteLayout({ title, description, children }) {
         {description ? <meta property="og:description" content={description} /> : null}
         <meta property="og:site_name" content={SITE.name} />
         <link
-          href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..800;1,6..96,400..800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Reem+Kufi:wght@500;600;700&display=swap"
           rel="stylesheet"
         />
         <script dangerouslySetInnerHTML={{ __html: LANG_SCRIPT }} />
       </Head>
 
-      <header className="s-head">
+      <header className={'s-head' + (dark ? ' dark' : '')}>
         <div className="s-wrap s-head-in">
           <Link href="/" className="s-brand" aria-label={SITE.name}>
             <span className="s-logo">GH</span>
@@ -88,6 +88,8 @@ export default function SiteLayout({ title, description, children }) {
           <nav className="s-nav" aria-label="Main">
             <a href="/app"><Bi ar="الأداة" en="Tool" /></a>
             <Link href="/shop"><Bi ar="المتجر" en="Shop" /></Link>
+            <Link href="/pricing"><Bi ar="الأسعار" en="Pricing" /></Link>
+            <Link href="/#about"><Bi ar="عنّي" en="About" /></Link>
             <Link href="/contact"><Bi ar="تواصل" en="Contact" /></Link>
             <button type="button" className="s-lang" onClick={switchLang}>
               <span className="ar" lang="en">English</span>
@@ -115,12 +117,18 @@ export default function SiteLayout({ title, description, children }) {
             <p className="s-foot-note">
               <a href={`mailto:${SITE.email}`}>{SITE.email}</a>
             </p>
+            <p className="s-foot-note">
+              <a href={SITE.instagram} rel="noopener noreferrer"><bdi>{SITE.instagramHandle}</bdi></a>
+              {SITE.whatsapp ? <> · <a href={waLink()} rel="noopener noreferrer"><bdi>{SITE.whatsappDisplay || 'WhatsApp'}</bdi></a></> : null}
+            </p>
           </div>
           <div>
             <div className="s-foot-h"><Bi ar="الموقع" en="Explore" /></div>
             <ul>
               <li><a href="/app"><Bi ar="الأداة" en="The tool" /></a></li>
               <li><Link href="/shop"><Bi ar="المتجر" en="Shop" /></Link></li>
+              <li><Link href="/pricing"><Bi ar="الخطط والأسعار" en="Plans and pricing" /></Link></li>
+              <li><Link href="/#about"><Bi ar="عنّي" en="About" /></Link></li>
               <li><Link href="/contact"><Bi ar="تواصل" en="Contact" /></Link></li>
             </ul>
           </div>
@@ -144,14 +152,23 @@ export default function SiteLayout({ title, description, children }) {
 
       <style jsx global>{`
         :root {
-          --cream: #f7f2e9;
-          --ivory: #fdfaf3;
-          --white: #ffffff;
-          --ink: #2c2620;
-          --ink-soft: #6b5f4f;
-          --gold: #b08d57;
-          --gold-deep: #96723f;
-          --line: #e6ddcc;
+          --cream: #ece4d6;
+          --ivory: #f5efe4;
+          --white: #fffdf8;
+          --ink: #17120f;
+          --ink-soft: #66594d;
+          --gold: #b98f4e;
+          --gold-deep: #8f6a2e;
+          --line: #ddd2bf;
+          --night: #110e0d;
+          --bone: #ece4d6;
+          --thread: #c9a463;
+          --plum: #6d4f5e;
+          --teal: #4d8189;
+          --brick: #b9553f;
+          --f-ar: 'Reem Kufi', 'IBM Plex Sans Arabic', sans-serif;
+          --f-en: 'Bodoni Moda', 'Didot', 'Times New Roman', serif;
+          --f-body: 'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, sans-serif;
         }
         html:not([data-lang='ar']) .ar { display: none !important; }
         html[data-lang='ar'] .en { display: none !important; }
@@ -159,7 +176,7 @@ export default function SiteLayout({ title, description, children }) {
         html { -webkit-text-size-adjust: 100%; }
         body {
           margin: 0; background: var(--ivory); color: var(--ink);
-          font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif; line-height: 1.7; font-size: 16px;
+          font-family: var(--f-body); line-height: 1.7; font-size: 16px;
         }
         a { color: inherit; }
         img { max-width: 100%; display: block; }
@@ -174,9 +191,9 @@ export default function SiteLayout({ title, description, children }) {
         .s-logo {
           width: 38px; height: 38px; border-radius: 8px; background: var(--ink); color: var(--ivory);
           display: inline-flex; align-items: center; justify-content: center;
-          font-family: 'Cormorant Garamond', serif; font-weight: 700; font-size: 1.15rem; letter-spacing: 1px; flex-shrink: 0;
+          font-family: var(--f-en); font-weight: 700; font-size: 1.15rem; letter-spacing: 1px; flex-shrink: 0;
         }
-        .s-brand-name { font-family: 'Cormorant Garamond', serif; font-size: 1.4rem; font-weight: 700; letter-spacing: 0.5px; direction: ltr; }
+        .s-brand-name { font-family: var(--f-en); font-size: 1.4rem; font-weight: 700; letter-spacing: 0.5px; direction: ltr; }
         .s-nav { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
         .s-nav a { text-decoration: none; font-weight: 500; color: var(--ink-soft); }
         .s-nav a:hover { color: var(--ink); }
@@ -187,13 +204,21 @@ export default function SiteLayout({ title, description, children }) {
         }
         .s-lang:hover { border-color: var(--gold); }
 
+        .s-head.dark { background: #110e0d; border-bottom-color: rgba(236, 228, 214, 0.14); }
+        .s-head.dark .s-logo { background: var(--ivory); color: var(--ink); }
+        .s-head.dark .s-brand-name { color: var(--ivory); }
+        .s-head.dark .s-nav a { color: #cdbfa8; }
+        .s-head.dark .s-nav a:hover { color: var(--ivory); }
+        .s-head.dark .s-lang { background: transparent; color: var(--ivory); border-color: rgba(236, 228, 214, 0.4); }
+        .s-head.dark .s-lang:hover { border-color: var(--thread); }
+
         /* ===== عام ===== */
         .s-main { min-height: 60vh; }
-        .s-eyebrow { font-family: 'Cormorant Garamond', serif; font-style: italic; color: var(--gold-deep); font-size: 1.05rem; letter-spacing: 1px; }
-        .s-h1 { font-family: 'Cormorant Garamond', 'Tajawal', serif; font-size: clamp(2.2rem, 5.2vw, 3.8rem); line-height: 1.12; font-weight: 700; margin: 8px 0 18px; }
-        html[data-lang='ar'] .s-h1 { font-family: 'Tajawal', sans-serif; font-weight: 800; line-height: 1.3; }
-        .s-h2 { font-family: 'Cormorant Garamond', 'Tajawal', serif; font-size: clamp(1.7rem, 3.4vw, 2.3rem); font-weight: 700; margin: 0 0 6px; line-height: 1.2; }
-        html[data-lang='ar'] .s-h2 { font-family: 'Tajawal', sans-serif; font-weight: 800; }
+        .s-eyebrow { font-family: var(--f-en); font-style: italic; color: var(--gold-deep); font-size: 1.05rem; letter-spacing: 1px; }
+        .s-h1 { font-family: var(--f-en); font-size: clamp(2.2rem, 5.2vw, 3.8rem); line-height: 1.12; font-weight: 700; margin: 8px 0 18px; }
+        html[data-lang='ar'] .s-h1 { font-family: var(--f-ar); font-weight: 700; line-height: 1.3; }
+        .s-h2 { font-family: var(--f-en); font-size: clamp(1.7rem, 3.4vw, 2.3rem); font-weight: 700; margin: 0 0 6px; line-height: 1.2; }
+        html[data-lang='ar'] .s-h2 { font-family: var(--f-ar); font-weight: 700; }
         .s-lead { color: var(--ink-soft); font-size: 1.12rem; max-width: 640px; margin: 0 0 26px; }
         .s-section { padding-block: 56px; }
         .s-section.alt { background: var(--cream); border-block: 1px solid var(--line); }
@@ -214,10 +239,6 @@ export default function SiteLayout({ title, description, children }) {
         .s-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 
         /* ===== الرئيسية ===== */
-        .s-hero { padding-block: 72px 56px; background: radial-gradient(1200px 400px at 50% -10%, #f3e9d6 0%, rgba(253,250,243,0) 70%); }
-        .s-hero .s-wrap { max-width: 880px; text-align: center; }
-        .s-hero .s-lead { margin-inline: auto; }
-        .s-hero .s-actions { justify-content: center; }
         .s-rule { width: 64px; height: 2px; background: var(--gold); margin: 0 auto 22px; border: 0; }
 
         .s-tool-group { margin-bottom: 30px; }
@@ -225,7 +246,7 @@ export default function SiteLayout({ title, description, children }) {
         .s-group-label { font-weight: 800; color: var(--gold-deep); margin-bottom: 12px; letter-spacing: 0.5px; }
         .s-grid { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); }
         .s-tool { background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
-        .s-tool-num { font-family: 'Cormorant Garamond', serif; font-style: italic; color: var(--gold); font-size: 1.05rem; }
+        .s-tool-num { font-family: var(--f-en); font-style: italic; color: var(--gold); font-size: 1.05rem; }
         .s-tool-name { font-weight: 800; font-size: 1.1rem; }
         .s-tool-desc { color: var(--ink-soft); font-size: 0.95rem; }
         .s-note { margin-top: 24px; color: var(--ink-soft); font-size: 0.95rem; }
@@ -239,9 +260,9 @@ export default function SiteLayout({ title, description, children }) {
         .s-card-body { padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
         .s-card-name { font-weight: 800; font-size: 1.08rem; line-height: 1.4; }
         .s-card-tag { color: var(--ink-soft); font-size: 0.93rem; flex: 1; }
-        .s-price { font-family: 'Cormorant Garamond', serif; font-weight: 700; font-size: 1.5rem; color: var(--gold-deep); margin-top: 8px; direction: ltr; text-align: start; }
+        .s-price { font-family: var(--f-en); font-weight: 700; font-size: 1.5rem; color: var(--gold-deep); margin-top: 8px; direction: ltr; text-align: start; }
         .s-ph { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: linear-gradient(160deg, #f3e9d6, #ebdfc7); }
-        .s-ph-mark { width: 64px; height: 64px; border-radius: 12px; background: var(--ink); color: var(--ivory); display: inline-flex; align-items: center; justify-content: center; font-family: 'Cormorant Garamond', serif; font-weight: 700; font-size: 1.6rem; letter-spacing: 1px; }
+        .s-ph-mark { width: 64px; height: 64px; border-radius: 12px; background: var(--ink); color: var(--ivory); display: inline-flex; align-items: center; justify-content: center; font-family: var(--f-en); font-weight: 700; font-size: 1.6rem; letter-spacing: 1px; }
         .s-ph-label { color: var(--ink-soft); font-weight: 700; font-size: 0.95rem; line-height: 1.5; }
 
         .s-crumbs { padding-block: 20px 0; font-size: 0.92rem; color: var(--ink-soft); }
@@ -252,7 +273,7 @@ export default function SiteLayout({ title, description, children }) {
         .s-prod-img img { width: 100%; height: 100%; object-fit: contain; }
         .s-prod-info h1 { font-size: clamp(1.7rem, 3.4vw, 2.4rem); margin: 0 0 6px; line-height: 1.25; font-weight: 800; }
         .s-prod-tag { color: var(--ink-soft); font-size: 1.1rem; margin: 0 0 14px; }
-        .s-prod-price { font-family: 'Cormorant Garamond', serif; font-weight: 700; font-size: 2.2rem; color: var(--gold-deep); direction: ltr; text-align: start; margin-bottom: 14px; }
+        .s-prod-price { font-family: var(--f-en); font-weight: 700; font-size: 2.2rem; color: var(--gold-deep); direction: ltr; text-align: start; margin-bottom: 14px; }
         .s-prod-info p { margin: 0 0 12px; }
         .s-prod-info h3 { margin: 22px 0 8px; font-size: 1.02rem; font-weight: 800; }
         .s-prod-info ul { margin: 0 0 10px; padding-inline-start: 20px; }
@@ -294,7 +315,6 @@ export default function SiteLayout({ title, description, children }) {
         }
         @media (max-width: 560px) {
           .s-grid, .s-pgrid { grid-template-columns: 1fr; }
-          .s-hero { padding-block: 48px 40px; }
           .s-section { padding-block: 40px; }
           .s-head-in { justify-content: center; }
           .s-nav { gap: 16px; justify-content: center; }
