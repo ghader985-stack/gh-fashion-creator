@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { SITE, LAUNCH, LAUNCH_GIFT, ltr, waLink } from '../lib/site';
+import { SITE, LAUNCH, LAUNCH_GIFT, LANG_NOTE, ltr, waLink } from '../lib/site';
 
 // يُنفَّذ بالـ <head> قبل رسم الصفحة: يحدد اللغة من اختيار الزائر المحفوظ، وإلا من لغة المتصفح.
 const LANG_SCRIPT = `(function(){var l='en';try{var s=localStorage.getItem('gh_site_lang');if(s==='ar'||s==='en'){l=s;}else{throw 0;}}catch(e){try{var a=navigator.languages||[navigator.language||''];for(var i=0;i<a.length;i++){if(String(a[i]).toLowerCase().indexOf('ar')===0){l='ar';break;}}}catch(e2){}}var d=document.documentElement;d.setAttribute('data-lang',l);d.setAttribute('lang',l);d.setAttribute('dir',l==='ar'?'rtl':'ltr');})();`;
@@ -105,6 +105,38 @@ function GiftBar() {
   );
 }
 
+function GlobeIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" />
+    </svg>
+  );
+}
+
+// شريط تنبيه اللغة بأول كل صفحة: الملفات بلغة الموقع اللي بتشتري منه.
+function LangBar() {
+  return (
+    <div className="s-lbar">
+      <div className="s-wrap s-lbar-in">
+        <GlobeIcon />
+        <span><Bi ar={LANG_NOTE.bar.ar} en={LANG_NOTE.bar.en} /></span>
+      </div>
+    </div>
+  );
+}
+
+// سطر تحت زر الشراء بصفحة المنتج.
+export function LangNote() {
+  return (
+    <p className="s-langnote">
+      <GlobeIcon size={16} />
+      <span><Bi ar={LANG_NOTE.product.ar} en={LANG_NOTE.product.en} /></span>
+    </p>
+  );
+}
+
 // شارة فوق غلاف منتج الهدية.
 function GiftChip() {
   const on = useGiftOn();
@@ -175,6 +207,7 @@ export default function SiteLayout({ title, description, children, dark = false 
       </Head>
 
       <GiftBar />
+      <LangBar />
 
       <header className={'s-head' + (dark ? ' dark' : '')}>
         <div className="s-wrap s-head-in">
@@ -385,6 +418,11 @@ export default function SiteLayout({ title, description, children, dark = false 
         .s-gbar { background: #7d5a22; color: #fbf6ea; font-size: 0.95rem; font-weight: 700; }
         .s-gbar-in { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; padding-block: 9px; text-align: center; line-height: 1.55; }
         .s-gbar a { color: #fff; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
+        .s-lbar { background: #efe6d3; color: var(--ink); border-bottom: 1px solid var(--line); font-size: 0.93rem; font-weight: 600; }
+        .s-lbar-in { display: flex; align-items: center; justify-content: center; gap: 10px; padding-block: 8px; text-align: center; line-height: 1.55; }
+        .s-lbar svg { color: #7d5a22; }
+        .s-langnote { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; font-size: 0.93rem; font-weight: 600; color: var(--ink); }
+        .s-langnote svg { color: #7d5a22; margin-top: 4px; }
         .s-card-img, .s-prod-img { position: relative; }
         .s-gchip {
           position: absolute; top: 10px; inset-inline-start: 10px; z-index: 2;
@@ -437,6 +475,8 @@ export default function SiteLayout({ title, description, children, dark = false 
           .s-gbar { font-size: 0.86rem; }
           .s-gbar-in { padding-block: 7px; }
           .s-gbar svg { display: none; }
+          .s-lbar { font-size: 0.85rem; }
+          .s-lbar svg { display: none; }
         }
       `}</style>
     </>
