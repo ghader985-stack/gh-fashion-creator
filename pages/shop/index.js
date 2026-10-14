@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import SiteLayout, { Bi, ProductImage } from '../../components/SiteLayout';
+import SiteLayout, { Bi, ProductImage, GiftBox } from '../../components/SiteLayout';
 import { PRODUCTS } from '../../lib/site';
 
 export default function Shop() {
@@ -20,6 +20,7 @@ export default function Shop() {
               />
             </p>
           </div>
+          <GiftBox kind="shop" />
           <div className="s-pgrid">
             {PRODUCTS.map((p) => (
               <Link href={`/shop/${p.slug}`} className="s-card" key={p.slug}>
