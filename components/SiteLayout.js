@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { SITE, ltr, waLink } from '../lib/site';
+import { SITE, LAUNCH, LAUNCH_GIFT, ltr, waLink } from '../lib/site';
 
 // يُنفَّذ بالـ <head> قبل رسم الصفحة: يحدد اللغة من اختيار الزائر المحفوظ، وإلا من لغة المتصفح.
 const LANG_SCRIPT = `(function(){var l='en';try{var s=localStorage.getItem('gh_site_lang');if(s==='ar'||s==='en'){l=s;}else{throw 0;}}catch(e){try{var a=navigator.languages||[navigator.language||''];for(var i=0;i<a.length;i++){if(String(a[i]).toLowerCase().indexOf('ar')===0){l='ar';break;}}}catch(e2){}}var d=document.documentElement;d.setAttribute('data-lang',l);d.setAttribute('lang',l);d.setAttribute('dir',l==='ar'?'rtl':'ltr');})();`;
@@ -67,6 +67,77 @@ function CoverImg({ srcs, alt, label, lang }) {
   );
 }
 
+// ===== هدية الإطلاق =====
+// ظاهرة بالـ HTML من البداية، وبتختفي لحالها بعد LAUNCH.ends (إن انحطّ تاريخ).
+export function useGiftOn() {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    if (LAUNCH.ends && Date.now() > Date.parse(LAUNCH.ends + 'T23:59:59+04:00')) setOn(false);
+  }, []);
+  return on;
+}
+
+function GiftIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <rect x="3" y="8" width="18" height="4" rx="1" />
+      <path d="M12 8v13" />
+      <path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8" />
+      <path d="M7.5 8a2.5 2.5 0 1 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 1 1 0 5" />
+    </svg>
+  );
+}
+
+// شريط أعلى كل صفحة.
+function GiftBar() {
+  const on = useGiftOn();
+  if (!on) return null;
+  return (
+    <div className="s-gbar">
+      <div className="s-wrap s-gbar-in">
+        <GiftIcon />
+        <span>
+          <Bi ar={LAUNCH_GIFT.bar.ar} en={LAUNCH_GIFT.bar.en} />{' '}
+          <Link href={`/shop/${LAUNCH_GIFT.slug}`}><Bi ar="التفاصيل" en="Details" /></Link>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// شارة فوق غلاف منتج الهدية.
+function GiftChip() {
+  const on = useGiftOn();
+  if (!on) return null;
+  return (
+    <span className="s-gchip">
+      <GiftIcon size={15} />
+      <Bi ar={LAUNCH_GIFT.label.ar} en={LAUNCH_GIFT.label.en} />
+    </span>
+  );
+}
+
+// صندوق الهدية: kind = 'shop' (صفحة المتجر) | 'product' (صفحة أي منتج) | 'pearl' (صفحة منتج الهدية نفسه).
+export function GiftBox({ kind = 'product' }) {
+  const on = useGiftOn();
+  if (!on) return null;
+  const t = LAUNCH_GIFT[kind + 'Title'];
+  const x = LAUNCH_GIFT[kind + 'Text'];
+  const href = kind === 'pearl' ? '/shop' : `/shop/${LAUNCH_GIFT.slug}`;
+  return (
+    <div className={'s-gbox ' + kind}>
+      <div className="s-gbox-h">
+        <GiftIcon size={22} />
+        <strong><Bi ar={t.ar} en={t.en} /></strong>
+      </div>
+      <p><Bi ar={x.ar} en={x.en} /></p>
+      <Link href={href} className="s-gbox-link">
+        {kind === 'pearl' ? <Bi ar="تصفّح المتجر" en="Browse the shop" /> : <Bi ar="شاهد الهدية" en="See the gift" />}
+      </Link>
+    </div>
+  );
+}
+
 export function ProductImage({ slug, alt, label, dir = 'products' }) {
   if (dir !== 'products') {
     return <CoverImg srcs={withExts(`/${dir}/${slug}`)} alt={alt} label={label} />;
@@ -80,6 +151,7 @@ export function ProductImage({ slug, alt, label, dir = 'products' }) {
     <>
       <CoverImg srcs={chain('ar', 'en')} alt={alt} label={label} lang="ar" />
       <CoverImg srcs={chain('en', 'ar')} alt={alt} label={label} lang="en" />
+      {slug === LAUNCH_GIFT.slug ? <GiftChip /> : null}
     </>
   );
 }
@@ -101,6 +173,8 @@ export default function SiteLayout({ title, description, children, dark = false 
         />
         <script dangerouslySetInnerHTML={{ __html: LANG_SCRIPT }} />
       </Head>
+
+      <GiftBar />
 
       <header className={'s-head' + (dark ? ' dark' : '')}>
         <div className="s-wrap s-head-in">
@@ -307,6 +381,24 @@ export default function SiteLayout({ title, description, children, dark = false 
         .s-box p { margin: 0 0 6px; }
         .s-box p:last-child { margin: 0; }
 
+        /* ===== هدية الإطلاق ===== */
+        .s-gbar { background: #7d5a22; color: #fbf6ea; font-size: 0.95rem; font-weight: 700; }
+        .s-gbar-in { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; padding-block: 9px; text-align: center; line-height: 1.55; }
+        .s-gbar a { color: #fff; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
+        .s-card-img, .s-prod-img { position: relative; }
+        .s-gchip {
+          position: absolute; top: 10px; inset-inline-start: 10px; z-index: 2;
+          display: inline-flex; align-items: center; gap: 6px; background: #7d5a22; color: #fff;
+          padding: 5px 12px; border-radius: 999px; font-weight: 800; font-size: 0.82rem; line-height: 1.4;
+          box-shadow: 0 2px 8px rgba(23, 18, 15, 0.3);
+        }
+        .s-gbox { border: 2px solid #7d5a22; background: #fbf3e2; border-radius: 12px; padding: 14px 18px; margin: 0 0 18px; color: var(--ink); }
+        .s-gbox.shop { margin: 0 0 30px; padding: 18px 22px; }
+        .s-gbox-h { display: flex; align-items: center; gap: 10px; color: #7d5a22; font-size: 1.1rem; }
+        .s-gbox p { margin: 6px 0 10px; font-size: 0.97rem; color: var(--ink); }
+        .s-prod-info .s-gbox p { margin: 6px 0 10px; }
+        .s-gbox-link { display: inline-block; font-weight: 800; color: #7d5a22; text-decoration: underline; text-underline-offset: 3px; }
+
         /* ===== صفحات النصوص ===== */
         .s-doc { max-width: 780px; padding-block: 48px 72px; }
         .s-doc h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); margin: 0 0 6px; line-height: 1.2; font-weight: 800; }
@@ -342,6 +434,9 @@ export default function SiteLayout({ title, description, children, dark = false 
           .s-head-in { justify-content: center; }
           .s-nav { gap: 16px; justify-content: center; }
           .s-btn { width: 100%; }
+          .s-gbar { font-size: 0.86rem; }
+          .s-gbar-in { padding-block: 7px; }
+          .s-gbar svg { display: none; }
         }
       `}</style>
     </>
