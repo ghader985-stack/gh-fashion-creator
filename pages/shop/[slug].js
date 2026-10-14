@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import SiteLayout, { Bi, ProductImage, GiftBox } from '../../components/SiteLayout';
+import SiteLayout, { Bi, ProductImage, GiftBox, LangNote } from '../../components/SiteLayout';
 import { PRODUCTS, LAUNCH_GIFT, getProduct, orderHref } from '../../lib/site';
 
 export async function getStaticPaths() {
@@ -48,6 +48,7 @@ export default function ProductPage({ slug }) {
             <a className="s-btn primary full en" lang="en" href={buyEn} {...(co.en ? { rel: 'noopener noreferrer' } : {})}>
               Buy now
             </a>
+            <LangNote />
 
             <div className="ar" lang="ar">
               {p.about.ar.map((t, i) => <p key={i} style={{ marginTop: i === 0 ? 22 : 0 }}>{t}</p>)}
