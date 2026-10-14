@@ -136,6 +136,12 @@ export default function Home() {
           </div>
           <div className="hm-about-text">
             <h2 className="s-h2"><Bi ar="أنا غدير بركات" en="I'm Ghadir Barakat" /></h2>
+            <p className="hm-about-role">
+              <Bi
+                ar="مصممة أزياء شغوفة بحب الأزياء وكل ما يخصها"
+                en="A fashion designer passionate about fashion and everything to do with it"
+              />
+            </p>
             <p className="hm-about-lead">
               <Bi
                 ar="بحب الأزياء والرسم، وبحب أشوف الفكرة اللي بخيالي تاخد شكل وتكبر، من أول سكتش لحد التفاصيل اللي بتعطيها شخصيتها."
@@ -254,6 +260,8 @@ export default function Home() {
         .hm-about-text p { max-width: 36em; margin: 0 0 12px; text-wrap: pretty; }
         .hm-about-text .hm-about-creed { font-weight: 600; padding-inline-start: 14px; border-inline-start: 3px solid var(--gold); margin-block: 18px; }
         .hm-about-text .hm-about-lead { margin: 6px 0 18px; }
+        .hm-about-text .hm-about-role { margin: -4px 0 14px; font-weight: 600; font-size: 1.05rem; line-height: 1.5; color: var(--ink-soft); max-width: 36em; text-wrap: balance; }
+        html[data-lang='en'] .hm-about-text .hm-about-role { letter-spacing: 0.02em; }
         .hm-about-actions { margin: 20px 0 14px; }
         .hm-about-text .hm-about-links { margin: 0 0 12px; color: var(--ink-soft); font-size: 0.95rem; }
         .hm-about-links a { color: var(--ink); }
